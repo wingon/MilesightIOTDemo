@@ -7,7 +7,7 @@ Milesight device MQTT uplink → database → FastAPI queries → **333 IOT Cons
 | [`mqttapi/`](./mqttapi/) | Mosquitto config, MQTT subscribe & ingest (`subscriber.py`), FastAPI (`api_server.py`), Ubuntu deploy files |
 | [`frontend/`](./frontend/) | 333 IOT Console (Vue 3 + Ant Design Vue) |
 
-For MQTT topics and table details, see [`mqttapi/README.md`](./mqttapi/README.md). For production architecture and iteration, see [`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md) (English: [Architecture_and_Deployment_readme_en.md](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_en.md)).
+For MQTT topics and table details, see [`mqttapi/README.md`](./mqttapi/README.md). For production architecture and iteration, see [`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md) (English: [Architecture_and_Deployment_readme_en.md](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_en.md)).
 
 Chinese (Hong Kong Traditional): [`README_zh-HK.md`](./README_zh-HK.md)
 
@@ -131,7 +131,7 @@ npm run preview      # preview build output
 ## Deployment (Ubuntu production)
 
 Full details, firewall, HTTPS, and rollback:  
-[`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md)  
+[`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md)  
 (English: [Architecture_and_Deployment_readme_en.md](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_en.md))
 
 Assumed paths (adjust as needed):
@@ -266,6 +266,6 @@ Do **not** put `.env`, Mosquitto passwords, or DB secrets into each frontend rel
 |-----|----------|
 | [`mqttapi/README.md`](./mqttapi/README.md) | MQTT topics, schema, local quick start, API list |
 | [`mqttapi/README_en.md`](./mqttapi/README_en.md) | Same (English) |
-| [`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md) | Full Ubuntu deploy and release iteration |
+| [`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md) | Full Ubuntu deploy and release iteration |
 | [`frontend/README.md`](./frontend/README.md) | Frontend stack and i18n notes |
 | [`README_zh-HK.md`](./README_zh-HK.md) | This overview (Hong Kong Traditional Chinese) |

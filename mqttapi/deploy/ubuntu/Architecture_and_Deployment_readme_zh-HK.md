@@ -455,7 +455,7 @@ sudo journalctl -u milesight-mqtt-subscriber -n 50 --no-pager
 
 ```text
 deploy/ubuntu/
-  架構與部署_readme.md                          ← 本說明（含 §7 版本迭代）
+  Architecture_and_Deployment_readme_zh-HK.md   ← 本說明（含 §7 版本迭代）
   Architecture_and_Deployment_readme_en.md      ← English
   mosquitto/milesight.conf                      ← apt Mosquitto（→ /etc/mosquitto/conf.d/）
   nginx/333-iot-console.conf                    ← Nginx 站點（root → console/current）

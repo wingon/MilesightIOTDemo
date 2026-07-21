@@ -348,6 +348,6 @@ ORDER BY id DESC LIMIT 10;
 
 同一台 Ubuntu 跑 MQTT、FastAPI、前端時，見：
 
-**[deploy/ubuntu/架構與部署_readme.md](./deploy/ubuntu/架構與部署_readme.md)** · [EN](./deploy/ubuntu/Architecture_and_Deployment_readme_en.md)
+**[deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md](./deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md)** · [EN](./deploy/ubuntu/Architecture_and_Deployment_readme_en.md)
 
 內含 **apt 本機 Mosquitto**（不用 Docker）、Nginx 站點與 systemd 服務範本（MQTT `:1883` 直連，Web 走 Nginx `:80`）。

@@ -346,6 +346,6 @@ Allow inbound **TCP 1883** on the Windows host firewall, or devices cannot reach
 
 To run MQTT, FastAPI, and the web console on one Ubuntu machine, see:
 
-**[deploy/ubuntu/Architecture_and_Deployment_readme_en.md](./deploy/ubuntu/Architecture_and_Deployment_readme_en.md)** · [中文](./deploy/ubuntu/架構與部署_readme.md)
+**[deploy/ubuntu/Architecture_and_Deployment_readme_en.md](./deploy/ubuntu/Architecture_and_Deployment_readme_en.md)** · [中文](./deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md)
 
 Includes **native apt Mosquitto** (no Docker), Nginx site config, and systemd unit templates (MQTT `:1883` direct; Web via Nginx `:80`).

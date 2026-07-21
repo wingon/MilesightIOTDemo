@@ -1,6 +1,6 @@
 # Architecture & Deploy (Ubuntu): Mosquitto (apt) + Nginx + 333 IOT Console
 
-Chinese (Hong Kong Traditional): [架構與部署_readme.md](./架構與部署_readme.md)
+Chinese (Hong Kong Traditional): [Architecture_and_Deployment_readme_zh-HK.md](./Architecture_and_Deployment_readme_zh-HK.md)
 
 ## System architecture
 
@@ -455,7 +455,7 @@ Notes:
 ```text
 deploy/ubuntu/
   Architecture_and_Deployment_readme_en.md   ← English (this guide)
-  架構與部署_readme.md                       ← Chinese (Hong Kong Traditional)
+  Architecture_and_Deployment_readme_zh-HK.md                       ← Chinese (Hong Kong Traditional)
   mosquitto/milesight.conf                   ← apt Mosquitto (→ /etc/mosquitto/conf.d/)
   nginx/333-iot-console.conf                 ← Nginx site (root → console/current)
   systemd/milesight-api.service              ← FastAPI

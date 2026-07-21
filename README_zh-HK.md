@@ -7,7 +7,7 @@ Milesight 設備 MQTT 上報 → 入庫 → FastAPI 查詢 → **333 IOT Console
 | [`mqttapi/`](./mqttapi/) | Mosquitto 設定、MQTT 訂閱入庫（`subscriber.py`）、FastAPI（`api_server.py`）、Ubuntu 部署檔 |
 | [`frontend/`](./frontend/) | 333 IOT Console（Vue 3 + Ant Design Vue） |
 
-更細的 MQTT / 表結構說明見 [`mqttapi/README.md`](./mqttapi/README.md)；正式機架構與迭代見 [`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md)。
+更細的 MQTT / 表結構說明見 [`mqttapi/README.md`](./mqttapi/README.md)；正式機架構與迭代見 [`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md)。
 
 英文版：[README.md](./README.md)
 
@@ -131,7 +131,7 @@ npm run preview      # 預覽建置結果
 ## 部署步驟（Ubuntu 正式機）
 
 完整細節、防火牆、HTTPS、版本回滾見：  
-[`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md)  
+[`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md)  
 （英文：[Architecture_and_Deployment_readme_en.md](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_en.md)）
 
 路徑假設（可改）：
@@ -266,5 +266,5 @@ sudo systemctl restart milesight-api milesight-mqtt-subscriber
 |------|------|
 | [`mqttapi/README.md`](./mqttapi/README.md) | MQTT 主題、表結構、本機快速開始、API 列表 |
 | [`mqttapi/README_en.md`](./mqttapi/README_en.md) | 同上（英文） |
-| [`mqttapi/deploy/ubuntu/架構與部署_readme.md`](./mqttapi/deploy/ubuntu/架構與部署_readme.md) | Ubuntu 完整部署與版本迭代 |
+| [`mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md`](./mqttapi/deploy/ubuntu/Architecture_and_Deployment_readme_zh-HK.md) | Ubuntu 完整部署與版本迭代 |
 | [`frontend/README.md`](./frontend/README.md) | 前端 stack 與 i18n 簡述 |
