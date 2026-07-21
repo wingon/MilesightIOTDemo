@@ -1,0 +1,37 @@
+{
+  "name": "333-iot-console",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:uat": "vite --mode uat",
+    "dev:prod": "vite --mode production",
+    "build": "vue-tsc -b && vite build",
+    "build:uat": "vue-tsc -b && vite build --mode uat",
+    "build:prod": "vue-tsc -b && vite build --mode production",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "ant-design-vue": "^4.2.6",
+    "axios": "^1.15.2",
+    "dayjs": "^1.11.20",
+    "echarts": "^6.0.0",
+    "pinia": "^3.0.4",
+    "three": "^0.185.1",
+    "vue": "^3.5.32",
+    "vue-i18n": "^11.4.6",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "@types/three": "^0.185.1",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "@vue/tsconfig": "^0.9.1",
+    "less": "^4.6.4",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.10",
+    "vue-tsc": "^3.2.7"
+  }
+}

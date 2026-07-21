@@ -1,0 +1,24 @@
+[Unit]
+Description=Milesight FastAPI (333 IOT Console backend)
+After=network.target mariadb.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=milesight
+Group=milesight
+WorkingDirectory=/opt/milesight/MilesightAnalysis/mqttapi
+Environment=PYTHONUNBUFFERED=1
+# Load MQTT/DB settings
+EnvironmentFile=-/opt/milesight/MilesightAnalysis/mqttapi/.env
+# Listen on localhost only — Nginx terminates public HTTP
+ExecStart=/opt/milesight/venv/bin/uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+
+# Hardening (optional)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+# .env
+!.env.example
+
+# --- Node / frontend (also covered by frontend/.gitignore) ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# --- MQTT secrets / runtime ---
+# mqttapi/.env
+# mqttapi/mosquitto/passwd
+# mqttapi/mosquitto/data/
+
+# --- IDE / OS ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.log

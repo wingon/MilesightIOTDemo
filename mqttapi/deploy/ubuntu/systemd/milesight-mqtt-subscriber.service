@@ -1,0 +1,23 @@
+[Unit]
+Description=Milesight MQTT subscriber (tof + ug65 → MariaDB)
+After=network.target mosquitto.service mariadb.service
+Wants=network.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=milesight
+Group=milesight
+WorkingDirectory=/opt/milesight/MilesightAnalysis/mqttapi
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/milesight/MilesightAnalysis/mqttapi/.env
+# IMPORTANT: only ONE instance; Client ID must be unique on the broker
+ExecStart=/opt/milesight/venv/bin/python -u subscriber.py
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UG65 Sensor Data Report - 24E124710E317752</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f1117; color: #e1e4e8; line-height: 1.6; }
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.header { text-align: center; padding: 40px 20px 30px; background: linear-gradient(135deg, #1a1f2e 0%, #161b2a 100%); border-radius: 16px; margin-bottom: 30px; border: 1px solid #21262d; }
+.header h1 { font-size: 2.2em; background: linear-gradient(90deg, #58a6ff, #bc8cff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }
+.header .subtitle { color: #8b949e; font-size: 1.1em; }
+.device-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 30px; }
+.info-card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 20px; }
+.info-card .label { color: #8b949e; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.info-card .value { color: #e1e4e8; font-size: 1.05em; font-weight: 600; word-break: break-all; }
+.section { margin-bottom: 36px; }
+.section-title { font-size: 1.4em; color: #58a6ff; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #21262d; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 30px; }
+.stat-card { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 20px; border-left: 4px solid; transition: transform 0.2s, box-shadow 0.2s; }
+.stat-card { border-left: 4px solid; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+.stat-label { color: #8b949e; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.stat-value { font-size: 2em; font-weight: 700; margin-bottom: 2px; }
+.stat-unit { color: #8b949e; font-size: 0.85em; margin-bottom: 8px; }
+.stat-range { color: #6e7681; font-size: 0.8em; }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 24px; margin-bottom: 30px; }
+.chart-container { background: #161b22; border: 1px solid #21262d; border-radius: 12px; padding: 24px; }
+.chart-container h3 { color: #c9d1d9; margin-bottom: 16px; font-size: 1.1em; }
+.chart-wrapper { position: relative; height: 300px; }
+.table-wrapper { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #21262d; border-radius: 12px; overflow: hidden; }
+th { background: #21262d; color: #58a6ff; padding: 12px 16px; text-align: left; font-weight: 600; font-size: 0.9em; }
+td { padding: 10px 16px; border-bottom: 1px solid #21262d; font-size: 0.9em; }
+tr:hover td { background: #1c2128; }
+.footer { text-align: center; padding: 20px; color: #6e7681; font-size: 0.85em; border-top: 1px solid #21262d; margin-top: 40px; }
+@media (max-width: 768px) {
+    .chart-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .header h1 { font-size: 1.6em; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+    <h1>UG65 Sensor Data Visualization Report</h1>
+    <div class="subtitle">Milesight LoRaWAN Multi-Sensor &bull; Device EUI: 24E124710E317752</div>
+    <div class="subtitle" style="margin-top:4px">Report Generated: 2026-07-13 &bull; Data Period: 2026-07-10 16:29:11 to 2026-07-10 16:48:11</div>
+</div>
+
+<div class="section">
+    <div class="section-title">Device Information</div>
+    <div class="device-info">
+        <div class="info-card"><div class="label">Device EUI</div><div class="value">24E124710E317752</div></div>
+        <div class="info-card"><div class="label">Serial Number</div><div class="value">6710e31775231938</div></div>
+        <div class="info-card"><div class="label">Gateway EUI</div><div class="value">24E124FFFEFAB29D</div></div>
+        <div class="info-card"><div class="label">App EUI</div><div class="value">24E124C0002A0001</div></div>
+        <div class="info-card"><div class="label">Firmware Version</div><div class="value">v1.6</div></div>
+        <div class="info-card"><div class="label">Hardware Version</div><div class="value">v2.1</div></div>
+        <div class="info-card"><div class="label">IPSO Version</div><div class="value">v0.1</div></div>
+        <div class="info-card"><div class="label">LoRaWAN Class</div><div class="value">Class C</div></div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Key Statistics (from 16 sensor readings)</div>
+    <div class="stats-grid">
+        <div class="stat-card" style="border-left-color:#ff6b6b"><div class="stat-label">CO2</div><div class="stat-value" style="color:#ff6b6b">1192.5</div><div class="stat-unit">ppm</div><div class="stat-range">Min: 1043 | Max: 1337</div></div><div class="stat-card" style="border-left-color:#feca57"><div class="stat-label">Temperature</div><div class="stat-value" style="color:#feca57">25.6</div><div class="stat-unit">?C</div><div class="stat-range">Min: 25.4 | Max: 25.9</div></div><div class="stat-card" style="border-left-color:#48dbfb"><div class="stat-label">Humidity</div><div class="stat-value" style="color:#48dbfb">49.2</div><div class="stat-unit">%RH</div><div class="stat-range">Min: 46 | Max: 52</div></div><div class="stat-card" style="border-left-color:#ff9ff3"><div class="stat-label">PM2.5</div><div class="stat-value" style="color:#ff9ff3">15.3</div><div class="stat-unit">?g/m?</div><div class="stat-range">Min: 10 | Max: 21</div></div><div class="stat-card" style="border-left-color:#54a0ff"><div class="stat-label">PM10</div><div class="stat-value" style="color:#54a0ff">15.4</div><div class="stat-unit">?g/m?</div><div class="stat-range">Min: 10 | Max: 21</div></div><div class="stat-card" style="border-left-color:#5f27cd"><div class="stat-label">TVOC</div><div class="stat-value" style="color:#5f27cd">16.6</div><div class="stat-unit">index</div><div class="stat-range">Min: 15 | Max: 21</div></div><div class="stat-card" style="border-left-color:#01a3a4"><div class="stat-label">Pressure</div><div class="stat-value" style="color:#01a3a4">996.5</div><div class="stat-unit">hPa</div><div class="stat-range">Min: 996.5 | Max: 996.6</div></div><div class="stat-card" style="border-left-color:#ee5a24"><div class="stat-label">RSSI</div><div class="stat-value" style="color:#ee5a24">-23.0</div><div class="stat-unit">dBm</div><div class="stat-range">Min: -38 | Max: 1</div></div><div class="stat-card" style="border-left-color:#009432"><div class="stat-label">SNR</div><div class="stat-value" style="color:#009432">11.8</div><div class="stat-unit">dB</div><div class="stat-range">Min: 2.5 | Max: 14.8</div></div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Environmental Trends</div>
+    <div class="chart-grid">
+        <div class="chart-container"><h3>Temperature &amp; Humidity</h3><div class="chart-wrapper"><canvas id="chartEnv"></canvas></div></div>
+        <div class="chart-container"><h3>CO&#8322; Concentration</h3><div class="chart-wrapper"><canvas id="chartCO2"></canvas></div></div>
+        <div class="chart-container"><h3>Particulate Matter (PM2.5 &amp; PM10)</h3><div class="chart-wrapper"><canvas id="chartPM"></canvas></div></div>
+        <div class="chart-container"><h3>Atmospheric Pressure</h3><div class="chart-wrapper"><canvas id="chartPressure"></canvas></div></div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Air Quality &amp; Other Sensors</div>
+    <div class="chart-grid">
+        <div class="chart-container"><h3>TVOC Index</h3><div class="chart-wrapper"><canvas id="chartTVOC"></canvas></div></div>
+        <div class="chart-container"><h3>Light Level &amp; PIR Motion</h3><div class="chart-wrapper"><canvas id="chartLightPir"></canvas></div></div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Signal Quality (LoRaWAN)</div>
+    <div class="chart-grid">
+        <div class="chart-container"><h3>RSSI (Received Signal Strength Indicator)</h3><div class="chart-wrapper"><canvas id="chartRSSI"></canvas></div></div>
+        <div class="chart-container"><h3>SNR (Signal-to-Noise Ratio)</h3><div class="chart-wrapper"><canvas id="chartSNR"></canvas></div></div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-title">Raw Data Table</div>
+    <div class="table-wrapper">
+        <table>
+            <thead><tr><th>Time</th><th>CO2 (ppm)</th><th>Temp (&deg;C)</th><th>Humidity (%RH)</th><th>PM2.5 (&mu;g/m&sup3;)</th><th>PM10 (&mu;g/m&sup3;)</th><th>TVOC</th><th>Pressure (hPa)</th><th>HCHO</th><th>Light</th><th>PIR</th><th>RSSI/SNR</th></tr></thead>
+            <tbody><tr><td>2026-07-10 16:29:11</td><td>1335</td><td>25.6</td><td>46</td><td>10</td><td>10</td><td>17</td><td>996.5</td><td>0</td><td>2</td><td>1</td><td>-5/11.5</td></tr><tr><td>2026-07-10 16:30:11</td><td>1337</td><td>25.7</td><td>52</td><td>11</td><td>11</td><td>16</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-13/14.0</td></tr><tr><td>2026-07-10 16:31:11</td><td>1332</td><td>25.9</td><td>46.5</td><td>11</td><td>11</td><td>15</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-22/13.8</td></tr><tr><td>2026-07-10 16:32:11</td><td>1318</td><td>25.8</td><td>47</td><td>11</td><td>11</td><td>15</td><td>996.6</td><td>0</td><td>2</td><td>1</td><td>-25/13.2</td></tr><tr><td>2026-07-10 16:33:11</td><td>1284</td><td>25.7</td><td>47</td><td>15</td><td>15</td><td>15</td><td>996.5</td><td>0</td><td>2</td><td>1</td><td>-22/12.8</td></tr><tr><td>2026-07-10 16:34:11</td><td>1254</td><td>25.6</td><td>48</td><td>15</td><td>15</td><td>15</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-24/13.8</td></tr><tr><td>2026-07-10 16:36:11</td><td>1229</td><td>25.5</td><td>48.5</td><td>15</td><td>15</td><td>15</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-28/13.2</td></tr><tr><td>2026-07-10 16:37:11</td><td>1225</td><td>25.5</td><td>49</td><td>15</td><td>15</td><td>18</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-18/12.0</td></tr><tr><td>2026-07-10 16:39:11</td><td>1188</td><td>25.7</td><td>49</td><td>16</td><td>16</td><td>15</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-32/11.2</td></tr><tr><td>2026-07-10 16:40:11</td><td>1129</td><td>25.6</td><td>49</td><td>16</td><td>16</td><td>20</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-35/13.0</td></tr><tr><td>2026-07-10 16:41:11</td><td>1113</td><td>25.5</td><td>49.5</td><td>16</td><td>16</td><td>18</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-37/2.5</td></tr><tr><td>2026-07-10 16:42:11</td><td>1099</td><td>25.5</td><td>50</td><td>18</td><td>18</td><td>21</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-38/5.2</td></tr><tr><td>2026-07-10 16:44:11</td><td>1079</td><td>25.5</td><td>51</td><td>18</td><td>18</td><td>19</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-24/14.0</td></tr><tr><td>2026-07-10 16:46:11</td><td>1068</td><td>25.5</td><td>51.5</td><td>21</td><td>21</td><td>15</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-25/13.8</td></tr><tr><td>2026-07-10 16:47:11</td><td>1047</td><td>25.4</td><td>51.5</td><td>21</td><td>21</td><td>16</td><td>996.5</td><td>0</td><td>3</td><td>1</td><td>-22/13.2</td></tr><tr><td>2026-07-10 16:48:11</td><td>1043</td><td>25.5</td><td>51.5</td><td>16</td><td>17</td><td>16</td><td>996.5</td><td>0</td><td>2</td><td>1</td><td>-22/14.8</td></tr>            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="footer">
+    <p>Generated by Codex &bull; Milesight UG65 Sensor Data Visualization Report</p>
+    <p>Data source: MilesightAnalysis\files\UG65_20260710-1648_60.0.0.49_datastream.csv</p>
+</div>
+
+</div>
+
+<script>
+const timeLabels = ["2026-07-10 16:29:11", "2026-07-10 16:30:11", "2026-07-10 16:31:11", "2026-07-10 16:32:11", "2026-07-10 16:33:11", "2026-07-10 16:34:11", "2026-07-10 16:36:11", "2026-07-10 16:37:11", "2026-07-10 16:39:11", "2026-07-10 16:40:11", "2026-07-10 16:41:11", "2026-07-10 16:42:11", "2026-07-10 16:44:11", "2026-07-10 16:46:11", "2026-07-10 16:47:11", "2026-07-10 16:48:11"];
+const signalLabels = ["2026-07-10 16:48:11", "2026-07-10 16:47:11", "2026-07-10 16:46:11", "2026-07-10 16:44:11", "2026-07-10 16:42:11", "2026-07-10 16:41:11", "2026-07-10 16:40:11", "2026-07-10 16:39:11", "2026-07-10 16:37:11", "2026-07-10 16:36:11", "2026-07-10 16:34:11", "2026-07-10 16:33:11", "2026-07-10 16:32:11", "2026-07-10 16:31:11", "2026-07-10 16:30:11", "2026-07-10 16:29:11", "2026-07-10 16:29:00"];
+const gridColor = 'rgba(255,255,255,0.06)';
+const tickColor = '#8b949e';
+
+function baseConfig(type, labels, datasets, extraOpts) {
+    return {
+        type: type,
+        data: { labels: labels, datasets: datasets },
+        options: Object.assign({
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#c9d1d9', usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { backgroundColor: '#1c2128', titleColor: '#e1e4e8', bodyColor: '#c9d1d9', borderColor: '#30363d', borderWidth: 1 }
+            },
+            scales: {
+                x: { grid: { color: gridColor }, ticks: { color: tickColor, maxRotation: 45, minRotation: 30, font: { size: 10 } } },
+                y: { grid: { color: gridColor }, ticks: { color: tickColor }, beginAtZero: false }
+            }
+        }, extraOpts || {})
+    };
+}
+
+function grad(ctx, c1, c2) {
+    const g = ctx.createLinearGradient(0, 0, 0, 300);
+    g.addColorStop(0, c1);
+    g.addColorStop(1, c2);
+    return g;
+}
+
+const envCtx = document.getElementById('chartEnv').getContext('2d');
+new Chart(envCtx, baseConfig('line', timeLabels, [
+    { label: 'Temperature (&deg;C)', data: [25.6, 25.7, 25.9, 25.8, 25.7, 25.6, 25.5, 25.5, 25.7, 25.6, 25.5, 25.5, 25.5, 25.5, 25.4, 25.5], borderColor: '#feca57', backgroundColor: grad(envCtx, 'rgba(254,202,87,0.3)', 'rgba(254,202,87,0.0)'), fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 7, yAxisID: 'y' },
+    { label: 'Humidity (%RH)', data: [46, 52, 46.5, 47, 47, 48, 48.5, 49, 49, 49, 49.5, 50, 51, 51.5, 51.5, 51.5], borderColor: '#48dbfb', backgroundColor: grad(envCtx, 'rgba(72,219,251,0.3)', 'rgba(72,219,251,0.0)'), fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 7, yAxisID: 'y1' }
+], {
+    scales: {
+        x: { grid: { color: gridColor }, ticks: { color: tickColor, maxRotation: 45, minRotation: 30, font: { size: 10 } } },
+        y: { position: 'left', grid: { color: gridColor }, ticks: { color: '#feca57' }, title: { display: true, text: 'Temperature (&deg;C)', color: '#feca57' } },
+        y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#48dbfb' }, title: { display: true, text: 'Humidity (%RH)', color: '#48dbfb' } }
+    }
+}));
+
+const co2Ctx = document.getElementById('chartCO2').getContext('2d');
+new Chart(co2Ctx, baseConfig('line', timeLabels, [
+    { label: 'CO2 (ppm)', data: [1335, 1337, 1332, 1318, 1284, 1254, 1229, 1225, 1188, 1129, 1113, 1099, 1079, 1068, 1047, 1043], borderColor: '#ff6b6b', backgroundColor: grad(co2Ctx, 'rgba(255,107,107,0.3)', 'rgba(255,107,107,0.0)'), fill: true, tension: 0.4, pointRadius: 5, pointHoverRadius: 8, pointBackgroundColor: '#ff6b6b' }
+], {
+    scales: { y: { grid: { color: gridColor }, ticks: { color: tickColor }, suggestedMin: 900 } }
+}));
+
+const pmCtx = document.getElementById('chartPM').getContext('2d');
+new Chart(pmCtx, baseConfig('bar', timeLabels, [
+    { label: 'PM2.5 (?g/m?)', data: [10, 11, 11, 11, 15, 15, 15, 15, 16, 16, 16, 18, 18, 21, 21, 16], backgroundColor: 'rgba(255,159,243,0.7)', borderColor: '#ff9ff3', borderWidth: 1, borderRadius: 4 },
+    { label: 'PM10 (?g/m?)', data: [10, 11, 11, 11, 15, 15, 15, 15, 16, 16, 16, 18, 18, 21, 21, 17], backgroundColor: 'rgba(84,160,255,0.7)', borderColor: '#54a0ff', borderWidth: 1, borderRadius: 4 }
+]));
+
+const presCtx = document.getElementById('chartPressure').getContext('2d');
+new Chart(presCtx, baseConfig('line', timeLabels, [
+    { label: 'Pressure (hPa)', data: [996.5, 996.5, 996.5, 996.6, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5], borderColor: '#01a3a4', backgroundColor: grad(presCtx, 'rgba(1,163,164,0.2)', 'rgba(1,163,164,0.0)'), fill: true, tension: 0.4, pointRadius: 4, pointHoverRadius: 7, borderDash: [5, 3] }
+]));
+
+const tvocCtx = document.getElementById('chartTVOC').getContext('2d');
+new Chart(tvocCtx, baseConfig('line', timeLabels, [
+    { label: 'TVOC Index', data: [17, 16, 15, 15, 15, 15, 15, 18, 15, 20, 18, 21, 19, 15, 16, 16], borderColor: '#5f27cd', backgroundColor: grad(tvocCtx, 'rgba(95,39,205,0.3)', 'rgba(95,39,205,0.0)'), fill: true, tension: 0.4, pointRadius: 5, pointHoverRadius: 8, pointStyle: 'triangle' }
+]));
+
+const lpCtx = document.getElementById('chartLightPir').getContext('2d');
+new Chart(lpCtx, baseConfig('bar', timeLabels, [
+    { label: 'Light Level', data: [2, 3, 3, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2], backgroundColor: 'rgba(254,202,87,0.7)', borderColor: '#feca57', borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
+    { label: 'PIR (Motion)', data: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], backgroundColor: 'rgba(255,107,107,0.9)', borderColor: '#ff6b6b', borderWidth: 1, borderRadius: 4, yAxisID: 'y' }
+]));
+
+const rssiCtx = document.getElementById('chartRSSI').getContext('2d');
+new Chart(rssiCtx, baseConfig('line', signalLabels, [
+    { label: 'RSSI (dBm)', data: [-22, -22, -25, -24, -38, -37, -35, -32, -18, -28, -24, -22, -25, -22, -13, -5, 1], borderColor: '#ee5a24', backgroundColor: grad(rssiCtx, 'rgba(238,90,36,0.2)', 'rgba(238,90,36,0.0)'), fill: true, tension: 0.3, pointRadius: 5, pointHoverRadius: 8 }
+], {
+    scales: { y: { grid: { color: gridColor }, ticks: { color: tickColor }, suggestedMin: -80, suggestedMax: 0 } }
+}));
+
+const snrCtx = document.getElementById('chartSNR').getContext('2d');
+new Chart(snrCtx, baseConfig('line', signalLabels, [
+    { label: 'SNR (dB)', data: [14.8, 13.2, 13.8, 14.0, 5.2, 2.5, 13.0, 11.2, 12.0, 13.2, 13.8, 12.8, 13.2, 13.8, 14.0, 11.5, 7.8], borderColor: '#009432', backgroundColor: grad(snrCtx, 'rgba(0,148,50,0.2)', 'rgba(0,148,50,0.0)'), fill: true, tension: 0.3, pointRadius: 5, pointHoverRadius: 8 }
+]));
+</script>
+
+</body>
+</html>

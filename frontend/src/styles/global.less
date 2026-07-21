@@ -1,0 +1,50 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --brand-primary: #c4a574;
+  --brand-ink: #0d0d0d;
+  --brand-charcoal: #1a1a1a;
+  --brand-canvas: #f7f7f5;
+  --brand-line: #e6e2da;
+  --brand-muted: #6b6b6b;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background: var(--brand-canvas);
+  color: var(--brand-ink);
+  font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', 'Helvetica Neue', Arial, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Ant Design polish for 333 heritage look */
+.ant-btn-primary {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ant-card {
+  border-color: var(--brand-line);
+  box-shadow: none;
+}
+
+.ant-card-head {
+  border-bottom-color: var(--brand-line);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.ant-table-thead > tr > th {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}

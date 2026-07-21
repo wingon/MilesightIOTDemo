@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UG65 感測器資料可視化報告 V5 · Cursor Grok</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2332;
+    --panel2: #243044;
+    --border: #2d3a4f;
+    --text: #e8eef7;
+    --muted: #8b9bb4;
+    --accent: #3d9cf0;
+    --good: #3ecf8e;
+    --warn: #f0b429;
+    --bad: #f07178;
+    --temp: #ff7b72;
+    --hum: #58a6ff;
+    --co2: #d2a8ff;
+    --pm: #ffa657;
+    --tvoc: #7ee787;
+    --press: #79c0ff;
+    --rssi: #ff9bce;
+    --snr: #a5d6ff;
+    --radius: 14px;
+    --shadow: 0 8px 28px rgba(0,0,0,.35);
+    --font: "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: radial-gradient(1200px 600px at 10% -10%, #1b3a5f 0%, transparent 55%),
+                radial-gradient(900px 500px at 100% 0%, #1a3d36 0%, transparent 45%),
+                var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 28px 32px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(26,35,50,.95), rgba(15,20,25,.6));
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(10px);
+  }
+  header h1 {
+    margin: 0 0 6px;
+    font-size: 1.55rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+  header .sub {
+    color: var(--muted);
+    font-size: .92rem;
+    display: flex; flex-wrap: wrap; gap: 10px 18px;
+  }
+  header .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: .8rem;
+  }
+  main {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 22px 20px 48px;
+    display: grid;
+    gap: 18px;
+  }
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  .kpi {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .kpi .label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+  .kpi .value { font-size: 1.45rem; font-weight: 700; margin-top: 4px; }
+  .kpi .hint { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+  .kpi.good .value { color: var(--good); }
+  .kpi.warn .value { color: var(--warn); }
+  .kpi.bad .value { color: var(--bad); }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 18px 14px;
+    box-shadow: var(--shadow);
+  }
+  .panel h2 {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .panel h2 span.meta { color: var(--muted); font-size: .8rem; font-weight: 500; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 900px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    header { padding: 18px 16px; }
+  }
+  .chart-wrap { position: relative; height: 280px; }
+  .chart-wrap.tall { height: 320px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .85rem;
+  }
+  th, td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+  }
+  th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+  tr:hover td { background: rgba(61,156,240,.06); }
+  .tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: .75rem;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+  }
+  .tag.UpUnc { color: var(--good); border-color: #2a6b4f; }
+  .tag.DnUnc { color: var(--accent); border-color: #2a5078; }
+  .tag.JnReq { color: var(--warn); border-color: #7a5c18; }
+  .tag.JnAcc { color: #c9a0ff; border-color: #5a3d7a; }
+  .scroll { overflow: auto; max-height: 420px; }
+  .note {
+    color: var(--muted);
+    font-size: .85rem;
+    margin-top: 8px;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+  }
+  .stat-card {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .stat-card h3 { margin: 0 0 8px; font-size: .9rem; }
+  .stat-card dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 10px;
+    font-size: .82rem;
+  }
+  .stat-card dt { color: var(--muted); }
+  .stat-card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: .78rem;
+    padding: 8px 16px 28px;
+  }
+  .legend-inline { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>UG65 LoRaWAN 感測器資料可視化報告</h1>
+  <div class="sub">
+    <span class="badge">版本 V5 · Cursor Grok</span>
+    <span class="badge">來源：UG65_20260710-1648_60.0.0.49_datastream.csv</span>
+    <span class="badge">裝置：24E124710E317752</span>
+    <span class="badge">閘道：24E124FFFEFAB29D</span>
+    <span class="badge">區間：15:40:33 – 16:48:11</span>
+    <span class="badge">產生：2026-07-13 14:22:52</span>
+  </div>
+</header>
+
+<main>
+  <section class="kpis" id="kpis"></section>
+
+  <section class="panel">
+    <h2>環境指標趨勢 <span class="meta">溫度 / 濕度 / CO₂ / TVOC</span></h2>
+    <div class="chart-wrap tall"><canvas id="chartEnv"></canvas></div>
+    <p class="note">CO₂ 以右側軸顯示（ppm）。參考：&lt;800 優良、800–1000 良好、1000–1500 偏高。</p>
+  </section>
+
+  <div class="grid-2">
+    <section class="panel">
+      <h2>空氣微粒 <span class="meta">PM2.5 / PM10 / HCHO</span></h2>
+      <div class="chart-wrap"><canvas id="chartPM"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>氣壓與光照 / PIR <span class="meta">hPa · level · presence</span></h2>
+      <div class="chart-wrap"><canvas id="chartPress"></canvas></div>
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <h2>LoRa 鏈路品質 <span class="meta">RSSI / SNR（感測上行）</span></h2>
+      <div class="chart-wrap"><canvas id="chartLink"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>封包類型與資料速率 <span class="meta">全量 30 筆</span></h2>
+      <div class="chart-wrap"><canvas id="chartTypes"></canvas></div>
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="panel">
+      <h2>頻率分佈 <span class="meta">MHz</span></h2>
+      <div class="chart-wrap"><canvas id="chartFreq"></canvas></div>
+    </section>
+    <section class="panel">
+      <h2>統計摘要</h2>
+      <div class="stats-grid" id="stats"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>裝置與連線資訊</h2>
+    <div class="stats-grid" id="deviceInfo"></div>
+    <p class="note" id="gapNote"></p>
+  </section>
+
+  <section class="panel">
+    <h2>封包時序明細 <span class="meta">共 30 筆</span></h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>時間</th><th>類型</th><th>Fcnt</th><th>DR</th><th>Freq</th>
+            <th>RSSI</th><th>SNR</th><th>Size</th><th>內容</th>
+          </tr>
+        </thead>
+        <tbody id="timelineBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>感測讀數明細 <span class="meta">16 筆環境封包</span></h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>時間</th><th>Temp</th><th>RH</th><th>CO₂</th><th>TVOC</th>
+            <th>PM2.5</th><th>PM10</th><th>Press</th><th>Light</th><th>PIR</th>
+            <th>RSSI</th><th>SNR</th><th>Fcnt</th>
+          </tr>
+        </thead>
+        <tbody id="sensorBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  UG65_V5_cursor_grok.html · 資料來源 UG65_20260710-1648_60.0.0.49_datastream.csv · 僅供分析檢視，空氣品質分級為一般參考閾值
+</footer>
+
+<script>
+const DATA = {"meta": {"source": "UG65_20260710-1648_60.0.0.49_datastream.csv", "generated": "2026-07-13 14:22:52", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "time_start": "2026-07-10T15:40:33+08:00", "time_end": "2026-07-10T16:48:11+08:00", "total_packets": 30, "sensor_packets": 16, "type_counts": {"JnReq": 6, "JnAcc": 4, "UpUnc": 17, "DnUnc": 3}, "dr_counts": {"SF11BW125": 12, "SF7BW125": 18}, "freq_counts": {"471.9": 4, "472.1": 3, "472.3": 2, "472.5": 6, "472.7": 2, "472.9": 3, "473.1": 1, "473.3": 2, "502.1": 1, "502.5": 3, "502.7": 1, "502.9": 1, "503.3": 1}, "metric_stats": {"temperature": {"n": 16, "min": 25.4, "max": 25.9, "avg": 25.59, "med": 25.55, "std": 0.13}, "humidity": {"n": 16, "min": 46, "max": 52, "avg": 49.19, "med": 49.0, "std": 1.89}, "co2": {"n": 16, "min": 1043, "max": 1337, "avg": 1192.5, "med": 1206.5, "std": 106.64}, "tvoc": {"n": 16, "min": 15, "max": 21, "avg": 16.62, "med": 16.0, "std": 1.93}, "pm2_5": {"n": 16, "min": 10, "max": 21, "avg": 15.31, "med": 15.5, "std": 3.22}, "pm10": {"n": 16, "min": 10, "max": 21, "avg": 15.38, "med": 15.5, "std": 3.24}, "pressure": {"n": 16, "min": 996.5, "max": 996.6, "avg": 996.51, "med": 996.5, "std": 0.02}, "hcho": {"n": 16, "min": 0, "max": 0, "avg": 0, "med": 0.0, "std": 0.0}, "light_level": {"n": 16, "min": 2, "max": 3, "avg": 2.75, "med": 3.0, "std": 0.43}, "pir": {"n": 16, "min": 1, "max": 1, "avg": 1, "med": 1.0, "std": 0.0}}, "link_rssi": {"n": 23, "min": -71.0, "max": 2.0, "avg": -31.09, "med": -25.0, "std": 20.64}, "link_snr": {"n": 23, "min": -19.5, "max": 14.8, "avg": 6.23, "med": 12.0, "std": 10.68}, "fcnt_gaps": [{"from": 7, "to": 9, "missing": [8]}, {"from": 10, "to": 12, "missing": [11]}, {"from": 15, "to": 17, "missing": [16]}, {"from": 17, "to": 19, "missing": [18]}], "device_info": {"sn": "6710e31775231938", "firmware_version": "v1.6", "hardware_version": "v2.1", "ipso_version": "v0.1", "lorawan_class": 2, "device_status": 255}, "aqi_notes": {"co2_avg": 1192.5, "co2_level": "偏高", "pm25_avg": 15.31, "pm25_level": "良好"}}, "chart": {"labels": ["16:29:11", "16:30:11", "16:31:11", "16:32:11", "16:33:11", "16:34:11", "16:36:11", "16:37:11", "16:39:11", "16:40:11", "16:41:11", "16:42:11", "16:44:11", "16:46:11", "16:47:11", "16:48:11"], "fullTimes": ["2026-07-10T16:29:11+08:00", "2026-07-10T16:30:11+08:00", "2026-07-10T16:31:11+08:00", "2026-07-10T16:32:11+08:00", "2026-07-10T16:33:11+08:00", "2026-07-10T16:34:11+08:00", "2026-07-10T16:36:11+08:00", "2026-07-10T16:37:11+08:00", "2026-07-10T16:39:11+08:00", "2026-07-10T16:40:11+08:00", "2026-07-10T16:41:11+08:00", "2026-07-10T16:42:11+08:00", "2026-07-10T16:44:11+08:00", "2026-07-10T16:46:11+08:00", "2026-07-10T16:47:11+08:00", "2026-07-10T16:48:11+08:00"], "temperature": [25.6, 25.7, 25.9, 25.8, 25.7, 25.6, 25.5, 25.5, 25.7, 25.6, 25.5, 25.5, 25.5, 25.5, 25.4, 25.5], "humidity": [46, 52, 46.5, 47, 47, 48, 48.5, 49, 49, 49, 49.5, 50, 51, 51.5, 51.5, 51.5], "co2": [1335, 1337, 1332, 1318, 1284, 1254, 1229, 1225, 1188, 1129, 1113, 1099, 1079, 1068, 1047, 1043], "tvoc": [17, 16, 15, 15, 15, 15, 15, 18, 15, 20, 18, 21, 19, 15, 16, 16], "pm25": [10, 11, 11, 11, 15, 15, 15, 15, 16, 16, 16, 18, 18, 21, 21, 16], "pm10": [10, 11, 11, 11, 15, 15, 15, 15, 16, 16, 16, 18, 18, 21, 21, 17], "pressure": [996.5, 996.5, 996.5, 996.6, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5, 996.5], "hcho": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "light": [2, 3, 3, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2], "pir": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], "rssi": [-5.0, -13.0, -22.0, -25.0, -22.0, -24.0, -28.0, -18.0, -32.0, -35.0, -37.0, -38.0, -24.0, -25.0, -22.0, -22.0], "snr": [11.5, 14.0, 13.8, 13.2, 12.8, 13.8, 13.2, 12.0, 11.2, 13.0, 2.5, 5.2, 14.0, 13.8, 13.2, 14.8], "fcnt": [2, 3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 17, 19, 20, 21], "freq": [472.9, 472.5, 472.1, 471.9, 473.1, 472.5, 471.9, 472.9, 472.3, 471.9, 472.9, 472.5, 473.3, 472.7, 472.1, 471.9]}, "timeline": [{"time": "2026-07-10T15:40:33+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.3, "rssi": -64.0, "snr": -11.8, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T15:51:33+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.5, "rssi": -63.0, "snr": -14.2, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:19:07+08:00", "type": "JnAcc", "dr": "SF11BW125", "freq": 502.1, "rssi": null, "snr": null, "fcnt": 0, "size": 17, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:19:07+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.1, "rssi": -71.0, "snr": -6.0, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:21:56+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.5, "rssi": -67.0, "snr": -12.8, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:21:57+08:00", "type": "JnAcc", "dr": "SF11BW125", "freq": 502.5, "rssi": null, "snr": null, "fcnt": 0, "size": 17, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:26:59+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.5, "rssi": -61.0, "snr": -19.5, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:27:00+08:00", "type": "JnAcc", "dr": "SF11BW125", "freq": 502.5, "rssi": null, "snr": null, "fcnt": 0, "size": 17, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:28:53+08:00", "type": "JnAcc", "dr": "SF11BW125", "freq": 502.7, "rssi": null, "snr": null, "fcnt": 0, "size": 17, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:28:53+08:00", "type": "JnReq", "dr": "SF11BW125", "freq": 472.7, "rssi": 2.0, "snr": 7.8, "fcnt": 0, "size": 18, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:29:00+08:00", "type": "UpUnc", "dr": "SF11BW125", "freq": 473.3, "rssi": 1.0, "snr": 7.8, "fcnt": 1, "size": 27, "has_sensor": false, "is_info": true}, {"time": "2026-07-10T16:29:01+08:00", "type": "DnUnc", "dr": "SF11BW125", "freq": 503.3, "rssi": null, "snr": null, "fcnt": 0, "size": 36, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:29:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.9, "rssi": -5.0, "snr": 11.5, "fcnt": 2, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:29:12+08:00", "type": "DnUnc", "dr": "SF7BW125", "freq": 502.9, "rssi": null, "snr": null, "fcnt": 1, "size": 0, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:30:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.5, "rssi": -13.0, "snr": 14.0, "fcnt": 3, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:30:12+08:00", "type": "DnUnc", "dr": "SF7BW125", "freq": 502.5, "rssi": null, "snr": null, "fcnt": 2, "size": 0, "has_sensor": false, "is_info": false}, {"time": "2026-07-10T16:31:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.1, "rssi": -22.0, "snr": 13.8, "fcnt": 4, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:32:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 471.9, "rssi": -25.0, "snr": 13.2, "fcnt": 5, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:33:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 473.1, "rssi": -22.0, "snr": 12.8, "fcnt": 6, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:34:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.5, "rssi": -24.0, "snr": 13.8, "fcnt": 7, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:36:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 471.9, "rssi": -28.0, "snr": 13.2, "fcnt": 9, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:37:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.9, "rssi": -18.0, "snr": 12.0, "fcnt": 10, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:39:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.3, "rssi": -32.0, "snr": 11.2, "fcnt": 12, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:40:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 471.9, "rssi": -35.0, "snr": 13.0, "fcnt": 13, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:41:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.9, "rssi": -37.0, "snr": 2.5, "fcnt": 14, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:42:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.5, "rssi": -38.0, "snr": 5.2, "fcnt": 15, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:44:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 473.3, "rssi": -24.0, "snr": 14.0, "fcnt": 17, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:46:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.7, "rssi": -25.0, "snr": 13.8, "fcnt": 19, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:47:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 472.1, "rssi": -22.0, "snr": 13.2, "fcnt": 20, "size": 37, "has_sensor": true, "is_info": false}, {"time": "2026-07-10T16:48:11+08:00", "type": "UpUnc", "dr": "SF7BW125", "freq": 471.9, "rssi": -22.0, "snr": 14.8, "fcnt": 21, "size": 37, "has_sensor": true, "is_info": false}], "sensors": [{"time": "2026-07-10T16:29:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472900000, "freq_mhz": 472.9, "dr": "SF7BW125", "rssi": -5.0, "snr": 11.5, "size": 37, "fcnt": 2, "type": "UpUnc", "payload": {"co2": 1335, "hcho": 0, "humidity": 46, "light_level": 2, "pir": 1, "pm10": 10, "pm2_5": 10, "pressure": 996.5, "temperature": 25.6, "tvoc": 17}}, {"time": "2026-07-10T16:30:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472500000, "freq_mhz": 472.5, "dr": "SF7BW125", "rssi": -13.0, "snr": 14.0, "size": 37, "fcnt": 3, "type": "UpUnc", "payload": {"co2": 1337, "hcho": 0, "humidity": 52, "light_level": 3, "pir": 1, "pm10": 11, "pm2_5": 11, "pressure": 996.5, "temperature": 25.7, "tvoc": 16}}, {"time": "2026-07-10T16:31:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472100000, "freq_mhz": 472.1, "dr": "SF7BW125", "rssi": -22.0, "snr": 13.8, "size": 37, "fcnt": 4, "type": "UpUnc", "payload": {"co2": 1332, "hcho": 0, "humidity": 46.5, "light_level": 3, "pir": 1, "pm10": 11, "pm2_5": 11, "pressure": 996.5, "temperature": 25.9, "tvoc": 15}}, {"time": "2026-07-10T16:32:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 471900000, "freq_mhz": 471.9, "dr": "SF7BW125", "rssi": -25.0, "snr": 13.2, "size": 37, "fcnt": 5, "type": "UpUnc", "payload": {"co2": 1318, "hcho": 0, "humidity": 47, "light_level": 2, "pir": 1, "pm10": 11, "pm2_5": 11, "pressure": 996.6, "temperature": 25.8, "tvoc": 15}}, {"time": "2026-07-10T16:33:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 473100000, "freq_mhz": 473.1, "dr": "SF7BW125", "rssi": -22.0, "snr": 12.8, "size": 37, "fcnt": 6, "type": "UpUnc", "payload": {"co2": 1284, "hcho": 0, "humidity": 47, "light_level": 2, "pir": 1, "pm10": 15, "pm2_5": 15, "pressure": 996.5, "temperature": 25.7, "tvoc": 15}}, {"time": "2026-07-10T16:34:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472500000, "freq_mhz": 472.5, "dr": "SF7BW125", "rssi": -24.0, "snr": 13.8, "size": 37, "fcnt": 7, "type": "UpUnc", "payload": {"co2": 1254, "hcho": 0, "humidity": 48, "light_level": 3, "pir": 1, "pm10": 15, "pm2_5": 15, "pressure": 996.5, "temperature": 25.6, "tvoc": 15}}, {"time": "2026-07-10T16:36:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 471900000, "freq_mhz": 471.9, "dr": "SF7BW125", "rssi": -28.0, "snr": 13.2, "size": 37, "fcnt": 9, "type": "UpUnc", "payload": {"co2": 1229, "hcho": 0, "humidity": 48.5, "light_level": 3, "pir": 1, "pm10": 15, "pm2_5": 15, "pressure": 996.5, "temperature": 25.5, "tvoc": 15}}, {"time": "2026-07-10T16:37:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472900000, "freq_mhz": 472.9, "dr": "SF7BW125", "rssi": -18.0, "snr": 12.0, "size": 37, "fcnt": 10, "type": "UpUnc", "payload": {"co2": 1225, "hcho": 0, "humidity": 49, "light_level": 3, "pir": 1, "pm10": 15, "pm2_5": 15, "pressure": 996.5, "temperature": 25.5, "tvoc": 18}}, {"time": "2026-07-10T16:39:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472300000, "freq_mhz": 472.3, "dr": "SF7BW125", "rssi": -32.0, "snr": 11.2, "size": 37, "fcnt": 12, "type": "UpUnc", "payload": {"co2": 1188, "hcho": 0, "humidity": 49, "light_level": 3, "pir": 1, "pm10": 16, "pm2_5": 16, "pressure": 996.5, "temperature": 25.7, "tvoc": 15}}, {"time": "2026-07-10T16:40:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 471900000, "freq_mhz": 471.9, "dr": "SF7BW125", "rssi": -35.0, "snr": 13.0, "size": 37, "fcnt": 13, "type": "UpUnc", "payload": {"co2": 1129, "hcho": 0, "humidity": 49, "light_level": 3, "pir": 1, "pm10": 16, "pm2_5": 16, "pressure": 996.5, "temperature": 25.6, "tvoc": 20}}, {"time": "2026-07-10T16:41:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472900000, "freq_mhz": 472.9, "dr": "SF7BW125", "rssi": -37.0, "snr": 2.5, "size": 37, "fcnt": 14, "type": "UpUnc", "payload": {"co2": 1113, "hcho": 0, "humidity": 49.5, "light_level": 3, "pir": 1, "pm10": 16, "pm2_5": 16, "pressure": 996.5, "temperature": 25.5, "tvoc": 18}}, {"time": "2026-07-10T16:42:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472500000, "freq_mhz": 472.5, "dr": "SF7BW125", "rssi": -38.0, "snr": 5.2, "size": 37, "fcnt": 15, "type": "UpUnc", "payload": {"co2": 1099, "hcho": 0, "humidity": 50, "light_level": 3, "pir": 1, "pm10": 18, "pm2_5": 18, "pressure": 996.5, "temperature": 25.5, "tvoc": 21}}, {"time": "2026-07-10T16:44:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 473300000, "freq_mhz": 473.3, "dr": "SF7BW125", "rssi": -24.0, "snr": 14.0, "size": 37, "fcnt": 17, "type": "UpUnc", "payload": {"co2": 1079, "hcho": 0, "humidity": 51, "light_level": 3, "pir": 1, "pm10": 18, "pm2_5": 18, "pressure": 996.5, "temperature": 25.5, "tvoc": 19}}, {"time": "2026-07-10T16:46:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472700000, "freq_mhz": 472.7, "dr": "SF7BW125", "rssi": -25.0, "snr": 13.8, "size": 37, "fcnt": 19, "type": "UpUnc", "payload": {"co2": 1068, "hcho": 0, "humidity": 51.5, "light_level": 3, "pir": 1, "pm10": 21, "pm2_5": 21, "pressure": 996.5, "temperature": 25.5, "tvoc": 15}}, {"time": "2026-07-10T16:47:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 472100000, "freq_mhz": 472.1, "dr": "SF7BW125", "rssi": -22.0, "snr": 13.2, "size": 37, "fcnt": 20, "type": "UpUnc", "payload": {"co2": 1047, "hcho": 0, "humidity": 51.5, "light_level": 3, "pir": 1, "pm10": 21, "pm2_5": 21, "pressure": 996.5, "temperature": 25.4, "tvoc": 16}}, {"time": "2026-07-10T16:48:11+08:00", "device": "24E124710E317752", "gateway": "24E124FFFEFAB29D", "freq_hz": 471900000, "freq_mhz": 471.9, "dr": "SF7BW125", "rssi": -22.0, "snr": 14.8, "size": 37, "fcnt": 21, "type": "UpUnc", "payload": {"co2": 1043, "hcho": 0, "humidity": 51.5, "light_level": 2, "pir": 1, "pm10": 17, "pm2_5": 16, "pressure": 996.5, "temperature": 25.5, "tvoc": 16}}]};
+
+const COLORS = {
+  temp: '#ff7b72', hum: '#58a6ff', co2: '#d2a8ff', tvoc: '#7ee787',
+  pm25: '#ffa657', pm10: '#ffd580', hcho: '#f07178', press: '#79c0ff',
+  light: '#e3b341', pir: '#c9a0ff', rssi: '#ff9bce', snr: '#a5d6ff',
+  grid: 'rgba(139,155,180,.18)', text: '#8b9bb4'
+};
+
+Chart.defaults.color = COLORS.text;
+Chart.defaults.borderColor = COLORS.grid;
+Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+
+function fmt(v, digits=1) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—';
+  return typeof v === 'number' ? v.toFixed(digits) : v;
+}
+
+function kpiClass(level) {
+  if (level === '優良' || level === '良好') return 'good';
+  if (level === '偏高') return 'warn';
+  if (level === '較差') return 'bad';
+  return '';
+}
+
+function renderKpis() {
+  const m = DATA.meta;
+  const ms = m.metric_stats;
+  const items = [
+    { label: '總封包', value: m.total_packets, hint: Object.entries(m.type_counts).map(([k,v])=>k+':'+v).join(' · ') },
+    { label: '感測上行', value: m.sensor_packets, hint: '含溫濕度/空氣品質 JSON' },
+    { label: '平均溫度', value: fmt(ms.temperature?.avg) + ' °C', hint: `範圍 ${fmt(ms.temperature?.min)}–${fmt(ms.temperature?.max)}` },
+    { label: '平均濕度', value: fmt(ms.humidity?.avg, 1) + ' %', hint: `範圍 ${fmt(ms.humidity?.min,0)}–${fmt(ms.humidity?.max,0)}` },
+    { label: '平均 CO₂', value: fmt(ms.co2?.avg, 0) + ' ppm', hint: m.aqi_notes.co2_level, cls: kpiClass(m.aqi_notes.co2_level) },
+    { label: '平均 PM2.5', value: fmt(ms.pm2_5?.avg, 1) + ' µg/m³', hint: m.aqi_notes.pm25_level, cls: kpiClass(m.aqi_notes.pm25_level) },
+    { label: '平均 RSSI', value: fmt(m.link_rssi?.avg, 1) + ' dBm', hint: `min ${fmt(m.link_rssi?.min,0)}` },
+    { label: '平均 SNR', value: fmt(m.link_snr?.avg, 1) + ' dB', hint: `min ${fmt(m.link_snr?.min,1)}` },
+  ];
+  document.getElementById('kpis').innerHTML = items.map(it => `
+    <div class="kpi ${it.cls||''}">
+      <div class="label">${it.label}</div>
+      <div class="value">${it.value}</div>
+      <div class="hint">${it.hint||''}</div>
+    </div>`).join('');
+}
+
+function lineOpts(yTitle, y2Title) {
+  const scales = {
+    x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: COLORS.grid } },
+    y: { title: { display: !!yTitle, text: yTitle }, grid: { color: COLORS.grid } }
+  };
+  if (y2Title) {
+    scales.y2 = { position: 'right', title: { display: true, text: y2Title }, grid: { drawOnChartArea: false } };
+  }
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'top', labels: { boxWidth: 12, usePointStyle: true } },
+      tooltip: { callbacks: {
+        title: (items) => DATA.chart.fullTimes[items[0].dataIndex] || items[0].label
+      } }
+    },
+    scales
+  };
+}
+
+function renderCharts() {
+  const c = DATA.chart;
+  const labels = c.labels;
+
+  new Chart(document.getElementById('chartEnv'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '溫度 °C', data: c.temperature, borderColor: COLORS.temp, backgroundColor: COLORS.temp+'33', tension: .3, yAxisID: 'y', pointRadius: 3 },
+        { label: '濕度 %', data: c.humidity, borderColor: COLORS.hum, backgroundColor: COLORS.hum+'33', tension: .3, yAxisID: 'y', pointRadius: 3 },
+        { label: 'TVOC', data: c.tvoc, borderColor: COLORS.tvoc, backgroundColor: COLORS.tvoc+'33', tension: .3, yAxisID: 'y', pointRadius: 3 },
+        { label: 'CO₂ ppm', data: c.co2, borderColor: COLORS.co2, backgroundColor: COLORS.co2+'33', tension: .3, yAxisID: 'y2', pointRadius: 3, borderWidth: 2 },
+      ]
+    },
+    options: lineOpts('°C / % / TVOC', 'CO₂ ppm')
+  });
+
+  new Chart(document.getElementById('chartPM'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'PM2.5', data: c.pm25, borderColor: COLORS.pm25, tension: .3, pointRadius: 3 },
+        { label: 'PM10', data: c.pm10, borderColor: COLORS.pm10, tension: .3, pointRadius: 3 },
+        { label: 'HCHO', data: c.hcho, borderColor: COLORS.hcho, tension: .3, pointRadius: 3 },
+      ]
+    },
+    options: lineOpts('µg/m³')
+  });
+
+  new Chart(document.getElementById('chartPress'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: '氣壓 hPa', data: c.pressure, borderColor: COLORS.press, tension: .3, yAxisID: 'y', pointRadius: 3 },
+        { label: '光照等級', data: c.light, borderColor: COLORS.light, tension: .3, yAxisID: 'y2', pointRadius: 3, stepped: false },
+        { label: 'PIR', data: c.pir, borderColor: COLORS.pir, tension: 0, yAxisID: 'y2', pointRadius: 4, showLine: true },
+      ]
+    },
+    options: lineOpts('hPa', 'Light / PIR')
+  });
+
+  new Chart(document.getElementById('chartLink'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'RSSI dBm', data: c.rssi, borderColor: COLORS.rssi, tension: .3, yAxisID: 'y', pointRadius: 3 },
+        { label: 'SNR dB', data: c.snr, borderColor: COLORS.snr, tension: .3, yAxisID: 'y2', pointRadius: 3 },
+      ]
+    },
+    options: lineOpts('RSSI dBm', 'SNR dB')
+  });
+
+  const typeLabels = Object.keys(DATA.meta.type_counts);
+  const typeValues = Object.values(DATA.meta.type_counts);
+  const typeColors = { UpUnc: '#3ecf8e', DnUnc: '#3d9cf0', JnReq: '#f0b429', JnAcc: '#c9a0ff' };
+
+  new Chart(document.getElementById('chartTypes'), {
+    type: 'bar',
+    data: {
+      labels: typeLabels,
+      datasets: [{
+        label: '封包數',
+        data: typeValues,
+        backgroundColor: typeLabels.map(t => typeColors[t] || '#8b9bb4'),
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: COLORS.grid } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  const freqLabels = Object.keys(DATA.meta.freq_counts);
+  const freqValues = Object.values(DATA.meta.freq_counts);
+  new Chart(document.getElementById('chartFreq'), {
+    type: 'bar',
+    data: {
+      labels: freqLabels.map(f => f + ' MHz'),
+      datasets: [{
+        label: '次數',
+        data: freqValues,
+        backgroundColor: '#3d9cf0aa',
+        borderColor: '#3d9cf0',
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: COLORS.grid } },
+        x: { ticks: { maxRotation: 45, minRotation: 0 }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function renderStats() {
+  const ms = DATA.meta.metric_stats;
+  const order = [
+    ['temperature','溫度 °C'],['humidity','濕度 %'],['co2','CO₂ ppm'],['tvoc','TVOC'],
+    ['pm2_5','PM2.5'],['pm10','PM10'],['pressure','氣壓 hPa'],['hcho','HCHO'],
+    ['light_level','光照'],['pir','PIR']
+  ];
+  document.getElementById('stats').innerHTML = order.map(([k, title]) => {
+    const s = ms[k];
+    if (!s) return '';
+    return `<div class="stat-card"><h3>${title}</h3>
+      <dl>
+        <dt>樣本</dt><dd>${s.n}</dd>
+        <dt>最小</dt><dd>${fmt(s.min, k==='co2'?0:2)}</dd>
+        <dt>最大</dt><dd>${fmt(s.max, k==='co2'?0:2)}</dd>
+        <dt>平均</dt><dd>${fmt(s.avg, k==='co2'?0:2)}</dd>
+        <dt>中位</dt><dd>${fmt(s.med, k==='co2'?0:2)}</dd>
+        <dt>標準差</dt><dd>${fmt(s.std, 2)}</dd>
+      </dl></div>`;
+  }).join('');
+
+  const di = DATA.meta.device_info;
+  const dr = DATA.meta.dr_counts;
+  document.getElementById('deviceInfo').innerHTML = `
+    <div class="stat-card"><h3>裝置</h3>
+      <dl>
+        <dt>DevEUI</dt><dd>${DATA.meta.device}</dd>
+        <dt>Gateway</dt><dd>${DATA.meta.gateway}</dd>
+        <dt>SN</dt><dd>${di.sn || '—'}</dd>
+        <dt>FW / HW</dt><dd>${di.firmware_version || '—'} / ${di.hardware_version || '—'}</dd>
+        <dt>IPSO</dt><dd>${di.ipso_version || '—'}</dd>
+        <dt>Class</dt><dd>${di.lorawan_class != null ? 'Class ' + ({0:'A',1:'B',2:'C'}[di.lorawan_class] || di.lorawan_class) : '—'}</dd>
+      </dl>
+    </div>
+    <div class="stat-card"><h3>資料速率</h3>
+      <dl>${Object.entries(dr).map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    </div>
+    <div class="stat-card"><h3>鏈路（全量有值）</h3>
+      <dl>
+        <dt>RSSI avg</dt><dd>${fmt(DATA.meta.link_rssi?.avg,1)} dBm</dd>
+        <dt>RSSI range</dt><dd>${fmt(DATA.meta.link_rssi?.min,0)} ~ ${fmt(DATA.meta.link_rssi?.max,0)}</dd>
+        <dt>SNR avg</dt><dd>${fmt(DATA.meta.link_snr?.avg,1)} dB</dd>
+        <dt>SNR range</dt><dd>${fmt(DATA.meta.link_snr?.min,1)} ~ ${fmt(DATA.meta.link_snr?.max,1)}</dd>
+      </dl>
+    </div>
+    <div class="stat-card"><h3>觀測時段</h3>
+      <dl>
+        <dt>開始</dt><dd>${DATA.meta.time_start}</dd>
+        <dt>結束</dt><dd>${DATA.meta.time_end}</dd>
+        <dt>來源檔</dt><dd>${DATA.meta.source}</dd>
+      </dl>
+    </div>`;
+
+  const gaps = DATA.meta.fcnt_gaps || [];
+  const gapEl = document.getElementById('gapNote');
+  if (!gaps.length) {
+    gapEl.textContent = '感測上行 Fcnt 連續性：未發現缺號（於已解析感測封包序列中）。';
+  } else {
+    gapEl.textContent = '感測上行 Fcnt 缺號：' + gaps.map(g => `${g.from}→${g.to}（缺 ${g.missing.join(',')}）`).join('；');
+  }
+}
+
+function renderTables() {
+  const tb = document.getElementById('timelineBody');
+  tb.innerHTML = DATA.timeline.map(r => {
+    let content = '—';
+    if (r.has_sensor) content = '環境感測';
+    else if (r.is_info) content = '裝置資訊';
+    else if (r.type === 'JnReq') content = 'Join Request';
+    else if (r.type === 'JnAcc') content = 'Join Accept';
+    else if (r.type === 'DnUnc') content = '下行';
+    return `<tr>
+      <td>${r.time}</td>
+      <td><span class="tag ${r.type}">${r.type}</span></td>
+      <td>${r.fcnt}</td>
+      <td>${r.dr}</td>
+      <td>${r.freq}</td>
+      <td>${r.rssi ?? '—'}</td>
+      <td>${r.snr ?? '—'}</td>
+      <td>${r.size}</td>
+      <td>${content}</td>
+    </tr>`;
+  }).join('');
+
+  const sb = document.getElementById('sensorBody');
+  sb.innerHTML = DATA.sensors.map(r => {
+    const p = r.payload;
+    return `<tr>
+      <td>${r.time}</td>
+      <td>${p.temperature}</td>
+      <td>${p.humidity}</td>
+      <td>${p.co2}</td>
+      <td>${p.tvoc}</td>
+      <td>${p.pm2_5}</td>
+      <td>${p.pm10}</td>
+      <td>${p.pressure}</td>
+      <td>${p.light_level}</td>
+      <td>${p.pir}</td>
+      <td>${r.rssi ?? '—'}</td>
+      <td>${r.snr ?? '—'}</td>
+      <td>${r.fcnt}</td>
+    </tr>`;
+  }).join('');
+}
+
+renderKpis();
+renderCharts();
+renderStats();
+renderTables();
+</script>
+</body>
+</html>
