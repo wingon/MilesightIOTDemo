@@ -25,6 +25,8 @@ class Settings:
     mqtt_qos: int
     mqtt_ug65_topic: str
     mqtt_ug65_qos: int
+    mqtt_ug56_topic: str
+    mqtt_ug56_qos: int
     mqtt_tls: bool
     db_host: str
     db_port: int
@@ -44,6 +46,8 @@ def load_settings() -> Settings:
         mqtt_qos=int(os.getenv("MQTT_QOS", "1")),
         mqtt_ug65_topic=os.getenv("MQTT_UG65_TOPIC", "milesight/ug65/uplink/+"),
         mqtt_ug65_qos=int(os.getenv("MQTT_UG65_QOS", "1")),
+        mqtt_ug56_topic=os.getenv("MQTT_UG56_TOPIC", "milesight/ug56/uplink/+"),
+        mqtt_ug56_qos=int(os.getenv("MQTT_UG56_QOS", "1")),
         mqtt_tls=_bool(os.getenv("MQTT_TLS"), False),
         db_host=os.getenv("DB_HOST", "127.0.0.1"),
         db_port=int(os.getenv("DB_PORT", "3306")),

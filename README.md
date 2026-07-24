@@ -77,7 +77,7 @@ python subscriber.py
 Subscribed topics (see `.env`):
 
 - People Counter / VS135 etc.: `em/+/status` → table `tof`
-- UG65 gateway: `milesight/ug65/uplink/+` → table `ug65`
+- UG65 / UG56 gateway: `milesight/ug65/uplink/+`, `milesight/ug56/uplink/+` → table `ug65`
 
 Optional test publish:
 
@@ -255,7 +255,7 @@ Do **not** put `.env`, Mosquitto passwords, or DB secrets into each frontend rel
 | Port | `1883` |
 | Credentials | Match `passwd` / `.env` (dev default `root`/`root`) |
 | VS135 etc. topic | `em/<device-SN>/status` |
-| UG65 topic | `milesight/ug65/uplink/+` (configure on gateway as needed) |
+| UG65 / UG56 topic | `milesight/ug65/uplink/+` or `milesight/ug56/uplink/+` (configure on gateway) |
 | TLS | Usually off for LAN development |
 
 ---

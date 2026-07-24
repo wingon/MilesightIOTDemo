@@ -194,10 +194,10 @@ sudo systemctl status mosquitto --no-pager
 ```bash
 ss -lntp | grep 1883   # 應看到 0.0.0.0:1883 或 *:1883
 
-mosquitto_sub -h 127.0.0.1 -p 1883 -u root -P root -t 'milesight/ug65/uplink/+' -v
+mosquitto_sub -h 127.0.0.1 -p 1883 -u root -P root -t 'milesight/ug65/uplink/+' -t 'milesight/ug56/uplink/+' -v
 # 另開終端：
 mosquitto_pub -h 127.0.0.1 -p 1883 -u root -P root \
-  -t 'milesight/ug65/uplink/test' -m '{"ping":1}' -q 1
+  -t 'milesight/ug56/uplink/test' -m '{"ping":1}' -q 1
 ```
 
 ### 2.4 防火牆

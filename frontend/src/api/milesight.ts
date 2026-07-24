@@ -59,11 +59,13 @@ export interface Ug65Row {
   topic: string
   dev_eui: string | null
   device_name: string | null
+  uplink_time?: string | null
   rssi: number | null
   lora_snr?: number | null
   f_cnt?: number | null
   frequency_hz?: number | null
   spread_factor?: number | null
+  gateway_model?: string | null
   payload_json: unknown
 }
 

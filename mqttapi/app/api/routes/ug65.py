@@ -28,6 +28,10 @@ def list_ug65_devices(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
 @router.get("/ug65")
 def list_ug65(
     dev_eui: str | None = Query(default=None, description="Filter by DevEUI"),
+    gateway_model: str | None = Query(
+        default=None,
+        description="Filter by gateway model from topic (ug65 or ug56)",
+    ),
     since: datetime | None = Query(
         default=None,
         description="received_at >= since (default: now - 48 hours)",
@@ -45,6 +49,7 @@ def list_ug65(
     effective_since = _resolve_since(since)
     items, total = db.list_ug65(
         dev_eui=dev_eui,
+        gateway_model=gateway_model,
         since=effective_since,
         until=until,
         limit=limit,

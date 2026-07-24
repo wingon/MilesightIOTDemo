@@ -209,14 +209,14 @@ class Database:
                 topic, qos,
                 application_id, application_name, device_name, dev_eui, uplink_time,
                 f_cnt, f_port, payload_base64, payload_hex,
-                gateway_mac, gateway_name, rssi, lora_snr,
+                gateway_mac, gateway_name, gateway_model, rssi, lora_snr,
                 frequency_hz, spread_factor, bandwidth_khz,
                 rx_info_json, tx_info_json, payload_json, raw_message
             ) VALUES (
                 %(topic)s, %(qos)s,
                 %(application_id)s, %(application_name)s, %(device_name)s, %(dev_eui)s, %(uplink_time)s,
                 %(f_cnt)s, %(f_port)s, %(payload_base64)s, %(payload_hex)s,
-                %(gateway_mac)s, %(gateway_name)s, %(rssi)s, %(lora_snr)s,
+                %(gateway_mac)s, %(gateway_name)s, %(gateway_model)s, %(rssi)s, %(lora_snr)s,
                 %(frequency_hz)s, %(spread_factor)s, %(bandwidth_khz)s,
                 %(rx_info_json)s, %(tx_info_json)s, %(payload_json)s, %(raw_message)s
             )
@@ -235,6 +235,7 @@ class Database:
             "payload_hex": record.get("payload_hex"),
             "gateway_mac": record.get("gateway_mac"),
             "gateway_name": record.get("gateway_name"),
+            "gateway_model": record.get("gateway_model"),
             "rssi": record.get("rssi"),
             "lora_snr": record.get("lora_snr"),
             "frequency_hz": record.get("frequency_hz"),
@@ -375,6 +376,7 @@ class Database:
         self,
         *,
         dev_eui: str | None = None,
+        gateway_model: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = 50,
@@ -385,6 +387,9 @@ class Database:
         if dev_eui:
             where.append("dev_eui = %(dev_eui)s")
             params["dev_eui"] = dev_eui.upper()
+        if gateway_model:
+            where.append("gateway_model = %(gateway_model)s")
+            params["gateway_model"] = gateway_model.lower()
         if since:
             where.append("received_at >= %(since)s")
             params["since"] = since
@@ -427,6 +432,7 @@ class Database:
                 dev_eui,
                 MAX(device_name) AS device_name,
                 MAX(application_name) AS application_name,
+                MAX(gateway_model) AS last_gateway_model,
                 COUNT(*) AS uplink_count,
                 MAX(received_at) AS last_received_at,
                 MAX(rssi) AS last_rssi

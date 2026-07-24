@@ -79,6 +79,63 @@ def decode_channel_payload(hex_payload: str) -> dict[str, Any]:
     return result
 
 
+def decode_am319_payload(hex_payload: str) -> dict[str, Any]:
+    """Decode Milesight AM307/AM319 IPSO channel payload to frontend field names."""
+    payload = re.sub(r"[^0-9a-fA-F]", "", hex_payload or "")
+    if not payload:
+        return {}
+
+    data = binascii.unhexlify(payload)
+    result: dict[str, Any] = {}
+    i = 0
+    while i + 1 < len(data):
+        channel = data[i]
+        typ = data[i + 1]
+        i += 2
+
+        if channel == 0x01 and typ == 0x75 and i < len(data):
+            result["battery"] = data[i]
+            i += 1
+        elif channel == 0x03 and typ == 0x67 and i + 1 < len(data):
+            result["temperature"] = round(_to_int16_le(data, i) / 10, 1)
+            i += 2
+        elif channel == 0x04 and typ == 0x68 and i < len(data):
+            result["humidity"] = data[i] / 2
+            i += 1
+        elif channel == 0x05 and typ == 0x00 and i < len(data):
+            result["pir"] = data[i]
+            i += 1
+        elif channel == 0x06 and typ == 0xCB and i < len(data):
+            result["light_level"] = data[i]
+            i += 1
+        elif channel == 0x07 and typ == 0x7D and i + 1 < len(data):
+            result["co2"] = int.from_bytes(data[i : i + 2], "little")
+            i += 2
+        elif channel == 0x08 and typ == 0x7D and i + 1 < len(data):
+            # Historical TVOC concentration (÷100)
+            result["tvoc"] = round(int.from_bytes(data[i : i + 2], "little") / 100, 2)
+            i += 2
+        elif channel == 0x08 and typ == 0xE6 and i + 1 < len(data):
+            # Newer firmware TVOC level (matches gateway decoded JSON integers)
+            result["tvoc"] = int.from_bytes(data[i : i + 2], "little")
+            i += 2
+        elif channel == 0x09 and typ == 0x73 and i + 1 < len(data):
+            result["pressure"] = round(int.from_bytes(data[i : i + 2], "little") / 10, 1)
+            i += 2
+        elif channel == 0x0A and typ == 0x7D and i + 1 < len(data):
+            result["hcho"] = round(int.from_bytes(data[i : i + 2], "little") / 100, 2)
+            i += 2
+        elif channel == 0x0B and typ == 0x7D and i + 1 < len(data):
+            result["pm2_5"] = int.from_bytes(data[i : i + 2], "little")
+            i += 2
+        elif channel == 0x0C and typ == 0x7D and i + 1 < len(data):
+            result["pm10"] = int.from_bytes(data[i : i + 2], "little")
+            i += 2
+        else:
+            break
+    return result
+
+
 def decode_nb_frame(hex_payload: str) -> dict[str, Any]:
     """Decode NB MQTT binary frame (StartID + header + TLV data part)."""
     payload = re.sub(r"[^0-9a-fA-F]", "", hex_payload or "")

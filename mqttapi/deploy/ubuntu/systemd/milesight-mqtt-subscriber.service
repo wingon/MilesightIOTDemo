@@ -1,5 +1,5 @@
 [Unit]
-Description=Milesight MQTT subscriber (tof + ug65 → MariaDB)
+Description=Milesight MQTT subscriber (tof + ug65/ug56 → MariaDB)
 After=network.target mosquitto.service mariadb.service
 Wants=network.target
 Requires=mosquitto.service

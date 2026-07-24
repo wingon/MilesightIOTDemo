@@ -143,12 +143,12 @@ export default {
     actions: '操作',
   },
   dashboard: {
-    subtitle: 'Milesight 傳感器上報 · 人流計數 / UG65',
+    subtitle: 'Milesight 傳感器上報 · 人流計數 / LoRaWAN 閘道',
     serviceStatus: '服務狀態',
     api: 'API',
     mariadb: 'MariaDB',
     tofCard: '人流計數 (tof)',
-    ug65Card: 'UG65',
+    ug65Card: 'UG65 / UG56',
     uplinkCount: '上報筆數',
     deviceCount: '裝置數',
     lastReceived: '最近',
@@ -187,7 +187,8 @@ export default {
     end: 'End',
   },
   ug65: {
-    title: 'UG65 上報（AM319 / CT103）',
+    title: '閘道上報（AM319 / CT103）',
+    subtitle: '經 UG65 / UG56 的 LoRaWAN 上報 · 存入 ug65 表',
     selectDevice: '選擇 DevEUI',
     receivedAt: '接收時間',
     topic: 'Topic',
@@ -195,9 +196,11 @@ export default {
   },
   ct103: {
     title: 'CT103 單相電流感測報告',
-    subtitle: 'Milesight CT103 電流監測 · UG65 LoRaWAN 上報分析',
+    subtitle: 'Milesight CT103 電流監測 · UG65 / UG56 LoRaWAN 上報分析',
     band: '頻段：470 MHz',
-    viaUg65: '經 UG65 閘道',
+    viaUg65: '經 UG65 / UG56 閘道',
+    viaGateway: '經 {model} 閘道',
+    viaGatewayUnknown: '經 LoRaWAN 閘道',
     sections: {
       overview: '資料概覽',
       latest: '最新感測讀數',
@@ -247,7 +250,7 @@ export default {
       loadState: '負載狀態（0=空載 / 1=有負載）',
       signal: 'LoRaWAN 訊號質素（RSSI / SNR）',
       signalEmpty:
-        '資料庫中沒有 RSSI/SNR。目前 MQTT 上報是應用層 JSON（無 rxInfo）。請在 UG65 改發含 rxInfo 的 ChirpStack 格式，或在 payload 內帶上 rssi / loRaSNR。',
+        '資料庫中沒有 RSSI/SNR。目前 MQTT 上報是應用層 JSON（無 rxInfo）。請在 UG65 / UG56 改發含 rxInfo 的 ChirpStack 格式，或在 payload 內帶上 rssi / loRaSNR。',
       tempNote: '僅顯示有溫度欄位的封包；status=2 表示傳感器未安裝',
       tempStatusNote: '2 = 未安裝 · 1 = 已安裝並有讀數 · 階梯線',
     },
@@ -275,6 +278,8 @@ export default {
     },
     table: {
       time: '時間',
+      uplinkTime: '上報時間',
+      receivedAt: '入庫時間',
       current: '電流 A',
       total: '累計 A·h',
       cableTemp: '導線溫度',
@@ -284,7 +289,9 @@ export default {
   air: {
     title: 'AM319 空氣質素報告',
     subtitle: 'Milesight AM319 環境傳感器 · LoRaWAN 閘道資料流分析',
-    viaUg65: '經 UG65 閘道',
+    viaUg65: '經 UG65 / UG56 閘道',
+    viaGateway: '經 {model} 閘道',
+    viaGatewayUnknown: '經 LoRaWAN 閘道',
     sections: {
       overview: '資料概覽',
       latest: '最新感測讀數',
@@ -344,7 +351,7 @@ export default {
       lightPir: '光照與 PIR',
       signal: 'LoRaWAN 訊號質素（RSSI / SNR）',
       signalEmpty:
-        '資料庫中沒有 RSSI/SNR。目前 MQTT 上報是應用層 JSON（無 rxInfo）。請在 UG65 改發含 rxInfo 的 ChirpStack 格式，或在 payload 內帶上 rssi / loRaSNR。',
+        '資料庫中沒有 RSSI/SNR。目前 MQTT 上報是應用層 JSON（無 rxInfo）。請在 UG65 / UG56 改發含 rxInfo 的 ChirpStack 格式，或在 payload 內帶上 rssi / loRaSNR。',
     },
     aq: {
       good: '整體空氣質素：良好',
@@ -360,6 +367,8 @@ export default {
     },
     table: {
       time: '時間',
+      uplinkTime: '上報時間',
+      receivedAt: '入庫時間',
     },
   },
   vs135: {

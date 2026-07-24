@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { listTof, listTofDevices, type TofDevice, type TofRow } from '@/api/milesight'
 import ChartPanel from '@/components/ChartPanel.vue'
 import { brand } from '@/theme/colorConfig'
-import { asRecord, formatNum, num } from '@/utils/reportCommon'
+import { asRecord, formatNum, formatTableTime, num } from '@/utils/reportCommon'
 import {
   type Vs135MainMetric,
   buildVs135CombinedOption,
@@ -397,7 +397,8 @@ onMounted(async () => {
         }"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'periodIn'">
+          <template v-if="column.dataIndex === 'received_at'">{{ formatTableTime(record.received_at) }}</template>
+          <template v-else-if="column.key === 'periodIn'">
             {{ formatNum(num(periodicOf(record)?.in), 0) }}
           </template>
           <template v-else-if="column.key === 'periodOut'">

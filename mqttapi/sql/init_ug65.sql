@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS ug65 (
 
   gateway_mac VARCHAR(32) NULL,
   gateway_name VARCHAR(128) NULL,
+  gateway_model VARCHAR(16) NULL,
   rssi SMALLINT NULL,
   lora_snr DECIMAL(5, 1) NULL,
   frequency_hz INT UNSIGNED NULL,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ug65 (
   PRIMARY KEY (id),
   KEY idx_received_at (received_at),
   KEY idx_dev_eui (dev_eui),
+  KEY idx_gateway_model (gateway_model),
   KEY idx_uplink_time (uplink_time),
   KEY idx_f_port (f_port)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -143,12 +143,12 @@ export default {
     actions: 'Actions',
   },
   dashboard: {
-    subtitle: 'Milesight sensor uplink · People Counter / UG65',
+    subtitle: 'Milesight sensor uplink · People Counter / LoRaWAN gateway',
     serviceStatus: 'Service Status',
     api: 'API',
     mariadb: 'MariaDB',
     tofCard: 'People Counter (tof)',
-    ug65Card: 'UG65',
+    ug65Card: 'UG65 / UG56',
     uplinkCount: 'Uplink count',
     deviceCount: 'Devices',
     lastReceived: 'Latest',
@@ -187,7 +187,8 @@ export default {
     end: 'End',
   },
   ug65: {
-    title: 'UG65 Uplinks (AM319 / CT103)',
+    title: 'Gateway Uplinks (AM319 / CT103)',
+    subtitle: 'LoRaWAN uplinks via UG65 / UG56 · stored in ug65 table',
     selectDevice: 'Select DevEUI',
     receivedAt: 'Received at',
     topic: 'Topic',
@@ -195,9 +196,11 @@ export default {
   },
   ct103: {
     title: 'CT103 Single-Phase Current Report',
-    subtitle: 'Milesight CT103 current monitoring · UG65 LoRaWAN uplink analysis',
+    subtitle: 'Milesight CT103 current monitoring · UG65 / UG56 LoRaWAN uplink analysis',
     band: 'Band: 470 MHz',
-    viaUg65: 'Via UG65 gateway',
+    viaUg65: 'Via UG65 / UG56 gateway',
+    viaGateway: 'Via {model} gateway',
+    viaGatewayUnknown: 'Via LoRaWAN gateway',
     sections: {
       overview: 'Data Overview',
       latest: 'Latest Sensor Readings',
@@ -239,7 +242,7 @@ export default {
       tempStatus:
         'Raw field temperature_sensor_status: 2 = not installed (this report), 1 = installed with reading, 0 = normal.',
       rssiSnr:
-        'LoRaWAN link quality from the gateway: RSSI (dBm, signal strength) and SNR (dB, signal-to-noise). Higher SNR / less-negative RSSI is better.',
+        'LoRaWAN link quality from the gateway: RSSI (dBm) — closer to 0 is better; SNR (dB) — higher is better.',
     },
     charts: {
       instantCurrent: 'Instantaneous Current',
@@ -250,8 +253,10 @@ export default {
       distribution: 'Instantaneous Current Distribution',
       loadState: 'Load State (0=idle / 1=load)',
       signal: 'LoRaWAN Signal Quality (RSSI / SNR)',
+      rssi: 'RSSI',
+      snr: 'SNR',
       signalEmpty:
-        'No RSSI/SNR in stored uplinks. Current MQTT payloads are application JSON only (no rxInfo). Configure UG65 to publish ChirpStack-style frames with rxInfo, or include rssi/loRaSNR in the payload.',
+        'No RSSI/SNR in stored uplinks. Current MQTT payloads are application JSON only (no rxInfo). Configure UG65/UG56 to publish ChirpStack-style frames with rxInfo, or include rssi/loRaSNR in the payload.',
       tempNote: 'Packets with temperature field only; status=2 means sensor not installed',
       tempStatusNote: '2 = not installed · 1 = installed with reading · stepped line',
     },
@@ -269,7 +274,7 @@ export default {
         'Temperature: {with}/{total} packets include cable temperature; {status2}/{total} report temperature_sensor_status=2 (not installed).',
       under6a:
         'Many instantaneous current readings are below 6 A. Per CT103 specs, induced power may be insufficient for periodic uplinks; continued reporting may indicate Type-C external power or residual charge.',
-      signal: 'LoRaWAN signal quality: avg RSSI {rssi} dBm, avg SNR {snr} dB.',
+      signal: 'LoRaWAN signal quality: avg RSSI {rssi} dBm (closer to 0 is better), avg SNR {snr} dB (higher is better).',
       interval: 'Median uplink interval ~{sec} s.',
     },
     notes: {
@@ -280,6 +285,8 @@ export default {
     },
     table: {
       time: 'Time',
+      uplinkTime: 'Reported at',
+      receivedAt: 'Ingested at',
       current: 'Current A',
       total: 'Total A·h',
       cableTemp: 'Cable Temp',
@@ -289,7 +296,9 @@ export default {
   air: {
     title: 'AM319 AirQuality Report',
     subtitle: 'Milesight AM319 environmental sensor · LoRaWAN gateway data stream analysis',
-    viaUg65: 'Via UG65 gateway',
+    viaUg65: 'Via UG65 / UG56 gateway',
+    viaGateway: 'Via {model} gateway',
+    viaGatewayUnknown: 'Via LoRaWAN gateway',
     sections: {
       overview: 'Data Overview',
       latest: 'Latest Sensor Readings',
@@ -349,8 +358,10 @@ export default {
       voc: 'TVOC & Formaldehyde',
       lightPir: 'Light Level & PIR',
       signal: 'LoRaWAN Signal Quality (RSSI / SNR)',
+      rssi: 'RSSI',
+      snr: 'SNR',
       signalEmpty:
-        'No RSSI/SNR in stored uplinks. Current MQTT payloads are application JSON only (no rxInfo). Configure UG65 to publish ChirpStack-style frames with rxInfo, or include rssi/loRaSNR in the payload.',
+        'No RSSI/SNR in stored uplinks. Current MQTT payloads are application JSON only (no rxInfo). Configure UG65/UG56 to publish ChirpStack-style frames with rxInfo, or include rssi/loRaSNR in the payload.',
     },
     aq: {
       good: 'Overall Air Quality: Good',
@@ -362,10 +373,12 @@ export default {
       temperature: 'Temperature remained in {min}–{max} °C.',
       pm25: 'PM2.5 peaked at {max} µg/m³ (WHO 24-hour guideline 35 µg/m³).',
       pir: 'PIR activity ratio was {ratio}% during the sampled window.',
-      signal: 'LoRaWAN signal quality: avg RSSI {rssi} dBm, avg SNR {snr} dB.',
+      signal: 'LoRaWAN signal quality: avg RSSI {rssi} dBm (closer to 0 is better), avg SNR {snr} dB (higher is better).',
     },
     table: {
       time: 'Time',
+      uplinkTime: 'Reported at',
+      receivedAt: 'Ingested at',
     },
   },
   vs135: {

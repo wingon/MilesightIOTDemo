@@ -193,10 +193,10 @@ Key settings (see `deploy/ubuntu/mosquitto/milesight.conf`):
 ```bash
 ss -lntp | grep 1883   # expect 0.0.0.0:1883 or *:1883
 
-mosquitto_sub -h 127.0.0.1 -p 1883 -u root -P root -t 'milesight/ug65/uplink/+' -v
+mosquitto_sub -h 127.0.0.1 -p 1883 -u root -P root -t 'milesight/ug65/uplink/+' -t 'milesight/ug56/uplink/+' -v
 # another terminal:
 mosquitto_pub -h 127.0.0.1 -p 1883 -u root -P root \
-  -t 'milesight/ug65/uplink/test' -m '{"ping":1}' -q 1
+  -t 'milesight/ug56/uplink/test' -m '{"ping":1}' -q 1
 ```
 
 ### 2.4 Firewall

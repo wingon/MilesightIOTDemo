@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { listUg65, type Ug65Row } from '@/api/milesight'
 import ChartPanel from '@/components/ChartPanel.vue'
 import { brand } from '@/theme/colorConfig'
-import { formatNum, num, asRecord } from '@/utils/reportCommon'
+import { formatNum, num, asRecord, latestGatewayModel, formatTableTimeUtcPlus8, rowUplinkTime } from '@/utils/reportCommon'
 import {
   CT103_EUI,
   TEMP_STATUS_LABEL,
@@ -43,6 +43,14 @@ async function load() {
 }
 
 const overview = computed(() => buildCt103Overview(rows.value))
+
+const gatewayBadge = computed(() => {
+  void locale.value
+  const model = latestGatewayModel(rows.value)
+  return model
+    ? t('ct103.viaGateway', { model })
+    : t('ct103.viaGatewayUnknown')
+})
 
 const insights = computed(() => {
   void locale.value
@@ -96,8 +104,8 @@ const loadOption = computed(() => {
 const signalOption = computed(() => {
   void locale.value
   return buildCt103SignalOption(overview.value, {
-    rssi: 'RSSI',
-    snr: 'SNR',
+    rssi: t('ct103.charts.rssi'),
+    snr: t('ct103.charts.snr'),
   })
 })
 
@@ -109,13 +117,14 @@ const pagedRows = computed(() => {
 })
 
 const columns = computed(() => [
-  { title: t('ct103.table.time'), dataIndex: 'received_at', width: 180 },
+  { title: t('ct103.table.uplinkTime'), key: 'uplink_time', width: 150 },
+  { title: t('ct103.table.receivedAt'), key: 'received_at', width: 150 },
   { title: t('ct103.table.current'), key: 'current', width: 100 },
   { title: t('ct103.table.total'), key: 'total', width: 110 },
   { title: t('ct103.table.cableTemp'), key: 'temp', width: 110 },
   { title: t('ct103.table.tempStatus'), key: 'tempStatus', width: 220 },
-  { title: 'RSSI', dataIndex: 'rssi', width: 90 },
-  { title: 'SNR', dataIndex: 'lora_snr', width: 90 },
+  { title: t('ct103.charts.rssi'), dataIndex: 'rssi', width: 90 },
+  { title: t('ct103.charts.snr'), dataIndex: 'lora_snr', width: 90 },
   { title: 'FCnt', dataIndex: 'f_cnt', width: 80 },
 ])
 
@@ -152,7 +161,7 @@ onMounted(load)
         <div class="badges">
           <span class="badge">Device EUI: {{ CT103_EUI }}</span>
           <span class="badge">{{ t('ct103.band') }}</span>
-          <span class="badge">{{ t('ct103.viaUg65') }}</span>
+          <span class="badge">{{ gatewayBadge }}</span>
         </div>
       </div>
       <a-button type="primary" @click="load">{{ t('common.refresh') }}</a-button>
@@ -398,7 +407,9 @@ onMounted(load)
         }"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'current'">
+          <template v-if="column.key === 'uplink_time'">{{ formatTableTimeUtcPlus8(rowUplinkTime(record)) }}</template>
+          <template v-else-if="column.key === 'received_at'">{{ formatTableTimeUtcPlus8(record.received_at) }}</template>
+          <template v-else-if="column.key === 'current'">
             {{ formatNum(num(payloadOf(record).current), 2) }}
           </template>
           <template v-else-if="column.key === 'total'">

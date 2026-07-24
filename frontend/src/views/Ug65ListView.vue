@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { listUg65, type Ug65Row } from '@/api/milesight'
 import ChartPanel from '@/components/ChartPanel.vue'
 import { brand } from '@/theme/colorConfig'
-import { asRecord, formatNum, num } from '@/utils/reportCommon'
+import { asRecord, formatNum, formatTableTimeUtcPlus8, latestGatewayModel, num, rowUplinkTime } from '@/utils/reportCommon'
 import {
   AIR_EUI,
   AIR_METRIC_META,
@@ -52,6 +52,14 @@ async function load() {
 }
 
 const overview = computed(() => buildAirOverview(rows.value))
+
+const gatewayBadge = computed(() => {
+  void locale.value
+  const model = latestGatewayModel(rows.value)
+  return model
+    ? t('air.viaGateway', { model })
+    : t('air.viaGatewayUnknown')
+})
 
 const insights = computed(() => {
   void locale.value
@@ -113,7 +121,10 @@ const lightPirOption = computed(() => {
 
 const signalOption = computed(() => {
   void locale.value
-  return buildAirSignalOption(overview.value, { rssi: 'RSSI', snr: 'SNR' })
+  return buildAirSignalOption(overview.value, {
+    rssi: t('air.charts.rssi'),
+    snr: t('air.charts.snr'),
+  })
 })
 
 const tableRows = computed(() => airRows(rows.value))
@@ -124,7 +135,7 @@ const pagedRows = computed(() => {
 })
 
 const columns = computed(() => [
-  { title: t('air.table.time'), dataIndex: 'received_at', width: 170 },
+  { title: t('air.table.uplinkTime'), key: 'uplink_time', width: 170 },
   { title: t('air.metrics.temperature'), key: 'temperature', width: 90 },
   { title: t('air.metrics.humidity'), key: 'humidity', width: 90 },
   { title: t('air.metrics.co2'), key: 'co2', width: 90 },
@@ -135,8 +146,8 @@ const columns = computed(() => [
   { title: t('air.metrics.pressure'), key: 'pressure', width: 100 },
   { title: t('air.metrics.light_level'), key: 'light_level', width: 90 },
   { title: t('air.metrics.pir'), key: 'pir', width: 70 },
-  { title: 'RSSI', dataIndex: 'rssi', width: 80 },
-  { title: 'SNR', dataIndex: 'lora_snr', width: 80 },
+  { title: t('air.charts.rssi'), dataIndex: 'rssi', width: 80 },
+  { title: t('air.charts.snr'), dataIndex: 'lora_snr', width: 80 },
 ])
 
 function payloadOf(row: Ug65Row) {
@@ -199,7 +210,7 @@ onMounted(load)
         <div class="hero-sub">{{ t('air.subtitle') }}</div>
         <div class="badges">
           <span class="badge">Device EUI: {{ AIR_EUI }}</span>
-          <span class="badge">{{ t('air.viaUg65') }}</span>
+          <span class="badge">{{ gatewayBadge }}</span>
         </div>
       </div>
       <a-button type="primary" @click="load">{{ t('common.refresh') }}</a-button>
@@ -384,7 +395,8 @@ onMounted(load)
         }"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'temperature'">{{ cell(record, 'temperature', 1) }}</template>
+          <template v-if="column.key === 'uplink_time'">{{ formatTableTimeUtcPlus8(rowUplinkTime(record)) }}</template>
+          <template v-else-if="column.key === 'temperature'">{{ cell(record, 'temperature', 1) }}</template>
           <template v-else-if="column.key === 'humidity'">{{ cell(record, 'humidity', 1) }}</template>
           <template v-else-if="column.key === 'co2'">{{ cell(record, 'co2', 0) }}</template>
           <template v-else-if="column.key === 'pm2_5'">{{ cell(record, 'pm2_5', 0) }}</template>

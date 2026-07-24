@@ -77,7 +77,7 @@ python subscriber.py
 訂閱主題（見 `.env`）：
 
 - People Counter / VS135 等：`em/+/status` → 表 `tof`
-- UG65 閘道：`milesight/ug65/uplink/+` → 表 `ug65`
+- UG65 / UG56 閘道：`milesight/ug65/uplink/+`、`milesight/ug56/uplink/+` → 表 `ug65`
 
 可選測試發布：
 
@@ -255,7 +255,7 @@ sudo systemctl restart milesight-api milesight-mqtt-subscriber
 | 端口 | `1883` |
 | 帳密 | 與 `passwd` / `.env` 一致（開發預設 `root`/`root`） |
 | VS135 等主題 | `em/<設備SN>/status` |
-| UG65 主題 | `milesight/ug65/uplink/+`（閘道側依實際配置） |
+| UG65 / UG56 主題 | `milesight/ug65/uplink/+` 或 `milesight/ug56/uplink/+`（閘道側依實際配置） |
 | TLS | 內網開發通常關閉 |
 
 ---

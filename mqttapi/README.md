@@ -7,7 +7,7 @@ English version: [README_en.md](./README_en.md)
 | 表 | 資料來源 | MQTT 主題 |
 |----|----------|-----------|
 | `tof` | People Counter / TOF（直連 MQTT） | `em/+/status` |
-| `ug65` | UG65 閘道 LoRaWAN 轉發（AM319 / CT103 等） | `milesight/ug65/uplink/+` |
+| `ug65` | UG65 / UG56 閘道 LoRaWAN 轉發（AM319 / CT103 等） | `milesight/ug65/uplink/+`、`milesight/ug56/uplink/+` |
 
 ## 架構
 
@@ -338,7 +338,7 @@ ORDER BY id DESC LIMIT 10;
 
 ## 環境變數（`.env`）
 
-見 `.env.example`。預設訂閱主題為 `em/+/status`；UG65 使用 `milesight/ug65/uplink/+`。
+見 `.env.example`。預設訂閱主題為 `em/+/status`；閘道為 `milesight/ug65/uplink/+` 與 `milesight/ug56/uplink/+`（同入 `ug65` 表）。
 
 ## 防火牆
 

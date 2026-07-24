@@ -20,17 +20,106 @@ export function shortTime(value: string) {
   return (part || value).slice(0, 8)
 }
 
-/** Display datetime with integer seconds only (YYYY-MM-DD HH:MM:SS). */
+/** Resolve gateway model (ug65 / ug56) from row field or topic path. */
+export function resolveGatewayModel(row: Pick<Ug65Row, 'gateway_model' | 'topic'>): string | null {
+  const fromField = (row.gateway_model || '').trim().toLowerCase()
+  if (fromField === 'ug65' || fromField === 'ug56') return fromField.toUpperCase()
+  const match = (row.topic || '').match(/^milesight\/(ug65|ug56)(?:\/|$)/i)
+  return match ? match[1].toUpperCase() : null
+}
+
+/** Latest uplink's gateway model (API returns newest first). */
+export function latestGatewayModel(rows: Array<Pick<Ug65Row, 'gateway_model' | 'topic'>>): string | null {
+  for (const row of rows) {
+    const model = resolveGatewayModel(row)
+    if (model) return model
+  }
+  return null
+}
+
+/** Display datetime as YYYY-MM-DD HH:MM:SS (no milliseconds). */
 export function formatDateTime(value: string | null | undefined): string | null {
   if (!value) return null
   const normalized = value.trim().replace('T', ' ')
   const match = normalized.match(
-    /^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})/,
+    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})/,
   )
-  if (!match) return normalized.slice(0, 19)
-  const [, date, hh, mm, ss] = match
+  if (!match) {
+    const fallback = normalized.slice(0, 19)
+    return fallback || null
+  }
+  const [, yyyy, mo, dd, hh, mm, ss] = match
   const pad = (n: string) => n.padStart(2, '0')
-  return `${date} ${pad(hh)}:${pad(mm)}:${pad(ss)}`
+  return `${yyyy}-${mo}-${dd} ${pad(hh)}:${pad(mm)}:${pad(ss)}`
+}
+
+/**
+ * Table / UI timestamps in Asia/Hong_Kong (UTC+8), full year:
+ * YYYY-MM-DD HH:MM:SS
+ *
+ * MariaDB CURRENT_TIMESTAMP / naive DATETIME from this project are UTC.
+ * Strings with explicit offsets (e.g. gatewayTime ...+08:00) are converted via that offset.
+ */
+export function formatTableTime(value: string | null | undefined): string {
+  return formatTableTimeUtcPlus8(value)
+}
+
+/** @deprecated alias — use formatTableTime */
+export function formatTableTimeUtcPlus8(value: string | null | undefined): string {
+  if (!value) return '—'
+  const text = value.trim()
+
+  const offsetMatch = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?([+-]\d{2}):?(\d{2})$/,
+  )
+  if (offsetMatch) {
+    const [, y, mo, d, hh, mm, ss, offH, offM] = offsetMatch
+    const sign = offH.startsWith('-') ? -1 : 1
+    const offsetMin = sign * (Math.abs(Number(offH)) * 60 + Number(offM))
+    const utcMs =
+      Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), Number(ss)) -
+      offsetMin * 60_000
+    return formatUtcMsAsHkt(utcMs)
+  }
+
+  const zMatch = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/i,
+  )
+  if (zMatch) {
+    const [, y, mo, d, hh, mm, ss] = zMatch
+    const utcMs = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+    return formatUtcMsAsHkt(utcMs)
+  }
+
+  // Naive MariaDB DATETIME — treat as UTC (matches docker MariaDB default TZ)
+  const naive = text.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{1,2}):(\d{1,2})/)
+  if (naive) {
+    const [, y, mo, d, hh, mm, ss] = naive
+    const utcMs = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+    return formatUtcMsAsHkt(utcMs)
+  }
+
+  return formatDateTime(text) || '—'
+}
+
+function formatUtcMsAsHkt(utcMs: number): string {
+  if (!Number.isFinite(utcMs)) return '—'
+  const hkt = new Date(utcMs + 8 * 3600_000)
+  const y = String(hkt.getUTCFullYear())
+  const mo = String(hkt.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(hkt.getUTCDate()).padStart(2, '0')
+  const hh = String(hkt.getUTCHours()).padStart(2, '0')
+  const mm = String(hkt.getUTCMinutes()).padStart(2, '0')
+  const ss = String(hkt.getUTCSeconds()).padStart(2, '0')
+  return `${y}-${mo}-${d} ${hh}:${mm}:${ss}`
+}
+
+/** Prefer gatewayTime from payload, then uplink_time column. */
+export function rowUplinkTime(row: Pick<Ug65Row, 'uplink_time' | 'payload_json'>): string | null {
+  const payload = asRecord(row.payload_json)
+  const gatewayTime = payload?.gatewayTime
+  if (typeof gatewayTime === 'string' && gatewayTime.trim()) return gatewayTime.trim()
+  return row.uplink_time || null
 }
 
 export function filterByEui(rows: Ug65Row[], eui: string) {

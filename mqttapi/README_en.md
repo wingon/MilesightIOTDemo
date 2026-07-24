@@ -5,7 +5,7 @@ Ingest two kinds of MQTT uplinks and store them in separate MariaDB tables:
 | Table | Source | MQTT topic |
 |-------|--------|------------|
 | `tof` | People Counter / TOF (direct MQTT) | `em/+/status` |
-| `ug65` | UG65 gateway LoRaWAN forward (AM130 / CT103, etc.) | `milesight/ug65/uplink/+` |
+| `ug65` | UG65 / UG56 gateway LoRaWAN forward (AM319 / CT103, etc.) | `milesight/ug65/uplink/+`, `milesight/ug56/uplink/+` |
 
 Chinese version: [README.md](./README.md)
 
@@ -336,7 +336,7 @@ ORDER BY id DESC LIMIT 10;
 
 ## Environment variables (`.env`)
 
-See `.env.example`. Default subscribe topic is `em/+/status`; UG65 uses `milesight/ug65/uplink/+`.
+See `.env.example`. Default subscribe topic is `em/+/status`; gateways use `milesight/ug65/uplink/+` and `milesight/ug56/uplink/+` (both land in the `ug65` table).
 
 ## Firewall
 
