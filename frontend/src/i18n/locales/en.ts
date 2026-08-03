@@ -221,7 +221,7 @@ export default {
       legendTitle: 'Metric meanings',
       legendHint: 'Items marked “derived” are calculated in the report; they are not raw device fields.',
       packetsDesc:
-        'CT103 sensor uplinks in the last 48 hours (API window) / matching rows in that window.',
+        'CT103 sensor uplinks in the 48 hours ending at the latest database record / matching rows in that window.',
       timeRangeDesc: 'Earliest and latest received_at among the loaded packets.',
       durationDesc: 'Elapsed time from the first to the last packet in the loaded window.',
       intervalDesc: 'Median gap between consecutive uplinks (derived from timestamps).',
@@ -318,7 +318,7 @@ export default {
       legendTitle: 'Metric meanings',
       legendHint: 'Items marked “derived” are calculated in the report; they are not raw device fields.',
       packetsDesc:
-        'Environment-sensor uplinks in the last 48 hours (API window) / matching rows in that window.',
+        'Environment-sensor uplinks in the 48 hours ending at the latest database record / matching rows in that window.',
       timeRangeDesc: 'Earliest and latest received_at among the loaded packets.',
       durationDesc: 'Elapsed time from the first to the last packet in the loaded window.',
       intervalDesc: 'Median gap between consecutive uplinks (derived from timestamps).',
@@ -404,7 +404,7 @@ export default {
       devices: 'Devices in View',
       legendTitle: 'Metric meanings',
       legendHint: 'Items marked “derived” are calculated in the report; they are not raw device fields.',
-      packetsDesc: 'VS135 uplinks in the last 48 hours (API window) / matching rows in that window.',
+      packetsDesc: 'VS135 uplinks in the 48 hours ending at the latest database record / matching rows in that window.',
       timeRangeDesc: 'Earliest and latest received_at among the loaded packets.',
       durationDesc: 'Elapsed time from the first to the last packet in the loaded window.',
       intervalDesc: 'Median gap between consecutive uplinks (derived from timestamps).',

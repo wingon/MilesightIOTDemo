@@ -345,6 +345,23 @@ class Database:
                 row = cur.fetchone()
         return self._parse_json_fields(dict(row), TOF_JSON_COLUMNS) if row else None
 
+    def latest_tof_received_at(self, *, device_sn: str | None = None) -> datetime | None:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if device_sn:
+            where.append("device_sn = %(device_sn)s")
+            params["device_sn"] = device_sn
+        clause = " AND ".join(where)
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT MAX(received_at) AS latest_received_at FROM tof WHERE {clause}",
+                    params,
+                )
+                row = cur.fetchone() or {}
+        latest = row.get("latest_received_at")
+        return latest if isinstance(latest, datetime) else None
+
     def list_tof_devices(self) -> list[dict[str, Any]]:
         sql = """
             SELECT
@@ -425,6 +442,31 @@ class Database:
                 cur.execute("SELECT * FROM ug65 WHERE id = %s", (row_id,))
                 row = cur.fetchone()
         return self._parse_json_fields(dict(row), UG65_JSON_COLUMNS) if row else None
+
+    def latest_ug65_received_at(
+        self,
+        *,
+        dev_eui: str | None = None,
+        gateway_model: str | None = None,
+    ) -> datetime | None:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if dev_eui:
+            where.append("dev_eui = %(dev_eui)s")
+            params["dev_eui"] = dev_eui.upper()
+        if gateway_model:
+            where.append("gateway_model = %(gateway_model)s")
+            params["gateway_model"] = gateway_model.lower()
+        clause = " AND ".join(where)
+        with self.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT MAX(received_at) AS latest_received_at FROM ug65 WHERE {clause}",
+                    params,
+                )
+                row = cur.fetchone() or {}
+        latest = row.get("latest_received_at")
+        return latest if isinstance(latest, datetime) else None
 
     def list_ug65_devices(self) -> list[dict[str, Any]]:
         sql = """

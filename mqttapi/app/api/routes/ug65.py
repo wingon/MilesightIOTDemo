@@ -11,13 +11,31 @@ from app.db import Database
 router = APIRouter(prefix="/api/v1", tags=["ug65"])
 
 DEFAULT_LOOKBACK_HOURS = 48
+# Set to False to test the original server-time window behavior.
+USE_LATEST_RECORD_WINDOW = True
 
 
-def _resolve_since(since: datetime | None) -> datetime:
-    """Default to the last 48 hours (server local time, matches MariaDB CURRENT_TIMESTAMP)."""
+def _resolve_window(
+    since: datetime | None,
+    until: datetime | None,
+    latest_received_at: datetime | None,
+) -> tuple[datetime, datetime | None]:
+    """Use the latest matching database row as the end of the default window."""
+    # Original implementation (server-time anchor):
+    # if since is not None:
+    #     return since, until
+    # return (
+    #     datetime.now().replace(tzinfo=None) - timedelta(hours=DEFAULT_LOOKBACK_HOURS),
+    #     until,
+    # )
     if since is not None:
-        return since
-    return datetime.now().replace(tzinfo=None) - timedelta(hours=DEFAULT_LOOKBACK_HOURS)
+        return since, until
+    if latest_received_at is None:
+        return datetime.now().replace(tzinfo=None) - timedelta(hours=DEFAULT_LOOKBACK_HOURS), until
+    return (
+        latest_received_at - timedelta(hours=DEFAULT_LOOKBACK_HOURS),
+        until or latest_received_at,
+    )
 
 
 @router.get("/ug65/devices")
@@ -34,7 +52,7 @@ def list_ug65(
     ),
     since: datetime | None = Query(
         default=None,
-        description="received_at >= since (default: now - 48 hours)",
+        description="received_at >= since (default: 48 hours before the latest matching row)",
     ),
     until: datetime | None = Query(default=None, description="received_at <= until"),
     limit: int | None = Query(
@@ -46,12 +64,17 @@ def list_ug65(
     offset: int = Query(default=0, ge=0),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    effective_since = _resolve_since(since)
+    latest_received_at = (
+        db.latest_ug65_received_at(dev_eui=dev_eui, gateway_model=gateway_model)
+        if since is None and USE_LATEST_RECORD_WINDOW
+        else None
+    )
+    effective_since, effective_until = _resolve_window(since, until, latest_received_at)
     items, total = db.list_ug65(
         dev_eui=dev_eui,
         gateway_model=gateway_model,
         since=effective_since,
-        until=until,
+        until=effective_until,
         limit=limit,
         offset=offset,
     )
@@ -60,7 +83,7 @@ def list_ug65(
         "limit": limit,
         "offset": offset,
         "since": effective_since.isoformat(sep=" "),
-        "until": until.isoformat(sep=" ") if until else None,
+        "until": effective_until.isoformat(sep=" ") if effective_until else None,
         "items": items,
     }
 
