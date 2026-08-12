@@ -6,9 +6,10 @@ import Building3D from '@/components/building/Building3D.vue'
 import BuildingDashboardPanel from '@/components/building/BuildingDashboardPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
 import { useBuildingStore } from '@/stores/building'
+import { listBuildingCellShapes } from '@/api/building'
 import { FLOOR_COUNT, floorName } from '@/utils/buildingDemo'
 import type { EnvMetric } from '@/utils/envColor'
-import type { CellShapeConfig, GridType } from '@/utils/floorGrid'
+import type { CellShapeConfig } from '@/utils/floorGrid'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -20,55 +21,29 @@ const selectedFloor = ref<number | null>(null)
 const metric = ref<EnvMetric>('temperature')
 
 /**
- * 格子形狀設定輔助函數
- *
- * 用途：為 Building3D 的指定格子設定自訂形狀（三角形、圓柱等）。
- * 支援一次設定多個樓層的同一個格子。
- *
- * @param row    - 格子行號（1-based，1~8，從南到北）
- * @param col    - 格子列號（1-based，1~12，從西到東）
- * @param floors - 要設定的樓層列表（3D 層號）
- *                 1=B2/F, 2=B1/F, 3=G/F, 4=1/F ... 10=7/F, 11=ROOF
- * @param shape  - 形狀類型：'Rect'(長方形) | 'Cylinder'(圓柱) | 'Triangle'(三角形) | 'Hidden'(隱藏不渲染)
- * @param rotation - 旋轉
- * @returns CellShapeConfig[] 設定陣列，可展開傳入 cellShapes
- *
- * 示例：
- *   cellShape(8, 11, [3, 4, 5], 'Triangle')
- *   → 3 樓(G/F)、4 樓(1/F)、5 樓(2/F) 的格子 (8,11) 顯示為三角形
- *
- *   cellShape(5, 5, Array.from({ length: 11 }, (_, i) => i + 1), 'Cylinder')
- *   → 所有 11 層的格子 (5,5) 顯示為圓柱
- */
-function cellShape(
-  row: number,
-  col: number,
-  floors: number[],
-  shape: GridType,
-  rotation: string,
-): CellShapeConfig[] {
-  return floors.map((floor) => ({ row, col, floor, shape, rotation }))
-}
-
-/**
  * 格子形狀設定列表
  *
- * 傳入 Building3D 的 :cell-shapes prop，覆蓋預設的三角形設定。
- * 使用展開運算符 ...cellShape(...) 批次產生設定。
+ * 由 DB（Building_Cell_Shape 表）驅動，透過 GET /api/v1/building/cell-shapes 拉取，
+ * 取代原本前端硬編碼的 cellShape(...) 設定。
+ * 傳入 Building3D 的 :cell-shapes prop，覆蓋預設設定。
  *
  * 注意事項：
- *  - floor 參數為 0 表示「所有樓層」（由 Building3D 內部處理）
+ *  - floor 為 0 表示「所有樓層」（由 Building3D 內部處理）
  *  - 指定具體樓層號則只在該層生效
  *  - 被 shouldExcludeCell 排除的格子不會渲染，設定無效
  */
-const cellShapes = ref<CellShapeConfig[]>([
-     // G/F~4/F：格子 (8,11) 顯示為圓柱
-  ...cellShape(8, 11, [3, 4, 5, 6, 7], 'Triangle', '0,0,0'), // 0,0.785,0
-  ...cellShape(7, 11, [3, 4, 5, 6, 7], 'Rect', '0,0,0'),
-  ...cellShape(7, 12, [3, 4, 5, 6, 7], 'Triangle', '0,0,0'),
-  // ...cellShape(5, 5, [8], 'Cylinder'),              // 示例：5F 的 (5,5) 為圓柱
-  // ...cellShape(3, 3, [3,4,5], 'Hidden'),            // 示例：3~5F 的 (3,3) 隱藏不渲染
-])
+const cellShapes = ref<CellShapeConfig[]>([])
+
+/** 從 DB 拉取格子形狀設定；失敗時保持空陣列（全部顯示預設長方形） */
+async function fetchCellShapes() {
+  try {
+    const { data } = await listBuildingCellShapes()
+    cellShapes.value = data ?? []
+  } catch (err) {
+    console.warn('[BuildingViewer] 無法載入格子形狀設定（Building_Cell_Shape）：', err)
+    cellShapes.value = []
+  }
+}
 
 onMounted(() => {
   // Warm inventory for dashboard metrics
@@ -76,6 +51,8 @@ onMounted(() => {
   // 拉取 WingOnIOT 各樓層真實溫度/濕度 + 設備明細
   store.fetchFloorEnv()
   store.fetchEnvDevices()
+  // 拉取 DB 驅動的格子形狀設定（不阻塞其餘初始化）
+  fetchCellShapes()
   const q = Number(route.query.floor)
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {
     onSelectFloor(q)

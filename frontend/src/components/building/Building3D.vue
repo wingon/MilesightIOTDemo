@@ -32,7 +32,7 @@ const props = defineProps<{
   floorEnv?: Record<number, FloorEnvValue>
   /** 當前著色指標 */
   metric?: EnvMetric
-  /** 自訂格子形狀設定（可選，不傳則使用預設設定） */
+  /** 自訂格子形狀設定（由 DB 驅動，無匹配設定時使用預設長方形） */
   cellShapes?: CellShapeConfig[]
 }>()
 
@@ -61,40 +61,21 @@ const meshesByFloor = new Map<number, THREE.Mesh[]>()
 let buildingGroup: THREE.Group | null = null
 
 /**
- * 預設形狀設定（內建）
- *
- * 當外部未傳入 :cell-shapes prop 時使用此設定。
- * floor=0 表示「所有樓層均適用」。
- *
- * 當前設定：
- *   - (8,11) 和 (7,12) 在所有樓層顯示為三角形（對角線切割效果）
- *   - 這兩個格子構成了建築右下角的斜切邊緣
- */
-const DEFAULT_CELL_SHAPES: CellShapeConfig[] = [
-  { row: 8, col: 11, floor: 0, shape: 'Triangle' },
-  { row: 7, col: 12, floor: 0, shape: 'Triangle' },
-]
-
-/**
  * 查詢指定格子的形狀設定
  *
- * 優先使用外部傳入的 customShapes（:cell-shapes prop），
- * 不存在則回退到 DEFAULT_CELL_SHAPES。
+ * 設定由 DB 驅動（:cell-shapes prop），不存在匹配時回退為預設長方形。
  *
- * @param floor       - 當前樓層（3D 層號 1~11）
- * @param row         - 格子行號（1-based）
- * @param col         - 格子列號（1-based）
- * @param customShapes - 外部傳入的自訂設定（可選）
+ * @param floor - 當前樓層（3D 層號 1~11）
+ * @param row   - 格子行號（1-based）
+ * @param col   - 格子列號（1-based）
  * @returns 匹配的 CellShapeConfig，未找到則回傳 undefined（使用預設長方形）
  */
 function getCellShapeConfig(
   floor: number,
   row: number,
   col: number,
-  customShapes?: CellShapeConfig[],
 ): CellShapeConfig | undefined {
-  const shapes = customShapes ?? DEFAULT_CELL_SHAPES
-  return shapes.find(
+  return props.cellShapes?.find(
     (s) =>
       s.row === row &&
       s.col === col &&
@@ -150,7 +131,7 @@ function rebuildFloors() {
       mats.push(mat)
       
       // 根據設定決定形狀：查詢 cellShapes 或使用預設長方形
-      const shapeConfig = getCellShapeConfig(level, cell.row, cell.col, props.cellShapes)
+      const shapeConfig = getCellShapeConfig(level, cell.row, cell.col)
       const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
       
       // Hidden 類型：跳過渲染，不建立 Mesh

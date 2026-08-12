@@ -654,3 +654,32 @@ class Database:
             )
         )
         return result
+
+    # ------------------------------------------------------------------
+    # 3D 樓棟格子形狀設定（WingOnIOT.Building_Cell_Shape，DB 驅動取代前端硬編碼）
+    # ------------------------------------------------------------------
+
+    def list_cell_shapes(self) -> list[dict[str, Any]]:
+        """啟用中的 3D 樓棟格子形狀設定（WingOnIOT 庫 Building_Cell_Shape 表）。
+
+        欄位名稱與前端 CellShapeConfig 直接對齊（row/col/floor/shape/rotation/color/height），
+        前端無需再做欄位映射。floor=0 表示「所有樓層」。
+        """
+        sql = """
+            SELECT
+                row_no   AS `row`,
+                col_no   AS col,
+                floor_no AS floor,
+                shape,
+                rotation,
+                color,
+                height
+            FROM Building_Cell_Shape
+            WHERE is_enabled = 1
+            ORDER BY sort_order ASC, row_no ASC, col_no ASC, floor_no ASC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(row), ()) for row in rows]
