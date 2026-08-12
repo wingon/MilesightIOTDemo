@@ -6,7 +6,7 @@ import { message } from 'ant-design-vue'
 import FloorModelPanel from '@/components/building/FloorModelPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
 import { useBuildingStore } from '@/stores/building'
-import { FLOOR_COUNT, FLOOR_ROOMS } from '@/utils/buildingDemo'
+import { FLOOR_COUNT, FLOOR_ROOMS, floorName } from '@/utils/buildingDemo'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -104,7 +104,7 @@ const roomLabel = computed(() => {
   <div v-if="floorValid" class="floor-viewer">
     <div class="page-intro">
       <div>
-        <h1>{{ t('building.floorTitle', { n: floor }) }}</h1>
+        <h1>{{ t('building.floorTitle', { n: floorName(floor) }) }}</h1>
         <p>{{ t('building.floorSubtitle') }}</p>
       </div>
       <div class="intro-actions">

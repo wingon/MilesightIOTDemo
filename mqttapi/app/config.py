@@ -33,6 +33,12 @@ class Settings:
     db_user: str
     db_password: str
     db_name: str
+    # WingOnIOT 环境监测库（默认同一 MySQL 实例，仅库名不同）
+    wingon_db_host: str
+    wingon_db_port: int
+    wingon_db_user: str
+    wingon_db_password: str
+    wingon_db_name: str
 
 
 def load_settings() -> Settings:
@@ -54,4 +60,10 @@ def load_settings() -> Settings:
         db_user=os.getenv("DB_USER", "root"),
         db_password=os.getenv("DB_PASSWORD", "root"),
         db_name=os.getenv("DB_NAME", "milesight"),
+        # WingOnIOT 库默认复用同一实例的账号，仅库名不同，可单独覆盖
+        wingon_db_host=os.getenv("WINGON_DB_HOST", "127.0.0.1"),
+        wingon_db_port=int(os.getenv("WINGON_DB_PORT", "3306")),
+        wingon_db_user=os.getenv("WINGON_DB_USER", "root"),
+        wingon_db_password=os.getenv("WINGON_DB_PASSWORD", "root"),
+        wingon_db_name=os.getenv("WINGON_DB_NAME", "WingOnIOT"),
     )

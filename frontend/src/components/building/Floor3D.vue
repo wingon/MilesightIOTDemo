@@ -6,19 +6,37 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import {
   buildCellToRoomMap,
   CELL_SIZE,
-  FLOOR_ROOMS,
   INTERIOR_CELLS,
   cellToWorld,
   getRoomById,
+  shouldExcludeCell,
   type Cell,
   type DeviceType,
 } from '@/utils/buildingDemo'
+import {
+  CYLINDER_RADIUS,
+  DEFAULT_GRIDDATA,
+  FALLBACK_COLOR,
+  RECT_LENGTH,
+  RECT_WIDTH,
+  ROOM_H,
+  createCylinderGeometry,
+  createRectGeometry,
+  decorationGeometry,
+  disposeGeometryCache,
+  gridCellToWorld,
+  parseRotation,
+  type FloorGridData,
+} from '@/utils/floorGrid'
 
 const props = defineProps<{
+  level: number
   selectedRoom: string | null
   roomDevices: Record<string, DeviceType[]>
   layout: Record<string, Cell[]>
   editMode: boolean
+  /** griddata 楼层布局；缺省用 DEFAULT_GRIDDATA */
+  gridData?: FloorGridData
 }>()
 
 const emit = defineEmits<{
@@ -44,17 +62,23 @@ let pickMeshes: THREE.Mesh[] = []
 const meshesByKey = new Map<string, THREE.Mesh[]>()
 let floorGroup: THREE.Group | null = null
 
-const ROOM_H = 1.35
 const CORRIDOR_H = 0.18
 const SLAB_H = 0.12
 
-let roomGeo: THREE.BoxGeometry | null = null
-let corridorGeo: THREE.BoxGeometry | null = null
-let slabGeo: THREE.BoxGeometry | null = null
+/** 共享轮廓线缓存（同一 geometry 只派生一次 EdgesGeometry） */
+const edgesCache = new Map<string, THREE.EdgesGeometry>()
 
-function hexColor(hex: string) {
-  return new THREE.Color(hex)
+function edgesGeometryFor(geometry: THREE.BufferGeometry): THREE.EdgesGeometry {
+  let edges = edgesCache.get(geometry.uuid)
+  if (!edges) {
+    edges = new THREE.EdgesGeometry(geometry)
+    edgesCache.set(geometry.uuid, edges)
+  }
+  return edges
 }
+
+/** ground 圆盘几何：模块级缓存，避免每次 rebuild 新建泄漏 */
+let groundGeo: THREE.CircleGeometry | null = null
 
 function disposeObject(obj: THREE.Object3D) {
   obj.traverse((child) => {
@@ -63,10 +87,10 @@ function disposeObject(obj: THREE.Object3D) {
       const mat = mesh.material
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
       else mat?.dispose()
+      return
     }
     const line = child as THREE.LineSegments
     if (line.isLineSegments) {
-      line.geometry?.dispose()
       const mat = line.material as THREE.Material
       mat?.dispose()
     }
@@ -85,12 +109,15 @@ function clearFloorGroup() {
 }
 
 function rebuildScene() {
-  if (!floorGroup || !roomGeo || !corridorGeo || !slabGeo) return
+  if (!floorGroup) return
   clearFloorGroup()
 
+  const gridData = props.gridData ?? DEFAULT_GRIDDATA
   const cellToRoom = buildCellToRoomMap(props.layout)
+  const slabGeo = createRectGeometry(CELL_SIZE * 0.98, SLAB_H, CELL_SIZE * 0.98)
 
   for (const cell of INTERIOR_CELLS) {
+    if (shouldExcludeCell(props.level, cell.row, cell.col)) continue
     const mat = new THREE.MeshStandardMaterial({
       color: 0xd8d2c8,
       roughness: 0.9,
@@ -103,68 +130,68 @@ function rebuildScene() {
     floorGroup.add(mesh)
   }
 
-  for (const cell of INTERIOR_CELLS) {
-    const roomId = cellToRoom.get(`${cell.row}-${cell.col}`) ?? null
-    const { x, z } = cellToWorld(cell.row, cell.col)
+  // 格子：griddata 决定放什么（type）、放哪（xAxis/yAxis）、怎么转（rotate）
+  // 注：DEFAULT_GRIDDATA 是 floor '8' 的演示数据；接入真实数据后请按楼层传入对应 gridData
+  for (const cell of gridData.griddata) {
+    const row = Number(cell.xAxis) + 1
+    const col = Number(cell.yAxis) + 1
+    if (!Number.isFinite(row) || !Number.isFinite(col)) continue
+    const roomId = cellToRoom.get(`${row}-${col}`) ?? null
+    const isRoom = !!roomId
 
-    if (roomId) {
-      const room = getRoomById(roomId)!
-      const mat = new THREE.MeshStandardMaterial({
-        color: hexColor(room.color),
-        roughness: 0.45,
-        metalness: 0.12,
-        transparent: true,
-        opacity: 0.92,
-      })
-      const mesh = new THREE.Mesh(roomGeo, mat)
-      mesh.position.set(x, SLAB_H + ROOM_H / 2, z)
-      mesh.castShadow = true
-      mesh.receiveShadow = true
-      mesh.userData.roomId = roomId
-      mesh.userData.row = cell.row
-      mesh.userData.col = cell.col
-      mesh.userData.kind = 'room'
-      floorGroup.add(mesh)
-      pickMeshes.push(mesh)
-      const list = meshesByKey.get(roomId) || []
-      list.push(mesh)
-      meshesByKey.set(roomId, list)
+    // 房间格高块、走廊格矮块；几何按尺寸共享，不重复 new
+    const height = isRoom ? ROOM_H : CORRIDOR_H
+    const geometry =
+      cell.type === 'Cylinder'
+        ? createCylinderGeometry(CYLINDER_RADIUS, height)
+        : createRectGeometry(RECT_LENGTH, RECT_WIDTH, height)
 
-      const edges = new THREE.EdgesGeometry(roomGeo)
+    const baseColor = isRoom
+      ? getRoomById(roomId)?.color ?? FALLBACK_COLOR
+      : props.editMode
+        ? '#d6e4ff'
+        : '#f2efe8'
+    const mat = decorationGeometry({ fixedColor: baseColor })
+
+    const { x, z } = gridCellToWorld(cell)
+    const baseY = SLAB_H + height / 2
+    const mesh = new THREE.Mesh(geometry, mat)
+    mesh.rotation.copy(parseRotation(cell.rotate))
+    mesh.position.set(x, baseY, z)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    mesh.userData.roomId = roomId
+    mesh.userData.row = row
+    mesh.userData.col = col
+    mesh.userData.kind = isRoom ? 'room' : 'corridor'
+    mesh.userData.baseColor = new THREE.Color(baseColor)
+    mesh.userData.baseY = baseY
+    floorGroup.add(mesh)
+    pickMeshes.push(mesh)
+
+    const key = roomId ?? '__corridor__'
+    const list = meshesByKey.get(key) || []
+    list.push(mesh)
+    meshesByKey.set(key, list)
+
+    // 房间格轮廓线：仅 Rect（圆柱是光滑体，不画线框）
+    if (isRoom && cell.type === 'Rect') {
       const line = new THREE.LineSegments(
-        edges,
+        edgesGeometryFor(geometry),
         new THREE.LineBasicMaterial({
-          color: props.editMode && props.selectedRoom === roomId ? 0xffffff : 0xffffff,
+          color: 0xffffff,
           transparent: true,
           opacity: props.editMode ? 0.65 : 0.35,
         }),
       )
       line.position.copy(mesh.position)
+      line.rotation.copy(mesh.rotation)
       floorGroup.add(line)
-    } else {
-      const mat = new THREE.MeshStandardMaterial({
-        color: props.editMode ? 0xe8f0ff : 0xf2efe8,
-        roughness: 0.85,
-        metalness: 0.05,
-      })
-      const mesh = new THREE.Mesh(corridorGeo, mat)
-      mesh.position.set(x, SLAB_H + CORRIDOR_H / 2, z)
-      mesh.receiveShadow = true
-      mesh.userData.roomId = null
-      mesh.userData.row = cell.row
-      mesh.userData.col = cell.col
-      mesh.userData.kind = 'corridor'
-      floorGroup.add(mesh)
-      pickMeshes.push(mesh)
-      const key = '__corridor__'
-      const list = meshesByKey.get(key) || []
-      list.push(mesh)
-      meshesByKey.set(key, list)
     }
   }
 
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(22, 64),
+    groundGeo ?? (groundGeo = new THREE.CircleGeometry(22, 64)),
     new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.95 }),
   )
   ground.rotation.x = -Math.PI / 2
@@ -179,26 +206,27 @@ function updateAppearance() {
   const selected = props.selectedRoom
   const hovered = hoveredRoom.value
 
-  for (const room of FLOOR_ROOMS) {
-    const meshes = meshesByKey.get(room.id) || []
-    const isActive = selected === room.id || hovered === room.id
-    const dimOthers = !!(selected && selected !== room.id)
+  for (const [key, meshes] of meshesByKey) {
+    const isRoom = key !== '__corridor__'
+    const isActive = isRoom && (selected === key || hovered === key)
+    const dimOthers = isRoom && !!selected && selected !== key
     for (const mesh of meshes) {
       const mat = mesh.material as THREE.MeshStandardMaterial
-      mat.color = hexColor(room.color)
+      const baseColor = (mesh.userData.baseColor as THREE.Color) ?? new THREE.Color(0xd8d2c8)
+      mat.color = baseColor
+      if (!isRoom) {
+        // 走廊：颜色已由 rebuildScene 按 editMode 算好，仅复位
+        mat.opacity = 1
+        mat.emissive = new THREE.Color(0x000000)
+        mat.emissiveIntensity = 0
+        continue
+      }
       mat.opacity = dimOthers && !isActive ? 0.28 : 0.92
-      mat.emissive = new THREE.Color(isActive ? room.color : 0x000000)
-      mat.emissiveIntensity = hovered === room.id ? 0.45 : selected === room.id ? 0.28 : 0
-      const baseY = SLAB_H + ROOM_H / 2
+      mat.emissive = new THREE.Color(isActive ? baseColor : 0x000000)
+      mat.emissiveIntensity = hovered === key ? 0.45 : selected === key ? 0.28 : 0
+      const baseY = (mesh.userData.baseY as number) ?? SLAB_H + ROOM_H / 2
       mesh.position.y = isActive ? baseY + 0.12 : baseY
     }
-  }
-
-  // Edit mode: highlight corridors as clickable
-  const corridors = meshesByKey.get('__corridor__') || []
-  for (const mesh of corridors) {
-    const mat = mesh.material as THREE.MeshStandardMaterial
-    mat.color = new THREE.Color(props.editMode ? 0xd6e4ff : 0xf2efe8)
   }
 }
 
@@ -340,10 +368,6 @@ onMounted(() => {
   const w = host.value.clientWidth
   const h = host.value.clientHeight
 
-  roomGeo = new THREE.BoxGeometry(CELL_SIZE * 0.92, ROOM_H, CELL_SIZE * 0.92)
-  corridorGeo = new THREE.BoxGeometry(CELL_SIZE * 0.96, CORRIDOR_H, CELL_SIZE * 0.96)
-  slabGeo = new THREE.BoxGeometry(CELL_SIZE * 0.98, SLAB_H, CELL_SIZE * 0.98)
-
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0xf0eee9)
   scene.fog = new THREE.Fog(0xf0eee9, 28, 55)
@@ -402,6 +426,12 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => props.gridData,
+  () => rebuildScene(),
+  { deep: true },
+)
+
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
   window.removeEventListener('resize', onResize)
@@ -411,9 +441,11 @@ onBeforeUnmount(() => {
   renderer?.domElement.removeEventListener('pointerleave', onPointerLeave)
   controls?.dispose()
   clearFloorGroup()
-  roomGeo?.dispose()
-  corridorGeo?.dispose()
-  slabGeo?.dispose()
+  disposeGeometryCache()
+  for (const edges of edgesCache.values()) edges.dispose()
+  edgesCache.clear()
+  groundGeo?.dispose()
+  groundGeo = null
   renderer?.dispose()
   if (renderer?.domElement.parentElement) {
     renderer.domElement.parentElement.removeChild(renderer.domElement)

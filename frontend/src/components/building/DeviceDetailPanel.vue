@@ -3,11 +3,13 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import ChartPanel from '@/components/ChartPanel.vue'
+import type { EnvironmentDevice } from '@/api/environment'
 import {
   buildAm319Option,
   buildCt103Option,
   buildVs135Option,
   FLOOR_ROOMS,
+  floorName,
   latestSnapshot,
   type DeviceType,
 } from '@/utils/buildingDemo'
@@ -37,6 +39,8 @@ const props = defineProps<{
   roomLabel?: string | null
   /** Unassigned floor inventory for dropdown */
   assignableOptions?: AssignableOption[]
+  /** WingOnIOT 真实环境设备（传入且非空时优先展示，替代 demo 设备与图表） */
+  envDevices?: EnvironmentDevice[]
 }>()
 
 const emit = defineEmits<{
@@ -60,9 +64,9 @@ const title = computed(() => {
       t('building.roomN', {
         n: FLOOR_ROOMS.find((r) => r.id === props.roomKey)?.index ?? props.roomKey,
       })
-    return t('building.selectionRoom', { floor: props.floor, room: label })
+    return t('building.selectionRoom', { floor: floorName(props.floor), room: label })
   }
-  return t('building.selectionFloor', { floor: props.floor })
+  return t('building.selectionFloor', { floor: floorName(props.floor) })
 })
 
 const deviceBlocks = computed(() => {
@@ -111,6 +115,12 @@ const dropdownOptions = computed(() =>
   })),
 )
 
+/** WingOnIOT 真实设备（envDevices 传入时优先） */
+const envBlocks = computed(() => props.envDevices || [])
+
+/** 真实设备模式：envDevices 已传入即强制启用；无设备时显示空状态，不回退 demo */
+const envMode = computed(() => props.envDevices !== undefined)
+
 watch(
   () => props.assignableOptions,
   (opts) => {
@@ -130,6 +140,17 @@ watch(
     }
     if (!activeId.value || !blocks.some((b) => b.id === activeId.value)) {
       activeId.value = blocks[0].id
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  envBlocks,
+  (blocks) => {
+    if (!blocks.length) return
+    if (!activeId.value || !blocks.some((b) => b.sn === activeId.value)) {
+      activeId.value = blocks[0].sn
     }
   },
   { immediate: true },
@@ -161,7 +182,9 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
       <h2>{{ t('building.devicePanel') }}</h2>
       <p>{{ title }}</p>
       <div class="head-meta">
-        <a-tag v-if="devices.length" color="gold">{{ devices.length }} {{ t('building.devices') }}</a-tag>
+        <a-tag v-if="(envMode ? envBlocks.length : devices.length) > 0" color="gold">
+          {{ envBlocks.length || devices.length }} {{ t('building.devices') }}
+        </a-tag>
         <a-tag v-else>{{ t('building.noDevices') }}</a-tag>
         <a-button
           v-if="canBack"
@@ -179,7 +202,8 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
           {{ t('building.enterFloor') }}
         </a-button>
       </div>
-      <div class="demo-badge">{{ t('building.demoData') }}</div>
+      <div v-if="envMode" class="live-badge">{{ t('building.liveData') }}</div>
+      <div v-else class="demo-badge">{{ t('building.demoData') }}</div>
     </div>
 
     <div
@@ -214,75 +238,143 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
       <div class="nav">
         <div class="nav-title">{{ t('building.deviceList') }}</div>
 
-        <div v-if="!deviceBlocks.length" class="nav-empty">
-          {{ roomKey ? t('building.roomNoDevices') : t('building.assignHint') }}
-        </div>
-
-        <div
-          v-for="block in deviceBlocks"
-          :key="block.id"
-          class="nav-item"
-          :class="{ active: activeId === block.id }"
-          role="button"
-          tabindex="0"
-          @click="scrollToDevice(block.id)"
-          @keydown.enter="scrollToDevice(block.id)"
-        >
-          <div class="nav-main">
-            <div class="nav-type">{{ block.type }}</div>
-            <div class="nav-sub">{{ block.sn }}</div>
-            <div class="nav-sub dim">{{ block.roomLabel }}</div>
+        <template v-if="envMode">
+          <div v-if="!envBlocks.length" class="nav-empty">
+            {{ t('building.envNoDevices') }}
           </div>
-          <button
-            v-if="manageable"
-            type="button"
-            class="nav-remove"
-            :title="t('building.removeDevice')"
-            @click="onRemove(block, $event)"
+          <div
+            v-for="dev in envBlocks"
+            :key="dev.sn"
+            class="nav-item"
+            :class="{ active: activeId === dev.sn }"
+            role="button"
+            tabindex="0"
+            @click="scrollToDevice(dev.sn)"
+            @keydown.enter="scrollToDevice(dev.sn)"
           >
-            <DeleteOutlined />
-          </button>
-        </div>
+            <div class="nav-main">
+              <div class="nav-type">{{ dev.deviceName || dev.name || dev.sn }}</div>
+              <div class="nav-sub">{{ dev.sn }}</div>
+              <div class="nav-sub dim">{{ t('building.envLocation') }}: {{ dev.location || '-' }}</div>
+            </div>
+          </div>
+        </template>
 
-        <a-button
-          v-if="canEnter && !devices.length"
-          type="primary"
-          size="small"
-          block
-          style="margin-top: 12px"
-          @click="emit('enterFloor')"
-        >
-          {{ t('building.enterFloor') }}
-        </a-button>
+        <template v-else>
+          <div v-if="!deviceBlocks.length" class="nav-empty">
+            {{ roomKey ? t('building.roomNoDevices') : t('building.assignHint') }}
+          </div>
+
+          <div
+            v-for="block in deviceBlocks"
+            :key="block.id"
+            class="nav-item"
+            :class="{ active: activeId === block.id }"
+            role="button"
+            tabindex="0"
+            @click="scrollToDevice(block.id)"
+            @keydown.enter="scrollToDevice(block.id)"
+          >
+            <div class="nav-main">
+              <div class="nav-type">{{ block.type }}</div>
+              <div class="nav-sub">{{ block.sn }}</div>
+              <div class="nav-sub dim">{{ block.roomLabel }}</div>
+            </div>
+            <button
+              v-if="manageable"
+              type="button"
+              class="nav-remove"
+              :title="t('building.removeDevice')"
+              @click="onRemove(block, $event)"
+            >
+              <DeleteOutlined />
+            </button>
+          </div>
+
+          <a-button
+            v-if="canEnter && !devices.length"
+            type="primary"
+            size="small"
+            block
+            style="margin-top: 12px"
+            @click="emit('enterFloor')"
+          >
+            {{ t('building.enterFloor') }}
+          </a-button>
+        </template>
       </div>
 
       <div ref="chartPane" class="charts">
-        <div v-if="!deviceBlocks.length" class="empty charts-empty">
-          <p>{{ roomKey ? t('building.roomNoDevices') : t('building.assignHint') }}</p>
-        </div>
-        <section
-          v-for="block in deviceBlocks"
-          :key="block.id"
-          class="device-card"
-          :class="{ active: activeId === block.id }"
-          :data-device-id="block.id"
-        >
-          <div class="device-head">
-            <div>
-              <div class="device-type">{{ block.type }}</div>
-              <div class="device-id">{{ block.sn }}</div>
-              <div class="device-room">{{ block.roomLabel }}</div>
-            </div>
-            <a-tag>{{ t('building.online') }}</a-tag>
+        <template v-if="envMode">
+          <div v-if="!envBlocks.length" class="empty charts-empty">
+            <p>{{ t('building.envNoDevices') }}</p>
           </div>
-          <div class="metrics">
-            <div v-for="m in block.snapshot" :key="m.label" class="metric">
-              <span class="m-label">{{ m.label }}</span>
-              <span class="m-value">{{ m.value }}</span>
+          <section
+            v-for="dev in envBlocks"
+            :key="dev.sn"
+            class="device-card env-card"
+            :class="{ active: activeId === dev.sn }"
+            :data-device-id="dev.sn"
+          >
+            <div class="device-head">
+              <div>
+                <div class="device-type">{{ dev.deviceName || dev.name || dev.sn }}</div>
+                <div class="device-id">{{ dev.sn }}</div>
+                <div class="device-room">
+                  {{ t('building.envLocation') }}: {{ dev.location || '-' }} ·
+                  {{ t('building.envModel') }}: {{ dev.model || '-' }}
+                </div>
+              </div>
+              <a-tag>{{ dev.floor || '-' }}</a-tag>
             </div>
+            <div class="metrics">
+              <div class="metric">
+                <span class="m-label">{{ t('dashboard.charts.temperature') }}</span>
+                <span class="m-value">
+                  {{ dev.temperatureMedian != null ? `${dev.temperatureMedian}°C` : '--' }}
+                </span>
+              </div>
+              <div class="metric">
+                <span class="m-label">{{ t('dashboard.charts.humidity') }}</span>
+                <span class="m-value">
+                  {{ dev.humidityMedian != null ? `${dev.humidityMedian}%RH` : '--' }}
+                </span>
+              </div>
+            </div>
+            <div class="env-updated">
+              {{ dev.toDateTime ? t('building.envUpdatedAt', { t: dev.toDateTime }) : t('building.envNoReading') }}
+            </div>
+          </section>
+        </template>
+
+        <template v-else>
+          <div v-if="!deviceBlocks.length" class="empty charts-empty">
+            <p>{{ roomKey ? t('building.roomNoDevices') : t('building.assignHint') }}</p>
           </div>
-          <ChartPanel :option="block.option" height="220px" />
-        </section>
+          <section
+            v-for="block in deviceBlocks"
+            :key="block.id"
+            class="device-card"
+            :class="{ active: activeId === block.id }"
+            :data-device-id="block.id"
+          >
+            <div class="device-head">
+              <div>
+                <div class="device-type">{{ block.type }}</div>
+                <div class="device-id">{{ block.sn }}</div>
+                <div class="device-room">{{ block.roomLabel }}</div>
+              </div>
+              <a-tag>{{ t('building.online') }}</a-tag>
+            </div>
+            <div class="metrics">
+              <div v-for="m in block.snapshot" :key="m.label" class="metric">
+                <span class="m-label">{{ m.label }}</span>
+                <span class="m-value">{{ m.value }}</span>
+              </div>
+            </div>
+            <ChartPanel :option="block.option" height="220px" />
+          </section>
+        </template>
       </div>
     </div>
   </aside>
@@ -352,6 +444,18 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   text-transform: uppercase;
   color: #a88955;
   border: 1px solid rgba(196, 165, 116, 0.55);
+  padding: 2px 8px;
+}
+
+.live-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #3d7a5a;
+  border: 1px solid rgba(61, 122, 90, 0.5);
   padding: 2px 8px;
 }
 
@@ -550,6 +654,16 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   font-size: 15px;
   font-weight: 650;
   color: #0d0d0d;
+}
+
+.env-updated {
+  font-size: 11px;
+  color: #9a9a9a;
+  padding-top: 2px;
+}
+
+.env-card .device-room {
+  color: #6b6b6b;
 }
 
 @media (max-width: 700px) {

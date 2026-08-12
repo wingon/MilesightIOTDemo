@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -8,12 +8,31 @@ import {
   FLOOR_COUNT,
   INTERIOR_CELLS,
   cellToWorld,
+  floorName,
+  shouldExcludeCell,
 } from '@/utils/buildingDemo'
+import {
+  envColorFor,
+  envRange,
+  type EnvMetric,
+  type FloorEnvValue,
+} from '@/utils/envColor'
+import {
+  createGeometryByType,
+  isHiddenType,
+  type CellShapeConfig,
+  type GridType,
+} from '@/utils/floorGrid'
 import { brand } from '@/theme/colorConfig'
 
 const props = defineProps<{
   selectedFloor: number | null
-  floorDeviceCounts?: Record<number, number>
+  /** WingOnIOT 各樓層真實溫度/濕度（key 為 3D 樓棟樓層號） */
+  floorEnv?: Record<number, FloorEnvValue>
+  /** 當前著色指標 */
+  metric?: EnvMetric
+  /** 自訂格子形狀設定（可選，不傳則使用預設設定） */
+  cellShapes?: CellShapeConfig[]
 }>()
 
 const emit = defineEmits<{
@@ -40,12 +59,64 @@ let floorMeshes: THREE.Mesh[] = []
 const meshesByFloor = new Map<number, THREE.Mesh[]>()
 let buildingGroup: THREE.Group | null = null
 
+/**
+ * 預設形狀設定（內建）
+ *
+ * 當外部未傳入 :cell-shapes prop 時使用此設定。
+ * floor=0 表示「所有樓層均適用」。
+ *
+ * 當前設定：
+ *   - (8,11) 和 (7,12) 在所有樓層顯示為三角形（對角線切割效果）
+ *   - 這兩個格子構成了建築右下角的斜切邊緣
+ */
+const DEFAULT_CELL_SHAPES: CellShapeConfig[] = [
+  { row: 8, col: 11, floor: 0, shape: 'Triangle' },
+  { row: 7, col: 12, floor: 0, shape: 'Triangle' },
+]
+
+/**
+ * 查詢指定格子的形狀設定
+ *
+ * 優先使用外部傳入的 customShapes（:cell-shapes prop），
+ * 不存在則回退到 DEFAULT_CELL_SHAPES。
+ *
+ * @param floor       - 當前樓層（3D 層號 1~11）
+ * @param row         - 格子行號（1-based）
+ * @param col         - 格子列號（1-based）
+ * @param customShapes - 外部傳入的自訂設定（可選）
+ * @returns 匹配的 CellShapeConfig，未找到則回傳 undefined（使用預設長方形）
+ */
+function getCellShapeConfig(
+  floor: number,
+  row: number,
+  col: number,
+  customShapes?: CellShapeConfig[],
+): CellShapeConfig | undefined {
+  const shapes = customShapes ?? DEFAULT_CELL_SHAPES
+  return shapes.find(
+    (s) =>
+      s.row === row &&
+      s.col === col &&
+      (s.floor === 0 || s.floor === floor),
+  )
+}
+
 const FLOOR_H = 0.76
 const FLOOR_GAP = 0.08
 const SLAB = FLOOR_H + FLOOR_GAP
 
 function floorColor(level: number, selected: number | null, hovered: number | null) {
   if (selected === level || hovered === level) return new THREE.Color(brand.primary)
+  // WingOnIOT 真實資料按當前指標著色（溫度/濕度色帶）
+  const env = props.floorEnv?.[level]
+  const metric = props.metric ?? 'temperature'
+  const value = env ? (metric === 'humidity' ? env.humidity : env.temperature) : null
+  if (value != null) {
+    const [min, max] = envRange(props.floorEnv, metric)
+    const color = envColorFor(metric, value, min, max)
+    if (color) return new THREE.Color(color)
+  }
+  // 無資料樓層保持預設漸變
   const t = level / Math.max(1, FLOOR_COUNT - 1)
   return new THREE.Color().setHSL(0.08, 0.12, 0.22 + t * 0.28)
 }
@@ -56,7 +127,8 @@ function rebuildFloors() {
   floorMeshes = []
   meshesByFloor.clear()
 
-  const cellGeo = new THREE.BoxGeometry(CELL_SIZE * 0.96, FLOOR_H, CELL_SIZE * 0.96)
+  const cellSize = CELL_SIZE * 0.96
+  const cellGeo = new THREE.BoxGeometry(cellSize, FLOOR_H, cellSize) as THREE.BufferGeometry
 
   for (let i = 0; i < FLOOR_COUNT; i++) {
     const level = i + 1
@@ -65,6 +137,8 @@ function rebuildFloors() {
     const levelMeshes: THREE.Mesh[] = []
 
     for (const cell of INTERIOR_CELLS) {
+      if (shouldExcludeCell(level, cell.row, cell.col)) continue
+      
       const mat = new THREE.MeshStandardMaterial({
         color: floorColor(level, props.selectedFloor, hoveredFloor.value),
         metalness: 0.12,
@@ -73,7 +147,20 @@ function rebuildFloors() {
         opacity: 0.95,
       })
       mats.push(mat)
-      const mesh = new THREE.Mesh(cellGeo, mat)
+      
+      // 根據設定決定形狀：查詢 cellShapes 或使用預設長方形
+      const shapeConfig = getCellShapeConfig(level, cell.row, cell.col, props.cellShapes)
+      const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
+      
+      // Hidden 類型：跳過渲染，不建立 Mesh
+      if (isHiddenType(shapeType)) continue
+      
+      // 長方形復用共享的 cellGeo，其他形狀按需建立（有幾何快取）
+      const geo = shapeType === 'Rect'
+        ? cellGeo
+        : createGeometryByType(shapeType, cellSize, FLOOR_H)
+      
+      const mesh = new THREE.Mesh(geo, mat)
       const { x, z } = cellToWorld(cell.row, cell.col)
       mesh.position.set(x, yBase + FLOOR_H / 2, z)
       mesh.userData.floor = level
@@ -123,7 +210,8 @@ function updateFloorAppearance() {
 }
 
 function deviceCountFor(floor: number) {
-  return props.floorDeviceCounts?.[floor] ?? 0
+  // WingOnIOT 真實設備數（無該層資料為 0），不顯示 demo 計數
+  return props.floorEnv?.[floor]?.deviceCount ?? 0
 }
 
 function updatePointer(ev: PointerEvent) {
@@ -211,7 +299,7 @@ onMounted(() => {
   scene.fog = new THREE.Fog(0xf7f7f5, 55, 120)
 
   camera = new THREE.PerspectiveCamera(42, w / Math.max(1, h), 0.1, 220)
-  camera.position.set(28, 38, 32)
+  camera.position.set(18, 13, 22)
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -221,10 +309,10 @@ onMounted(() => {
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
-  controls.target.set(0, (FLOOR_COUNT * SLAB) / 3, 0)
+  controls.target.set(0, (FLOOR_COUNT * SLAB) / 2, 0)
   controls.maxPolarAngle = Math.PI * 0.48
-  controls.minDistance = 14
-  controls.maxDistance = 95
+  controls.minDistance = 8
+  controls.maxDistance = 60
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0xb0a090, 0.85))
   const dir = new THREE.DirectionalLight(0xfff5e6, 1.05)
@@ -251,6 +339,40 @@ watch(
   () => props.selectedFloor,
   () => updateFloorAppearance(),
 )
+
+// 真實資料/指標變化時重新整理樓層顏色
+watch(
+  () => props.floorEnv,
+  () => updateFloorAppearance(),
+  { deep: true },
+)
+watch(
+  () => props.metric,
+  () => updateFloorAppearance(),
+)
+
+// 格子形狀設定變化時重建整個樓層（深比較，新增/刪除設定均觸發）
+watch(
+  () => props.cellShapes,
+  () => rebuildFloors(),
+  { deep: true },
+)
+
+// 圖例（當前指標色帶）
+const legendRange = computed(() => envRange(props.floorEnv, props.metric ?? 'temperature'))
+const legendUnit = computed(() => (props.metric === 'humidity' ? '%RH' : '°C'))
+const legendLabel = computed(() =>
+  props.metric === 'humidity' ? t('building.metricHumidity') : t('building.metricTemperature'),
+)
+const LEGEND_CELLS = 10
+
+/** 圖例色塊顏色 —— 與 3D 樓層同源（envColorFor 取樣） */
+function legendCellColor(i: number) {
+  const [min, max] = legendRange.value
+  const t = (i - 0.5) / LEGEND_CELLS
+  const value = min + t * (max - min)
+  return envColorFor(props.metric ?? 'temperature', value, min, max) ?? '#d9d5cc'
+}
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
@@ -279,10 +401,30 @@ onBeforeUnmount(() => {
       class="floor-toast"
       :style="toastStyle"
     >
-      <div class="toast-level">{{ t('building.level', { n: hoveredFloor }) }}</div>
+      <div class="toast-level">{{ t('building.level', { n: floorName(hoveredFloor ?? 0) }) }}</div>
       <div class="toast-devices">
         {{ t('building.toastDevices', { n: deviceCountFor(hoveredFloor ?? 0) }) }}
       </div>
+    </div>
+    <div class="env-legend">
+      <div class="legend-head">
+        <span class="legend-title">{{ legendLabel }}</span>
+        <span class="legend-unit">{{ legendUnit }}</span>
+        <span class="legend-live" aria-hidden="true" />
+      </div>
+      <div class="legend-bar" role="img" :aria-label="`${legendLabel} · ${legendRange[0]} – ${legendRange[1]} ${legendUnit}`">
+        <span
+          v-for="i in LEGEND_CELLS"
+          :key="i"
+          class="legend-cell"
+          :style="{ background: legendCellColor(i) }"
+        />
+      </div>
+      <div class="legend-scale" aria-hidden="true">
+        <span>{{ legendRange[0] }}</span>
+        <span>{{ legendRange[1] }}</span>
+      </div>
+      <p class="legend-note">{{ t('building.envNoData') }}</p>
     </div>
   </div>
 </template>
@@ -333,5 +475,119 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.82);
+}
+
+.env-legend {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: 12px;
+  min-width: 150px;
+  padding: 10px 12px 9px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.72);
+  border: 1px solid rgba(196, 165, 116, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+  animation: legend-in 240ms ease-out;
+}
+
+.legend-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.legend-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+.legend-unit {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: #d4b88a;
+}
+
+.legend-live {
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  align-self: center;
+  border-radius: 50%;
+  background: #c4a574;
+  box-shadow: 0 0 0 3px rgba(196, 165, 116, 0.22);
+  animation: legend-pulse 2.4s ease-in-out infinite;
+}
+
+.legend-bar {
+  display: flex;
+  height: 8px;
+  margin: 7px 0 5px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.legend-cell {
+  flex: 1;
+  height: 100%;
+}
+
+.legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.legend-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes legend-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes legend-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(196, 165, 116, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(196, 165, 116, 0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .env-legend {
+    animation: none;
+  }
+  .legend-live {
+    animation: none;
+  }
 }
 </style>

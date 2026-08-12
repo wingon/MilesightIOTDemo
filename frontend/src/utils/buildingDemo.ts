@@ -5,7 +5,24 @@ export type DeviceType = 'CT103' | 'AM319' | 'VS135'
 
 export const DEVICE_TYPES: DeviceType[] = ['CT103', 'AM319', 'VS135']
 
-export const FLOOR_COUNT = 30
+/**
+ * 楼层数按建筑剖面图（SECTION A-A）：
+ * 地下 2 层（B2/F、B1/F）+ 地上 8 层（G/F、1/F…7/F）+ 屋顶层（ROOF）= 11 层。
+ * 3D 层号 1..11 自下而上：1→B2/F、2→B1/F、3→G/F、4→1/F … 10→7/F、11→ROOF。
+ */
+export const FLOOR_COUNT = 11
+/** 地下层数（位于 3D 楼栋底部） */
+export const BASEMENT_COUNT = 2
+/** 地面层（G/F）对应的 3D 层号 */
+export const GROUND_LEVEL = BASEMENT_COUNT + 1
+
+/** 3D 层号 → 建筑图楼层名（1→'B2'、2→'B1'、3→'G'、4→'1' … 10→'7'、11→'ROOF'） */
+export function floorName(level: number): string {
+  if (level <= BASEMENT_COUNT) return `B${BASEMENT_COUNT - level + 1}`
+  if (level === GROUND_LEVEL) return 'G'
+  if (level === FLOOR_COUNT) return 'ROOF'
+  return String(level - GROUND_LEVEL)
+}
 
 export const GRID_ROWS = 8
 export const GRID_COLS = 12
@@ -44,11 +61,9 @@ function rangeCells(row: number, colFrom: number, colTo: number): Cell[] {
 /** Building interior from user outline (1-based). */
 function outlineInteriorCells(): Cell[] {
   const cells: Cell[] = []
-  cells.push(...rangeCells(1, 1, 2))
-  cells.push(...rangeCells(2, 1, 11))
-  cells.push(...rangeCells(3, 1, 12))
-  cells.push(...rangeCells(4, 5, 7))
-  for (let r = 5; r <= 8; r++) cells.push(...rangeCells(r, 6, 12))
+  for (let r = 1; r <= GRID_ROWS; r++) {
+    cells.push(...rangeCells(r, 1, GRID_COLS))
+  }
   return cells
 }
 
@@ -235,6 +250,27 @@ export function isInterior(row: number, col: number) {
   return INTERIOR_CELL_SET.has(cellKey(row, col))
 }
 
+/**
+ * 判断指定楼层的单元格是否应被排除（不渲染）。
+ * 1. G/F（3D层号3）到ROOF（3D层号11），8,12 不渲染
+ * 2. 5F（3D层号8）到ROOF（3D层号11），8,11、7,11、7,12 不渲染
+ */
+export function shouldExcludeCell(level: number, row: number, col: number): boolean {
+  // G/F到ROOF：8,12不渲染
+  if (level >= 3 && level <= FLOOR_COUNT) {
+    if (row === 8 && col === 12) {
+      return true
+    }
+  }
+  // 5F到ROOF：8,11、7,11、7,12不渲染
+  if (level >= 8 && level <= FLOOR_COUNT) {
+    if ((row === 7 || row === 8) && (col === 11 || col === 12)) {
+      return true
+    }
+  }
+  return false
+}
+
 /** Convert grid cell (1-based) to world XZ center (building centered at origin). */
 export function cellToWorld(row: number, col: number) {
   const x = (col - (GRID_COLS + 1) / 2) * CELL_SIZE
@@ -410,8 +446,8 @@ export function newDeviceId() {
   return `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** Demo: at most 3 floors raise environmental / metric alerts */
-export const ENV_ALERT_FLOORS = [7, 15, 22] as const
+/** Demo: at most 3 floors raise environmental / metric alerts (B1/F、2/F、5/F) */
+export const ENV_ALERT_FLOORS = [2, 5, 8] as const
 
 export const CO2_WARN_PPM = 1000
 
@@ -548,16 +584,18 @@ export interface FloorStats {
   /** Either alert type */
   abnormal: boolean
   connectivityRatio: number
-  current: number
-  cableTemp: number
-  co2: number
-  temperature: number
-  humidity: number
-  pm25: number
+  current: number | null
+  cableTemp: number | null
+  co2: number | null
+  /** WingOnIOT 真实温度（无数据为 null，面板显示 --） */
+  temperature: number | null
+  /** WingOnIOT 真实湿度（无数据为 null，面板显示 --） */
+  humidity: number | null
+  pm25: number | null
   co2High: boolean
-  periodIn: number
-  periodOut: number
-  occupancy: number
+  periodIn: number | null
+  periodOut: number | null
+  occupancy: number | null
 }
 
 export function computeFloorStats(

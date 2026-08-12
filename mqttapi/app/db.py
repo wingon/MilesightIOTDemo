@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
@@ -33,6 +34,24 @@ class Database:
             user=self.settings.db_user,
             password=self.settings.db_password,
             database=self.settings.db_name,
+            charset="utf8mb4",
+            cursorclass=DictCursor,
+            autocommit=True,
+        )
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
+    def wingon_connection(self):
+        """WingOnIOT 环境监测库连接（同一 MySQL 实例的另一个库）。"""
+        conn = pymysql.connect(
+            host=self.settings.wingon_db_host,
+            port=self.settings.wingon_db_port,
+            user=self.settings.wingon_db_user,
+            password=self.settings.wingon_db_password,
+            database=self.settings.wingon_db_name,
             charset="utf8mb4",
             cursorclass=DictCursor,
             autocommit=True,
@@ -494,4 +513,144 @@ class Database:
                 item["last_received_at"] = item["last_received_at"].isoformat(sep=" ")
             item["uplink_count"] = int(item.get("uplink_count") or 0)
             result.append(item)
+        return result
+
+    # ------------------------------------------------------------------
+    # WingOnIOT 环境监测（Environment_Device / Environmental_Monitoring）
+    # ------------------------------------------------------------------
+
+    #: 当前建筑最大地下层编号（如 B2/F 为最深 → 2）。
+    #: 3D 层号自下而上：B2/F→1、B1/F→2、G/F→3、1/F→4 … 7/F→10（剖面图：地下 2 层 + 地上 8 层）
+    B_FLOOR_BASE = 2
+
+    @staticmethod
+    def floor_to_level(floor: str | None) -> int | None:
+        """把 WingOnIOT 楼层字符串映射为 3D 楼栋层号。
+
+        - 'B1/F'、'B2/F' → 2、1（地下层从下往上压到楼栋底部）
+        - 'G/F' → 3（地面层）
+        - '4/F'、'5/F' → 7、8（地上 n/F → n + 3，即 地下2层 + 地面层 之上）
+        - 无法解析返回 None
+        """
+        if not floor:
+            return None
+        value = str(floor).strip().upper()
+        m = re.fullmatch(r"B(\d+)/F", value)
+        if m:
+            return Database.B_FLOOR_BASE - int(m.group(1)) + 1
+        if value in ("G/F", "G", "GROUND", "GROUND/F"):
+            return Database.B_FLOOR_BASE + 1
+        m = re.fullmatch(r"(\d+)/F", value)
+        if m:
+            return Database.B_FLOOR_BASE + 1 + int(m.group(1))
+        try:
+            return Database.B_FLOOR_BASE + 1 + int(value)
+        except ValueError:
+            return None
+
+    def list_environment_devices(self) -> list[dict[str, Any]]:
+        """WingOnIOT 环境设备列表，附每台设备最新一条监测（中位温湿度）与 3D 层号。
+
+        - 无监测记录的设备 latest 字段为 null（LEFT JOIN）
+        - level 由 floor 解析（B2/F→1、B1/F→2、G/F→3、4/F→7 …）
+        """
+        sql = """
+            SELECT d.sn, d.name, d.deviceName, d.model, d.floor, d.location, d.macAddress,
+                   l.toDateTime, l.temperatureMedian, l.humidityMedian
+            FROM Environment_Device d
+            LEFT JOIN (
+                SELECT m.sn, m.toDateTime, m.temperatureMedian, m.humidityMedian
+                FROM (
+                    SELECT m2.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY sn ORDER BY InsertAt DESC, id DESC
+                           ) AS rn
+                    FROM Environmental_Monitoring m2
+                ) m
+                WHERE m.rn = 1
+            ) l ON l.sn = d.sn
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall() or []
+        result = []
+        for row in rows:
+            item = self._parse_json_fields(dict(row), ())
+            item["level"] = self.floor_to_level(item.get("floor"))
+            result.append(item)
+        # 按 3D 层号排序（无层号排最后），同层按名称 —— 避免字符串排序把 B 层排乱
+        result.sort(
+            key=lambda x: (
+                x.get("level") is None,
+                x.get("level") or 0,
+                x.get("floor") or "",
+                x.get("name") or "",
+            )
+        )
+        return result
+
+    def list_environment_monitoring(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Environmental_Monitoring 分页列表（最新写入在前）。"""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS cnt FROM Environmental_Monitoring")
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                sql = """
+                    SELECT *
+                    FROM Environmental_Monitoring
+                    ORDER BY InsertAt DESC, id DESC
+                    LIMIT %(limit)s OFFSET %(offset)s
+                """
+                cur.execute(sql, {"limit": limit, "offset": offset})
+                rows = cur.fetchall() or []
+        return (
+            [self._parse_json_fields(dict(r), ()) for r in rows],
+            total,
+        )
+
+    def floor_environment_summary(self) -> list[dict[str, Any]]:
+        """按楼层聚合：每台设备取最新一条监测记录，楼层温度/湿度为该层设备中位值均值。"""
+        sql = """
+            SELECT d.floor AS floor,
+                   COUNT(DISTINCT d.sn) AS device_count,
+                   ROUND(AVG(l.temperatureMedian), 1) AS temperature,
+                   ROUND(AVG(l.humidityMedian), 1) AS humidity,
+                   MAX(l.InsertAt) AS updated_at
+            FROM Environment_Device d
+            JOIN (
+                SELECT m.sn, m.temperatureMedian, m.humidityMedian, m.InsertAt
+                FROM (
+                    SELECT m2.*,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY sn ORDER BY InsertAt DESC, id DESC
+                           ) AS rn
+                    FROM Environmental_Monitoring m2
+                ) m
+                WHERE m.rn = 1
+            ) l ON l.sn = d.sn
+            GROUP BY d.floor
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall() or []
+        result = []
+        for row in rows:
+            item = self._parse_json_fields(dict(row), ())
+            item["level"] = self.floor_to_level(item.get("floor"))
+            result.append(item)
+        # 按 3D 层号排序（无层号排最后）—— 避免字符串排序把 B 层排乱
+        result.sort(
+            key=lambda x: (
+                x.get("level") is None,
+                x.get("level") or 0,
+                x.get("floor") or "",
+            )
+        )
         return result

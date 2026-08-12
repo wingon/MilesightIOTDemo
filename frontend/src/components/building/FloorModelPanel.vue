@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Floor3D from '@/components/building/Floor3D.vue'
-import { FLOOR_ROOMS, type Cell, type DeviceType } from '@/utils/buildingDemo'
+import { FLOOR_ROOMS, floorName, type Cell, type DeviceType } from '@/utils/buildingDemo'
 
 const props = defineProps<{
   floor: number
@@ -42,7 +42,7 @@ function cellCount(roomId: string) {
   <div class="floor-model">
     <div class="toolbar">
       <div class="title">
-        {{ t('building.level', { n: floor }) }}
+        {{ t('building.level', { n: floorName(floor) }) }}
         <span class="hint">
           {{ editMode ? t('building.floorModelHintEdit') : t('building.floorModelHint3d') }}
         </span>
@@ -67,6 +67,7 @@ function cellCount(roomId: string) {
     <div class="stage">
       <div class="viewport">
         <Floor3D
+          :level="floor"
           :selected-room="selectedRoom"
           :room-devices="roomDevices"
           :layout="layout"

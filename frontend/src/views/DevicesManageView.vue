@@ -5,7 +5,7 @@ import { message } from 'ant-design-vue'
 import { ApiOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { testMqttConnectivity } from '@/api/milesight'
 import { useBuildingStore } from '@/stores/building'
-import { DEVICE_TYPES, FLOOR_COUNT, type DeviceType } from '@/utils/buildingDemo'
+import { DEVICE_TYPES, FLOOR_COUNT, floorName, type DeviceType } from '@/utils/buildingDemo'
 
 const { t } = useI18n()
 const store = useBuildingStore()
@@ -22,7 +22,7 @@ const inventory = computed(() => store.getInventory(floor.value))
 const floorOptions = computed(() =>
   Array.from({ length: FLOOR_COUNT }, (_, i) => ({
     value: i + 1,
-    label: t('building.level', { n: i + 1 }),
+    label: t('building.level', { n: floorName(i + 1) }),
   })),
 )
 
@@ -77,7 +77,7 @@ function onAddToFloor() {
     message.error(t('devicesPage.duplicateSn'))
     return
   }
-  message.success(t('devicesPage.added', { sn: deviceSn, floor: floor.value }))
+  message.success(t('devicesPage.added', { sn: deviceSn, floor: floorName(floor.value) }))
   sn.value = ''
   lastTestOk.value = null
   lastTestMsg.value = ''

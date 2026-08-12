@@ -5,7 +5,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-# .env
+.env
 !.env.example
 
 # --- Node / frontend (also covered by frontend/.gitignore) ---
@@ -15,9 +15,13 @@ dist-ssr/
 *.local
 
 # --- MQTT secrets / runtime ---
-# mqttapi/.env
-# mqttapi/mosquitto/passwd
-# mqttapi/mosquitto/data/
+mqttapi/.env
+mqttapi/mosquitto/passwd
+mqttapi/mosquitto/data/
+
+# --- Production data (do not upload) ---
+milesight_data.sql
+files/*.csv
 
 # --- IDE / OS ---
 .idea/
@@ -26,3 +30,8 @@ dist-ssr/
 .DS_Store
 Thumbs.db
 *.log
+
+# --- Editor / agent tooling ---
+.cursor/
+.reasonix/
+reasonix.toml

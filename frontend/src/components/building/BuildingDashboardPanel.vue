@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useBuildingStore } from '@/stores/building'
-import type { FloorStats } from '@/utils/buildingDemo'
+import { floorName, type FloorStats } from '@/utils/buildingDemo'
 
 defineProps<{
   selectedFloor?: number | null
@@ -28,7 +28,7 @@ const onlinePct = computed(() => {
 const metricAlertFloors = computed(() =>
   summary.value.floors
     .filter((f) => f.metricAlert)
-    .sort((a, b) => b.co2 - a.co2 || a.floor - b.floor)
+    .sort((a, b) => (b.co2 ?? 0) - (a.co2 ?? 0) || a.floor - b.floor)
     .slice(0, 3),
 )
 
@@ -85,7 +85,7 @@ function onPick(floor: number) {
         <h2>{{ t('buildingDash.title') }}</h2>
         <p>{{ t('buildingDash.subtitle') }}</p>
       </div>
-      <span class="demo">{{ t('building.demoData') }}</span>
+      <span class="demo live">{{ t('building.liveData') }}</span>
     </header>
 
     <div class="scroll">
@@ -193,26 +193,26 @@ function onPick(floor: number) {
               :title="alertReasons(f).join(' · ') || undefined"
               @click="onPick(f.floor)"
             >
-              <div class="sticky floor-id">{{ t('building.level', { n: f.floor }) }}</div>
+              <div class="sticky floor-id">{{ t('building.level', { n: floorName(f.floor) }) }}</div>
               <span class="m online">{{ f.connected }}/{{ f.registered }}</span>
               <span class="m fail" :class="{ bad: f.mqttAlert }">
                 {{ f.failed > 0 ? f.failed : '—' }}
               </span>
-              <span class="m">{{ f.current }}</span>
-              <span class="m muted">{{ f.cableTemp }}°</span>
+              <span class="m">{{ f.current != null ? f.current : '--' }}</span>
+              <span class="m muted">{{ f.cableTemp != null ? `${f.cableTemp}°` : '--' }}</span>
               <span
                 class="m co2"
                 :class="{ warn: f.metricAlert }"
                 :title="t('buildingDash.co2WarnHint')"
               >
-                {{ f.co2 }}
+                {{ f.co2 != null ? f.co2 : '--' }}
               </span>
-              <span class="m muted">{{ f.temperature }}°</span>
-              <span class="m muted">{{ f.humidity }}%</span>
-              <span class="m">{{ f.pm25 }}</span>
-              <span class="m">{{ f.periodIn }}</span>
-              <span class="m">{{ f.periodOut }}</span>
-              <span class="m">{{ f.occupancy }}</span>
+              <span class="m muted">{{ f.temperature != null ? `${f.temperature}°` : '--' }}</span>
+              <span class="m muted">{{ f.humidity != null ? `${f.humidity}%` : '--' }}</span>
+              <span class="m">{{ f.pm25 != null ? f.pm25 : '--' }}</span>
+              <span class="m">{{ f.periodIn != null ? f.periodIn : '--' }}</span>
+              <span class="m">{{ f.periodOut != null ? f.periodOut : '--' }}</span>
+              <span class="m">{{ f.occupancy != null ? f.occupancy : '--' }}</span>
               <span class="m type ct">{{ f.byType.CT103 }}</span>
               <span class="m type am">{{ f.byType.AM319 }}</span>
               <span class="m type vs">{{ f.byType.VS135 }}</span>
@@ -232,7 +232,7 @@ function onPick(floor: number) {
           @click="onPick(f.floor)"
         >
           <div class="alert-left">
-            <div class="alert-floor">{{ t('building.level', { n: f.floor }) }}</div>
+            <div class="alert-floor">{{ t('building.level', { n: floorName(f.floor) }) }}</div>
             <div class="alert-reason">{{ t('buildingDash.co2High', { n: f.co2 }) }}</div>
           </div>
           <div class="alert-right">
@@ -253,7 +253,7 @@ function onPick(floor: number) {
           @click="onPick(f.floor)"
         >
           <div class="alert-left">
-            <div class="alert-floor">{{ t('building.level', { n: f.floor }) }}</div>
+            <div class="alert-floor">{{ t('building.level', { n: floorName(f.floor) }) }}</div>
             <div class="alert-reason">{{ t('buildingDash.failCount', { n: f.failed }) }}</div>
           </div>
           <div class="alert-right">
@@ -310,6 +310,11 @@ function onPick(floor: number) {
   color: #a88955;
   border: 1px solid rgba(196, 165, 116, 0.55);
   padding: 3px 7px;
+}
+
+.demo.live {
+  color: #3d7a5a;
+  border-color: rgba(61, 122, 90, 0.5);
 }
 
 .scroll {

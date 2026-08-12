@@ -1,9 +1,9 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { getFloorEnvironmentSummary, listEnvironmentDevices, type EnvironmentDevice } from '@/api/environment'
 import {
   buildCellToRoomMap,
   computeFloorStats,
-  countAssignedIds,
   createDefaultFloorInventory,
   createDefaultRoomLayout,
   FLOOR_COUNT,
@@ -17,6 +17,74 @@ import {
 } from '@/utils/buildingDemo'
 
 export const useBuildingStore = defineStore('building', () => {
+  /** floor -> 来自 WingOnIOT 库的真实温度/湿度（level 为 3D 楼栋层号） */
+  const floorEnv = reactive<
+    Record<
+      number,
+      {
+        temperature: number | null
+        humidity: number | null
+        /** 该层有最新读数的设备数 */
+        deviceCount: number
+        updatedAt: string | null
+      }
+    >
+  >({})
+  const envLoading = ref(false)
+  const envError = ref<string | null>(null)
+  let envFetched = false
+
+  /** 拉取 WingOnIOT 各楼层最新温度/湿度；失败不阻塞页面（保留 demo 回退） */
+  async function fetchFloorEnv() {
+    if (envFetched) return
+    envFetched = true
+    envLoading.value = true
+    envError.value = null
+    try {
+      const { data } = await getFloorEnvironmentSummary()
+      for (const row of data) {
+        // level 为 3D 楼栋层号（1..FLOOR_COUNT）：B2/F→1、B1/F→2、G/F→3、n/F→n+3；
+        // 超出范围的映射（如更深的地下室或更高楼层）无法渲染则跳过
+        if (row.level == null || row.level < 1 || row.level > FLOOR_COUNT) continue
+        floorEnv[row.level] = {
+          temperature: row.temperature,
+          humidity: row.humidity,
+          deviceCount: row.device_count,
+          updatedAt: row.updated_at,
+        }
+      }
+    } catch (err) {
+      envError.value = err instanceof Error ? err.message : String(err)
+      console.warn('[building] fetchFloorEnv failed:', envError.value)
+      // 失败时复位标记，下次进入页面可重试
+      envFetched = false
+    } finally {
+      envLoading.value = false
+    }
+  }
+
+  /** WingOnIOT 真实环境设备（含每台最新温度/湿度） */
+  const envDevices = ref<EnvironmentDevice[]>([])
+  let envDevicesFetched = false
+
+  /** 拉取 WingOnIOT 设备列表（含最新读数）；失败可重试 */
+  async function fetchEnvDevices() {
+    if (envDevicesFetched) return
+    envDevicesFetched = true
+    try {
+      const { data } = await listEnvironmentDevices()
+      envDevices.value = data
+    } catch (err) {
+      console.warn('[building] fetchEnvDevices failed:', err)
+      envDevicesFetched = false
+    }
+  }
+
+  /** 某 3D 层号对应的真实环境设备 */
+  function devicesForFloor(level: number): EnvironmentDevice[] {
+    return envDevices.value.filter((d) => d.level === level)
+  }
+
   /** floor -> inventory devices registered to that floor */
   const floorInventory = reactive<Record<number, FloorInventoryDevice[]>>({})
   /** floor -> roomId -> inventory device ids assigned to room */
@@ -181,19 +249,6 @@ export const useBuildingStore = defineStore('building', () => {
     return (floorLayouts[floor][roomId] || []).length
   }
 
-  const floorDeviceCounts = computed(() => {
-    const counts: Record<number, number> = {}
-    for (let i = 1; i <= FLOOR_COUNT; i++) {
-      if (floorInventory[i]) {
-        counts[i] = countAssignedIds(roomDeviceIds[i] || {})
-      } else {
-        const seeded = createDefaultFloorInventory(i)
-        counts[i] = countAssignedIds(seeded.roomAssignments)
-      }
-    }
-    return counts
-  })
-
   function listDeviceInstances(
     floor: number,
     roomId: string | null,
@@ -238,7 +293,44 @@ export const useBuildingStore = defineStore('building', () => {
 
   function getFloorStats(floor: number): FloorStats {
     ensureFloor(floor)
-    return computeFloorStats(floor, floorInventory[floor], roomDeviceIds[floor])
+    const stats = computeFloorStats(floor, floorInventory[floor], roomDeviceIds[floor])
+    // WingOnIOT 真实数据优先；无该层数据时统计清空，一律不显示 demo 数据
+    const env = floorEnv[floor]
+    const hasReal = !!env
+    stats.temperature = env && env.temperature != null ? env.temperature : null
+    stats.humidity = env && env.humidity != null ? env.humidity : null
+    // WingOnIOT 只有温度/湿度，其余环境指标（CO₂/PM2.5/电流/占用率等）置空
+    stats.current = null
+    stats.cableTemp = null
+    stats.co2 = null
+    stats.pm25 = null
+    stats.periodIn = null
+    stats.periodOut = null
+    stats.occupancy = null
+    stats.co2High = false
+    stats.metricAlert = false
+    if (hasReal) {
+      // 有 WingOnIOT 设备的楼层：设备数 = 真实设备数（有最新读数即视为在线）
+      stats.registered = env.deviceCount
+      stats.connected = env.deviceCount
+      stats.failed = 0
+      stats.untested = 0
+      stats.assigned = env.deviceCount
+      stats.unassigned = 0
+      stats.byType = { CT103: 0, AM319: 0, VS135: 0 }
+    } else {
+      // 无 WingOnIOT 设备的楼层：统计清零
+      stats.registered = 0
+      stats.connected = 0
+      stats.failed = 0
+      stats.untested = 0
+      stats.assigned = 0
+      stats.unassigned = 0
+      stats.byType = { CT103: 0, AM319: 0, VS135: 0 }
+    }
+    stats.mqttAlert = false
+    stats.abnormal = false
+    return stats
   }
 
   const allFloorStats = computed(() => {
@@ -286,6 +378,13 @@ export const useBuildingStore = defineStore('building', () => {
   })
 
   return {
+    floorEnv,
+    envLoading,
+    envError,
+    fetchFloorEnv,
+    envDevices,
+    fetchEnvDevices,
+    devicesForFloor,
     floorInventory,
     roomDeviceIds,
     floorLayouts,
@@ -306,7 +405,6 @@ export const useBuildingStore = defineStore('building', () => {
     resetFloorLayout,
     cellToRoomMap,
     roomCellCount,
-    floorDeviceCounts,
     listDeviceInstances,
     getFloorStats,
     allFloorStats,
