@@ -20,6 +20,7 @@ import {
 import {
   createGeometryByType,
   isHiddenType,
+  parseRotation,
   type CellShapeConfig,
   type GridType,
 } from '@/utils/floorGrid'
@@ -163,6 +164,9 @@ function rebuildFloors() {
       const mesh = new THREE.Mesh(geo, mat)
       const { x, z } = cellToWorld(cell.row, cell.col)
       mesh.position.set(x, yBase + FLOOR_H / 2, z)
+      if (shapeConfig?.rotation) {
+        mesh.rotation.copy(parseRotation(shapeConfig.rotation))
+      }
       mesh.userData.floor = level
       mesh.castShadow = true
       mesh.receiveShadow = true

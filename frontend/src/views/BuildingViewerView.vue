@@ -30,6 +30,7 @@ const metric = ref<EnvMetric>('temperature')
  * @param floors - 要設定的樓層列表（3D 層號）
  *                 1=B2/F, 2=B1/F, 3=G/F, 4=1/F ... 10=7/F, 11=ROOF
  * @param shape  - 形狀類型：'Rect'(長方形) | 'Cylinder'(圓柱) | 'Triangle'(三角形) | 'Hidden'(隱藏不渲染)
+ * @param rotation - 旋轉
  * @returns CellShapeConfig[] 設定陣列，可展開傳入 cellShapes
  *
  * 示例：
@@ -44,8 +45,9 @@ function cellShape(
   col: number,
   floors: number[],
   shape: GridType,
+  rotation: string,
 ): CellShapeConfig[] {
-  return floors.map((floor) => ({ row, col, floor, shape }))
+  return floors.map((floor) => ({ row, col, floor, shape, rotation }))
 }
 
 /**
@@ -61,9 +63,9 @@ function cellShape(
  */
 const cellShapes = ref<CellShapeConfig[]>([
      // G/F~4/F：格子 (8,11) 顯示為圓柱
-  ...cellShape(8, 11, [3, 4, 5, 6, 7], 'Triangle'),
-  ...cellShape(7, 11, [3, 4, 5, 6, 7], 'Rect'),
-  ...cellShape(7, 12, [3, 4, 5, 6, 7], 'Triangle'),
+  ...cellShape(8, 11, [3, 4, 5, 6, 7], 'Triangle', '0,0,0'), // 0,0.785,0
+  ...cellShape(7, 11, [3, 4, 5, 6, 7], 'Rect', '0,0,0'),
+  ...cellShape(7, 12, [3, 4, 5, 6, 7], 'Triangle', '0,0,0'),
   // ...cellShape(5, 5, [8], 'Cylinder'),              // 示例：5F 的 (5,5) 為圓柱
   // ...cellShape(3, 3, [3,4,5], 'Hidden'),            // 示例：3~5F 的 (3,3) 隱藏不渲染
 ])
