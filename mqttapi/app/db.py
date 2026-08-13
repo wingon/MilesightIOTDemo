@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from contextlib import contextmanager
 from datetime import datetime
@@ -10,6 +11,8 @@ from pymysql.cursors import DictCursor
 
 from .config import Settings
 from .decoder import JSON_SECTION_KEYS
+
+logger = logging.getLogger(__name__)
 
 TOF_JSON_COLUMNS = (
     *JSON_SECTION_KEYS,
@@ -664,22 +667,88 @@ class Database:
 
         欄位名稱與前端 CellShapeConfig 直接對齊（row/col/floor/shape/rotation/color/height），
         前端無需再做欄位映射。floor=0 表示「所有樓層」。
+
+        DB 中 floors 為 JSON 陣列（如 [3,4,5,6,7]，一個格子一列），此處展開成多筆
+        row/col/floor，保持 API 行為與舊版（一列一樓層）一致。
         """
         sql = """
             SELECT
                 row_no   AS `row`,
                 col_no   AS col,
-                floor_no AS floor,
+                floors,
                 shape,
                 rotation,
                 color,
-                height
+                height,
+                sort_order
             FROM Building_Cell_Shape
             WHERE is_enabled = 1
-            ORDER BY sort_order ASC, row_no ASC, col_no ASC, floor_no ASC
+            ORDER BY sort_order ASC, row_no ASC, col_no ASC
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql)
                 rows = cur.fetchall() or []
-        return [self._parse_json_fields(dict(row), ()) for row in rows]
+
+        expanded: list[dict[str, Any]] = []
+        for row in rows:
+            item = self._parse_json_fields(dict(row), ("floors",))
+            floors = item.get("floors")
+            if isinstance(floors, str):
+                try:
+                    floors = json.loads(floors)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Building_Cell_Shape row_no=%s col_no=%s: floors 非合法 JSON，已跳過",
+                        item.get("row"),
+                        item.get("col"),
+                    )
+                    continue
+            if not isinstance(floors, list):
+                logger.warning(
+                    "Building_Cell_Shape row_no=%s col_no=%s: floors 非 JSON 陣列，已跳過",
+                    item.get("row"),
+                    item.get("col"),
+                )
+                continue
+            base = {k: v for k, v in item.items() if k != "floors"}
+            seen_floors: set[int] = set()
+            for floor in floors:
+                # 排除 JSON 布林（True 是 int 的子類別）與非整數值，避免 floor=true/3.0 混入
+                if isinstance(floor, int) and not isinstance(floor, bool):
+                    if floor in seen_floors:
+                        logger.warning(
+                            "Building_Cell_Shape row_no=%s col_no=%s: 樓層 %s 重複，已去重",
+                            item.get("row"),
+                            item.get("col"),
+                            floor,
+                        )
+                        continue
+                    seen_floors.add(floor)
+                    expanded.append({**base, "floor": floor})
+                else:
+                    logger.warning(
+                        "Building_Cell_Shape row_no=%s col_no=%s: 樓層值 %r 非整數，已跳過",
+                        item.get("row"),
+                        item.get("col"),
+                        floor,
+                    )
+            if not floors:
+                logger.warning(
+                    "Building_Cell_Shape row_no=%s col_no=%s: floors 為空陣列，此格子不會出現在 API",
+                    item.get("row"),
+                    item.get("col"),
+                )
+
+        # 維持與舊 SQL 相同的排序：sort_order → row → col → floor
+        expanded.sort(
+            key=lambda x: (
+                x.get("sort_order") or 0,
+                x.get("row") or 0,
+                x.get("col") or 0,
+                x.get("floor") or 0,
+            )
+        )
+        for item in expanded:
+            item.pop("sort_order", None)
+        return expanded

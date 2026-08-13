@@ -1,7 +1,6 @@
-/** Theme inspired by https://333collins.com/ — Exclusive / Prestige / Historic / Heritage */
 export const brand = {
-  name: '333 IOT Console',
-  shortName: '333',
+  name: 'Wing On Godown Building',
+  shortName: 'Wing On',
   primary: '#C4A574',
   primaryHover: '#D4B88A',
   primaryActive: '#A88955',

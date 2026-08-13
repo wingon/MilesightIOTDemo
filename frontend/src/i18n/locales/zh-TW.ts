@@ -1,6 +1,8 @@
 export default {
   common: {
-    brand: '333 IOT 控制臺',
+    brand: '永安貨倉大廈',
+    brandLine1: 'Wing On',
+    brandLine2: '永安貨倉大廈',
     refresh: '重新整理',
     query: '查詢',
     language: '語言',

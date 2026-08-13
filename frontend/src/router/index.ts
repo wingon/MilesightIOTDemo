@@ -62,8 +62,8 @@ const router = createRouter({
 
 router.afterEach((to) => {
   const key = to.meta.titleKey as string | undefined
-  const pageTitle = key ? String(i18n.global.t(key)) : '333 IOT Console'
-  document.title = `${pageTitle} · 333 IOT Console`
+  const pageTitle = key ? String(i18n.global.t(key)) : String(i18n.global.t('common.brand'))
+  document.title = `${pageTitle} · ${String(i18n.global.t('common.brand'))}`
 })
 
 export default router

@@ -1,6 +1,8 @@
 export default {
   common: {
-    brand: '333 IOT Console',
+    brand: 'Wing On Godown Building',
+    brandLine1: 'Wing On',
+    brandLine2: 'Godown Building',
     refresh: 'Refresh',
     query: 'Search',
     language: 'Language',

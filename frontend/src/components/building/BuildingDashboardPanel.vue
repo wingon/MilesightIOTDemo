@@ -61,9 +61,9 @@ const listFloors = computed(() => {
     ])
     return summary.value.floors
       .filter((f) => ids.has(f.floor))
-      .sort((a, b) => a.floor - b.floor)
+      .sort((a, b) => b.floor - a.floor)
   }
-  return [...summary.value.floors].sort((a, b) => a.floor - b.floor)
+  return [...summary.value.floors].sort((a, b) => b.floor - a.floor)
 })
 
 function alertReasons(f: FloorStats) {
@@ -154,6 +154,8 @@ function onPick(floor: number) {
 
         <div v-else class="floor-scroll">
           <div class="floor-table">
+            <!-- 後端已屏蔽多餘指標欄位，前端亦僅顯示 連通/溫度/濕度（其餘欄位暫註解保留） -->
+            <!-- 舊欄位群組標頭（連通分組）：
             <div class="list-groups" aria-hidden="true">
               <span class="sticky g-floor" />
               <span class="g-conn">{{ t('buildingDash.groupConn') }}</span>
@@ -162,15 +164,17 @@ function onPick(floor: number) {
               <span class="g-vs">VS135</span>
               <span class="g-cnt">{{ t('buildingDash.groupCount') }}</span>
             </div>
+            -->
             <div class="list-legend" aria-hidden="true">
               <span class="sticky leg-floor">{{ t('buildingDash.colFloor') }}</span>
-              <span>{{ t('buildingDash.metricOnline') }}</span>
+              <span class="leg-online">{{ t('buildingDash.metricOnline') }}</span>
+              <span>{{ t('buildingDash.metricTemp') }}</span>
+              <span>{{ t('buildingDash.metricHumidity') }}</span>
+              <!-- 舊欄位標題（暫時註解保留）：
               <span>{{ t('buildingDash.metricFail') }}</span>
               <span>{{ t('buildingDash.metricCurrent') }}</span>
               <span>{{ t('buildingDash.metricCableTemp') }}</span>
               <span>{{ t('buildingDash.metricCo2') }}</span>
-              <span>{{ t('buildingDash.metricTemp') }}</span>
-              <span>{{ t('buildingDash.metricHumidity') }}</span>
               <span>{{ t('buildingDash.metricPm25') }}</span>
               <span>{{ t('buildingDash.metricPeriodIn') }}</span>
               <span>{{ t('buildingDash.metricPeriodOut') }}</span>
@@ -178,6 +182,7 @@ function onPick(floor: number) {
               <span>{{ t('buildingDash.metricCt') }}</span>
               <span>{{ t('buildingDash.metricAm') }}</span>
               <span>{{ t('buildingDash.metricVs') }}</span>
+              -->
             </div>
 
             <button
@@ -195,6 +200,9 @@ function onPick(floor: number) {
             >
               <div class="sticky floor-id">{{ t('building.level', { n: floorName(f.floor) }) }}</div>
               <span class="m online">{{ f.connected }}/{{ f.registered }}</span>
+              <span class="m muted">{{ f.temperature != null ? `${f.temperature}°` : '--' }}</span>
+              <span class="m muted">{{ f.humidity != null ? `${f.humidity}%` : '--' }}</span>
+              <!-- 舊欄位資料（暫時註解保留）：
               <span class="m fail" :class="{ bad: f.mqttAlert }">
                 {{ f.failed > 0 ? f.failed : '—' }}
               </span>
@@ -207,8 +215,6 @@ function onPick(floor: number) {
               >
                 {{ f.co2 != null ? f.co2 : '--' }}
               </span>
-              <span class="m muted">{{ f.temperature != null ? `${f.temperature}°` : '--' }}</span>
-              <span class="m muted">{{ f.humidity != null ? `${f.humidity}%` : '--' }}</span>
               <span class="m">{{ f.pm25 != null ? f.pm25 : '--' }}</span>
               <span class="m">{{ f.periodIn != null ? f.periodIn : '--' }}</span>
               <span class="m">{{ f.periodOut != null ? f.periodOut : '--' }}</span>
@@ -216,6 +222,7 @@ function onPick(floor: number) {
               <span class="m type ct">{{ f.byType.CT103 }}</span>
               <span class="m type am">{{ f.byType.AM319 }}</span>
               <span class="m type vs">{{ f.byType.VS135 }}</span>
+              -->
             </button>
           </div>
         </div>
@@ -568,11 +575,18 @@ function onPick(floor: number) {
 }
 
 .floor-table {
+  /* 舊版 15 欄最小寬度（多餘欄位已屏蔽）：
   min-width: 920px;
+  */
+  min-width: 0;
 }
 
+/* 目前僅顯示 樓層/連通/溫度/濕度 四欄（其餘欄位註解保留）：
 @floor-cols: 72px 64px 40px 52px 52px 52px 48px 48px 52px 48px 48px 48px 44px 44px 44px;
+*/
+@floor-cols: 72px 104px 64px 64px;
 
+/* 舊欄位群組標頭樣式（多餘欄位已屏蔽，暫註解保留）：
 .list-groups {
   display: grid;
   grid-template-columns: @floor-cols;
@@ -609,6 +623,7 @@ function onPick(floor: number) {
     color: #8a8070;
   }
 }
+*/
 
 .list-legend,
 .floor-row {
@@ -631,6 +646,11 @@ function onPick(floor: number) {
   }
 
   .leg-floor {
+    text-align: left;
+  }
+
+  /* 連通 欄位與資料（.m.online，靠左）對齊，避免標題與數據錯位 */
+  .leg-online {
     text-align: left;
   }
 }
@@ -714,6 +734,7 @@ function onPick(floor: number) {
     color: #6b6b6b;
   }
 
+  /* 舊欄位樣式（多餘欄位已屏蔽，暫註解保留）：
   &.co2.warn {
     color: #b42318;
     font-weight: 700;
@@ -737,6 +758,7 @@ function onPick(floor: number) {
       color: #3d7a5a;
     }
   }
+  */
 }
 
 .foot {

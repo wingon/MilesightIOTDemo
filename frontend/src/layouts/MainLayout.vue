@@ -14,7 +14,6 @@ import {
   GlobalOutlined,
 } from '@ant-design/icons-vue'
 import { useAppStore } from '@/stores/app'
-import { brand } from '@/theme/colorConfig'
 import type { AppLocale } from '@/i18n'
 
 const { t, locale } = useI18n()
@@ -28,50 +27,56 @@ const selectedKeys = computed(() => {
   return [name]
 })
 
-const brandWords = ['Exclusive', 'Prestige', 'Historic', 'Heritage'] as const
+const brandLine1 = computed(() => String(t('common.brandLine1')))
+const brandLine2 = computed(() => String(t('common.brandLine2')))
 
-const menuItems = computed(() => [
-  {
-    key: 'dashboard',
-    icon: () => h(DashboardOutlined),
-    label: t('menu.dashboard'),
-    path: '/',
-  },
-  {
-    key: 'ct103',
-    icon: () => h(ThunderboltOutlined),
-    label: t('menu.tof'),
-    path: '/ct103',
-  },
-  {
-    key: 'ug65',
-    icon: () => h(CloudOutlined),
-    label: t('menu.ug65'),
-    path: '/ug65',
-  },
-  {
-    key: 'vs135',
-    icon: () => h(TeamOutlined),
-    label: t('menu.vs135'),
-    path: '/vs135',
-  },
-  {
-    key: 'building-viewer',
-    icon: () => h(BankOutlined),
-    label: t('menu.buildingViewer'),
-    path: '/building-viewer',
-  },
-  {
-    key: 'devices',
-    icon: () => h(ApiOutlined),
-    label: t('menu.devices'),
-    path: '/devices',
-  },
-])
+const menuItems = computed(() =>
+  [
+    {
+      key: 'dashboard',
+      icon: () => h(DashboardOutlined),
+      label: t('menu.dashboard'),
+      path: '/',
+    },
+    {
+      key: 'ct103',
+      icon: () => h(ThunderboltOutlined),
+      label: t('menu.tof'),
+      path: '/ct103',
+      hidden: true,
+    },
+    {
+      key: 'ug65',
+      icon: () => h(CloudOutlined),
+      label: t('menu.ug65'),
+      path: '/ug65',
+      hidden: true,
+    },
+    {
+      key: 'vs135',
+      icon: () => h(TeamOutlined),
+      label: t('menu.vs135'),
+      path: '/vs135',
+      hidden: true,
+    },
+    {
+      key: 'building-viewer',
+      icon: () => h(BankOutlined),
+      label: t('menu.buildingViewer'),
+      path: '/building-viewer',
+    },
+    {
+      key: 'devices',
+      icon: () => h(ApiOutlined),
+      label: t('menu.devices'),
+      path: '/devices',
+    },
+  ].filter((item) => !item.hidden)
+)
 
 const pageTitle = computed(() => {
   const key = route.meta.titleKey as string | undefined
-  return key ? t(key) : brand.name
+  return key ? t(key) : t('common.brand')
 })
 
 const localeOptions = computed(() => [
@@ -89,8 +94,8 @@ function onMenuClick(info: { key: string | number }) {
 function onLocaleChange(value: unknown) {
   appStore.setLocale(value as AppLocale)
   const key = route.meta.titleKey as string | undefined
-  const title = key ? t(key) : brand.name
-  document.title = `${title} · 333 IOT Console`
+  const title = key ? t(key) : t('common.brand')
+  document.title = `${title} · ${t('common.brand')}`
 }
 </script>
 
@@ -106,23 +111,11 @@ function onLocaleChange(value: unknown) {
       class="sider"
     >
       <div class="brand" :class="{ collapsed: appStore.sidebarCollapsed }">
-        <img class="brand-logo" src="/333-logo.png" alt="333" />
+        <img class="brand-logo" src="/wingon-logo.png" alt="Wing On" />
         <div v-if="!appStore.sidebarCollapsed" class="brand-text">
-          <div class="brand-tags" aria-label="Exclusive Prestige Historic Heritage">
-            <span class="brand-word">
-              <i v-for="(ch, i) in brandWords[0]" :key="`w0-${i}`">{{ ch }}</i>
-            </span>
-            <span class="brand-sep" aria-hidden="true">·</span>
-            <span class="brand-word">
-              <i v-for="(ch, i) in brandWords[1]" :key="`w1-${i}`">{{ ch }}</i>
-            </span>
-            <span class="brand-word">
-              <i v-for="(ch, i) in brandWords[2]" :key="`w2-${i}`">{{ ch }}</i>
-            </span>
-            <span class="brand-sep" aria-hidden="true">·</span>
-            <span class="brand-word">
-              <i v-for="(ch, i) in brandWords[3]" :key="`w3-${i}`">{{ ch }}</i>
-            </span>
+          <div class="brand-name">
+            <span class="brand-line1">{{ brandLine1 }}</span>
+            <span class="brand-line2">{{ brandLine2 }}</span>
           </div>
         </div>
       </div>
@@ -231,38 +224,22 @@ function onLocaleChange(value: unknown) {
   flex: 1;
 }
 
-.brand-tags {
-  margin-top: 0;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  column-gap: 4px;
-  row-gap: 3px;
-  width: 100%;
-  align-items: center;
-}
-
-.brand-sep {
+.brand-name {
   color: #c4a574;
-  font-size: 9px;
-  line-height: 1;
-  text-align: center;
-  opacity: 0.9;
-}
-
-.brand-word {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
-  color: #c4a574;
-  font-size: 9px;
-  text-transform: uppercase;
+  font-weight: 600;
   line-height: 1.3;
-  font-style: normal;
+  letter-spacing: 0.03em;
+  display: flex;
+  flex-direction: column;
 }
 
-.brand-word i {
-  font-style: normal;
-  font-weight: 500;
+.brand-line1 {
+  font-size: 14px;
+}
+
+.brand-line2 {
+  font-size: 12px;
+  opacity: 0.85;
 }
 
 .header {
