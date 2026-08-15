@@ -33,6 +33,8 @@ watch(
       return
     }
     store.ensureFloor(n)
+    // 拉取 WingOnIOT 真實環境設備（此頁也需顯示 DB 設備，而非 demo）
+    store.fetchEnvDevices()
     selectedRoom.value = null
     editMode.value = false
   },
@@ -52,6 +54,20 @@ const layout = computed(() => {
 const panelDevices = computed(() => {
   if (!floorValid.value) return []
   return store.listDeviceInstances(floor.value, selectedRoom.value)
+})
+
+/** 選中樓層對應的 WingOnIOT 真實環境設備（無資料時為空陣列，面板顯示空狀態而非 demo） */
+const panelEnvDevices = computed(() => {
+  if (!floorValid.value) return []
+  return store.devicesForFloor(floor.value)
+})
+
+/** 各房间 DB 设备数（DB 无 room 字段，默认全部归入 room-1） */
+const deviceCountMap = computed(() => {
+  const map: Record<string, number> = {}
+  for (const room of FLOOR_ROOMS) map[room.id] = 0
+  if (panelEnvDevices.value.length) map['room-1'] = panelEnvDevices.value.length
+  return map
 })
 
 const assignableOptions = computed(() => {
@@ -120,6 +136,7 @@ const roomLabel = computed(() => {
           :selected-room="selectedRoom"
           :layout="layout"
           :edit-mode="editMode"
+          :device-count-map="deviceCountMap"
           @select-room="onSelectRoom"
           @update:edit-mode="(v) => (editMode = v)"
           @toggle-cell="onToggleCell"
@@ -132,6 +149,7 @@ const roomLabel = computed(() => {
           :room-key="selectedRoom"
           :room-label="roomLabel"
           :devices="panelDevices"
+          :env-devices="panelEnvDevices"
           :assignable-options="assignableOptions"
           :can-enter="false"
           manageable

@@ -10,6 +10,8 @@ const props = defineProps<{
   selectedRoom: string | null
   layout: Record<string, Cell[]>
   editMode: boolean
+  /** 各房间 DB 设备数（key 为 roomId，默认所有设备归入 room-1） */
+  deviceCountMap?: Record<string, number>
 }>()
 
 const emit = defineEmits<{
@@ -29,12 +31,12 @@ function onRoomClick(roomId: string | null) {
   emit('selectRoom', props.selectedRoom === roomId ? null : roomId)
 }
 
-function deviceCount(roomId: string) {
-  return (props.roomDevices[roomId] || []).length
-}
-
 function cellCount(roomId: string) {
   return (props.layout[roomId] || []).length
+}
+
+function deviceCount(roomId: string) {
+  return props.deviceCountMap?.[roomId] ?? 0
 }
 </script>
 
