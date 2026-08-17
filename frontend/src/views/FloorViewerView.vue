@@ -15,6 +15,7 @@ const store = useBuildingStore()
 
 const selectedRoom = ref<string | null>(null)
 const editMode = ref(false)
+const selectedWallIndex = ref<number | null>(null)
 
 const floor = computed(() => {
   const n = Number(route.params.floor)
@@ -33,10 +34,11 @@ watch(
       return
     }
     store.ensureFloor(n)
-    // 拉取 WingOnIOT 真實環境設備（此頁也需顯示 DB 設備，而非 demo）
+    // Fetch real WingOnIOT environment devices (this page must show DB devices, not demo)
     store.fetchEnvDevices()
     selectedRoom.value = null
     editMode.value = false
+    selectedWallIndex.value = null
   },
   { immediate: true },
 )
@@ -51,18 +53,23 @@ const layout = computed(() => {
   return store.getFloorLayout(floor.value)
 })
 
+const customWalls = computed(() => {
+  if (!floorValid.value) return []
+  return store.getCustomWalls(floor.value)
+})
+
 const panelDevices = computed(() => {
   if (!floorValid.value) return []
   return store.listDeviceInstances(floor.value, selectedRoom.value)
 })
 
-/** 選中樓層對應的 WingOnIOT 真實環境設備（無資料時為空陣列，面板顯示空狀態而非 demo） */
+/** Real WingOnIOT environment devices for the selected floor (empty when no data; panel shows empty state instead of demo) */
 const panelEnvDevices = computed(() => {
   if (!floorValid.value) return []
   return store.devicesForFloor(floor.value)
 })
 
-/** 各房间 DB 设备数（DB 无 room 字段，默认全部归入 room-1） */
+/** DB device count per room (DB has no room field, so all devices default to room-1) */
 const deviceCountMap = computed(() => {
   const map: Record<string, number> = {}
   for (const room of FLOOR_ROOMS) map[room.id] = 0
@@ -101,6 +108,64 @@ function onToggleCell(payload: { row: number; col: number }) {
   store.assignRoomCell(floor.value, selectedRoom.value, payload.row, payload.col)
 }
 
+function onDropCell(payload: { row: number; col: number; roomId: string }) {
+  store.assignRoomCell(floor.value, payload.roomId, payload.row, payload.col)
+}
+
+function onDropWall(payload: { row: number; col: number; dir: 'v' | 'h' }) {
+  const half = 1.15 / 2
+  const halfCols = 12 / 2
+  const halfRows = 8 / 2
+  const x = (payload.col - halfCols - 0.5) * 1.15
+  const z = (payload.row - halfRows - 0.5) * 1.15
+  if (payload.dir === 'h') {
+    // Horizontal wall: placed along the bottom edge of the cell (X direction)
+    store.addCustomWall(floor.value, {
+      x1: x - half,
+      z1: z + half,
+      x2: x + half,
+      z2: z + half,
+    })
+    return
+  }
+  // Vertical wall: placed along the right edge of the cell (Z direction)
+  store.addCustomWall(floor.value, {
+    x1: x + half,
+    z1: z - half,
+    x2: x + half,
+    z2: z + half,
+  })
+}
+
+function onSelectWall(index: number | null) {
+  selectedWallIndex.value = index
+}
+
+function onMoveWall(payload: { index: number; row: number; col: number }) {
+  const wall = store.getCustomWalls(floor.value)[payload.index]
+  if (!wall) return
+  const half = 1.15 / 2
+  const halfCols = 12 / 2
+  const halfRows = 8 / 2
+  const x = (payload.col - halfCols - 0.5) * 1.15
+  const z = (payload.row - halfRows - 0.5) * 1.15
+  const horizontal = Math.abs(wall.z1 - wall.z2) < 0.01
+  const moved: { x1: number; z1: number; x2: number; z2: number } = horizontal
+    ? { x1: x - half, z1: z + half, x2: x + half, z2: z + half }
+    : { x1: x + half, z1: z - half, x2: x + half, z2: z + half }
+  store.moveCustomWall(floor.value, payload.index, moved)
+  selectedWallIndex.value = null
+}
+
+function onRemoveWall(index: number) {
+  store.removeCustomWall(floor.value, index)
+  selectedWallIndex.value = null
+}
+
+function onMoveCell(payload: { fromRow: number; fromCol: number; row: number; col: number }) {
+  store.moveRoomCell(floor.value, payload.fromRow, payload.fromCol, payload.row, payload.col)
+}
+
 function onResetLayout() {
   store.resetFloorLayout(floor.value)
 }
@@ -136,11 +201,19 @@ const roomLabel = computed(() => {
           :selected-room="selectedRoom"
           :layout="layout"
           :edit-mode="editMode"
+          :custom-walls="customWalls"
           :device-count-map="deviceCountMap"
+          :selected-wall-index="selectedWallIndex"
           @select-room="onSelectRoom"
           @update:edit-mode="(v) => (editMode = v)"
           @toggle-cell="onToggleCell"
+          @drop-cell="onDropCell"
+          @drop-wall="onDropWall"
           @reset-layout="onResetLayout"
+          @select-wall="onSelectWall"
+          @move-wall="onMoveWall"
+          @remove-wall="onRemoveWall"
+          @move-cell="onMoveCell"
         />
       </div>
       <div class="right">

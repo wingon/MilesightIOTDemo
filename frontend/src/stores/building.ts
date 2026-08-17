@@ -17,14 +17,14 @@ import {
 } from '@/utils/buildingDemo'
 
 export const useBuildingStore = defineStore('building', () => {
-  /** floor -> 来自 WingOnIOT 库的真实温度/湿度（level 为 3D 楼栋层号） */
+  /** floor -> real temperature/humidity from the WingOnIOT DB (level is the 3D building level) */
   const floorEnv = reactive<
     Record<
       number,
       {
         temperature: number | null
         humidity: number | null
-        /** 该层有最新读数的设备数 */
+        /** Number of devices with the latest reading on this floor */
         deviceCount: number
         updatedAt: string | null
       }
@@ -34,7 +34,7 @@ export const useBuildingStore = defineStore('building', () => {
   const envError = ref<string | null>(null)
   let envFetched = false
 
-  /** 拉取 WingOnIOT 各楼层最新温度/湿度；失败不阻塞页面（保留 demo 回退） */
+  /** Fetch the latest temperature/humidity per floor from WingOnIOT; failures must not block the page (keeps demo fallback) */
   async function fetchFloorEnv() {
     if (envFetched) return
     envFetched = true
@@ -43,8 +43,8 @@ export const useBuildingStore = defineStore('building', () => {
     try {
       const { data } = await getFloorEnvironmentSummary()
       for (const row of data) {
-        // level 为 3D 楼栋层号（1..FLOOR_COUNT）：B2/F→1、B1/F→2、G/F→3、n/F→n+3；
-        // 超出范围的映射（如更深的地下室或更高楼层）无法渲染则跳过
+        // level is the 3D building level (1..FLOOR_COUNT): B2/F→1, B1/F→2, G/F→3, n/F→n+3;
+        // mappings out of range (e.g. deeper basements or higher floors) cannot render and are skipped
         if (row.level == null || row.level < 1 || row.level > FLOOR_COUNT) continue
         floorEnv[row.level] = {
           temperature: row.temperature,
@@ -56,18 +56,18 @@ export const useBuildingStore = defineStore('building', () => {
     } catch (err) {
       envError.value = err instanceof Error ? err.message : String(err)
       console.warn('[building] fetchFloorEnv failed:', envError.value)
-      // 失败时复位标记，下次进入页面可重试
+      // Reset the flag on failure so the next page entry can retry
       envFetched = false
     } finally {
       envLoading.value = false
     }
   }
 
-  /** WingOnIOT 真实环境设备（含每台最新温度/湿度） */
+  /** Real WingOnIOT environment devices (including the latest reading per device) */
   const envDevices = ref<EnvironmentDevice[]>([])
   let envDevicesFetched = false
 
-  /** 拉取 WingOnIOT 设备列表（含最新读数）；失败可重试 */
+  /** Fetch the WingOnIOT device list (including the latest reading); retriable on failure */
   async function fetchEnvDevices() {
     if (envDevicesFetched) return
     envDevicesFetched = true
@@ -80,7 +80,7 @@ export const useBuildingStore = defineStore('building', () => {
     }
   }
 
-  /** 某 3D 层号对应的真实环境设备 */
+  /** Real environment devices for a given 3D level */
   function devicesForFloor(level: number): EnvironmentDevice[] {
     return envDevices.value.filter((d) => d.level === level)
   }
@@ -91,6 +91,8 @@ export const useBuildingStore = defineStore('building', () => {
   const roomDeviceIds = reactive<Record<number, Record<string, string[]>>>({})
   /** floor -> roomId -> cells */
   const floorLayouts = reactive<Record<number, Record<string, Cell[]>>>({})
+  /** floor -> custom walls (manually added by the user in edit mode) */
+  const floorCustomWalls = reactive<Record<number, { x1: number; z1: number; x2: number; z2: number }[]>>({})
 
   function ensureFloor(floor: number) {
     if (!floorInventory[floor]) {
@@ -103,6 +105,9 @@ export const useBuildingStore = defineStore('building', () => {
     }
     if (!roomDeviceIds[floor]) {
       roomDeviceIds[floor] = {}
+    }
+    if (!floorCustomWalls[floor]) {
+      floorCustomWalls[floor] = []
     }
   }
 
@@ -237,6 +242,56 @@ export const useBuildingStore = defineStore('building', () => {
 
   function resetFloorLayout(floor: number) {
     floorLayouts[floor] = createDefaultRoomLayout()
+    floorCustomWalls[floor] = []
+  }
+
+  /** Move a cell from its source position to a target position (keeping room ownership) */
+  function moveRoomCell(floor: number, fromRow: number, fromCol: number, toRow: number, toCol: number) {
+    if (!isInterior(toRow, toCol)) return
+    ensureFloor(floor)
+    const layout = floorLayouts[floor]
+    const owner = getCellOwner(floor, fromRow, fromCol)
+    if (!owner) return
+    // If the target is occupied by another room, release its original ownership first
+    const targetOwner = getCellOwner(floor, toRow, toCol)
+    if (targetOwner && targetOwner !== owner) {
+      layout[targetOwner] = layout[targetOwner].filter((c) => !(c.row === toRow && c.col === toCol))
+    }
+    // Remove from the source room and add to the target position
+    layout[owner] = layout[owner].filter((c) => !(c.row === fromRow && c.col === fromCol))
+    if (!layout[owner].some((c) => c.row === toRow && c.col === toCol)) {
+      layout[owner].push({ row: toRow, col: toCol })
+    }
+  }
+
+  /** Get the custom walls of a floor */
+  function getCustomWalls(floor: number) {
+    ensureFloor(floor)
+    return floorCustomWalls[floor]
+  }
+
+  /** Add a custom wall */
+  function addCustomWall(floor: number, wall: { x1: number; z1: number; x2: number; z2: number }) {
+    ensureFloor(floor)
+    floorCustomWalls[floor].push(wall)
+  }
+
+  /** Remove a custom wall (by index) */
+  function removeCustomWall(floor: number, index: number) {
+    ensureFloor(floor)
+    floorCustomWalls[floor].splice(index, 1)
+  }
+
+  /** Move a custom wall (update coordinates by index) */
+  function moveCustomWall(
+    floor: number,
+    index: number,
+    wall: { x1: number; z1: number; x2: number; z2: number },
+  ) {
+    ensureFloor(floor)
+    if (index >= 0 && index < floorCustomWalls[floor].length) {
+      floorCustomWalls[floor][index] = wall
+    }
   }
 
   function cellToRoomMap(floor: number) {
@@ -294,12 +349,12 @@ export const useBuildingStore = defineStore('building', () => {
   function getFloorStats(floor: number): FloorStats {
     ensureFloor(floor)
     const stats = computeFloorStats(floor, floorInventory[floor], roomDeviceIds[floor])
-    // WingOnIOT 真实数据优先；无该层数据时统计清空，一律不显示 demo 数据
+    // Real WingOnIOT data takes priority; without floor data, stats are cleared and demo data is never shown
     const env = floorEnv[floor]
     const hasReal = !!env
     stats.temperature = env && env.temperature != null ? env.temperature : null
     stats.humidity = env && env.humidity != null ? env.humidity : null
-    // WingOnIOT 只有温度/湿度，其余环境指标（CO₂/PM2.5/电流/占用率等）置空
+    // WingOnIOT only provides temperature/humidity; clear the other environment metrics (CO₂/PM2.5/current/occupancy etc.)
     stats.current = null
     stats.cableTemp = null
     stats.co2 = null
@@ -310,7 +365,7 @@ export const useBuildingStore = defineStore('building', () => {
     stats.co2High = false
     stats.metricAlert = false
     if (hasReal) {
-      // 有 WingOnIOT 设备的楼层：设备数 = 真实设备数（有最新读数即视为在线）
+      // Floors with WingOnIOT devices: device count = real device count (a device with a latest reading counts as online)
       stats.registered = env.deviceCount
       stats.connected = env.deviceCount
       stats.failed = 0
@@ -319,7 +374,7 @@ export const useBuildingStore = defineStore('building', () => {
       stats.unassigned = 0
       stats.byType = { CT103: 0, AM319: 0, VS135: 0 }
     } else {
-      // 无 WingOnIOT 设备的楼层：统计清零
+      // Floors without WingOnIOT devices: stats are zeroed
       stats.registered = 0
       stats.connected = 0
       stats.failed = 0
@@ -388,6 +443,7 @@ export const useBuildingStore = defineStore('building', () => {
     floorInventory,
     roomDeviceIds,
     floorLayouts,
+    floorCustomWalls,
     ensureFloor,
     getInventory,
     getRoomAssignments,
@@ -403,6 +459,11 @@ export const useBuildingStore = defineStore('building', () => {
     getCellOwner,
     assignRoomCell,
     resetFloorLayout,
+    moveRoomCell,
+    getCustomWalls,
+    addCustomWall,
+    removeCustomWall,
+    moveCustomWall,
     cellToRoomMap,
     roomCellCount,
     listDeviceInstances,

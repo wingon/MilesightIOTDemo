@@ -6,17 +6,17 @@ export type DeviceType = 'CT103' | 'AM319' | 'VS135'
 export const DEVICE_TYPES: DeviceType[] = ['CT103', 'AM319', 'VS135']
 
 /**
- * 楼层数按建筑剖面图（SECTION A-A）：
- * 地下 2 层（B2/F、B1/F）+ 地上 8 层（G/F、1/F…7/F）+ 屋顶层（ROOF）= 11 层。
- * 3D 层号 1..11 自下而上：1→B2/F、2→B1/F、3→G/F、4→1/F … 10→7/F、11→ROOF。
+ * Floor count follows the building section (SECTION A-A):
+ * 2 basement floors (B2/F, B1/F) + 8 above-ground floors (G/F, 1/F…7/F) + roof (ROOF) = 11 floors.
+ * 3D level numbers 1..11 bottom-up: 1→B2/F, 2→B1/F, 3→G/F, 4→1/F … 10→7/F, 11→ROOF.
  */
 export const FLOOR_COUNT = 11
-/** 地下层数（位于 3D 楼栋底部） */
+/** Basement floor count (located at the bottom of the 3D building) */
 export const BASEMENT_COUNT = 2
-/** 地面层（G/F）对应的 3D 层号 */
+/** 3D level of the ground floor (G/F) */
 export const GROUND_LEVEL = BASEMENT_COUNT + 1
 
-/** 3D 层号 → 建筑图楼层名（1→'B2'、2→'B1'、3→'G'、4→'1' … 10→'7'、11→'ROOF'） */
+/** Map 3D level → building plan floor name (1→'B2', 2→'B1', 3→'G', 4→'1' … 10→'7', 11→'ROOF') */
 export function floorName(level: number): string {
   if (level <= BASEMENT_COUNT) return `B${BASEMENT_COUNT - level + 1}`
   if (level === GROUND_LEVEL) return 'G'
@@ -205,7 +205,7 @@ export const FLOOR_ROOMS: FloorRoomDef[] = [
 export function createDefaultRoomLayout(): Record<string, Cell[]> {
   const map: Record<string, Cell[]> = {}
   for (const room of FLOOR_ROOMS) {
-    map[room.id] = room.cells.map((c) => ({ ...c }))
+    map[room.id] = [] // Start empty: cells are user-edited, no preset layout
   }
   return map
 }
@@ -251,22 +251,28 @@ export function isInterior(row: number, col: number) {
 }
 
 /**
- * 判断指定楼层的单元格是否应被排除（不渲染）。
- * 1. G/F（3D层号3）到ROOF（3D层号11），8,12 不渲染
- * 2. 5F（3D层号8）到ROOF（3D层号11），8,11、7,11、7,12 不渲染
+ * Whether a cell should be excluded (not rendered) for a given floor.
+ * Aligned to the exterior outline per the G/F plan:
+ * 1. Bottom-left chamfer (smaller): (8,1), (7,1)
+ * 2. Bottom-right chamfer (larger): (8,12), (8,11), (7,12), (7,11), (6,12)
  */
-export function shouldExcludeCell(level: number, row: number, col: number): boolean {
-  // G/F到ROOF：8,12不渲染
-  if (level >= 3 && level <= FLOOR_COUNT) {
-    if (row === 8 && col === 12) {
-      return true
-    }
+export function shouldExcludeCell(_level: number, row: number, col: number): boolean {
+  // Bottom-left chamfer (small, corner cut only)
+  if (
+    (row === 8 && col === 1) ||
+    (row === 7 && col === 1)
+  ) {
+    return true
   }
-  // 5F到ROOF：8,11、7,11、7,12不渲染
-  if (level >= 8 && level <= FLOOR_COUNT) {
-    if ((row === 7 || row === 8) && (col === 11 || col === 12)) {
-      return true
-    }
+  // Bottom-right chamfer (larger, wider corner cut)
+  if (
+    (row === 8 && col === 12) ||
+    (row === 8 && col === 11) ||
+    (row === 7 && col === 12) ||
+    (row === 7 && col === 11) ||
+    (row === 6 && col === 12)
+  ) {
+    return true
   }
   return false
 }
@@ -587,9 +593,9 @@ export interface FloorStats {
   current: number | null
   cableTemp: number | null
   co2: number | null
-  /** WingOnIOT 真实温度（无数据为 null，面板显示 --） */
+  /** Real WingOnIOT temperature (null when no data; panel shows --) */
   temperature: number | null
-  /** WingOnIOT 真实湿度（无数据为 null，面板显示 --） */
+  /** Real WingOnIOT humidity (null when no data; panel shows --) */
   humidity: number | null
   pm25: number | null
   co2High: boolean

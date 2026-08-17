@@ -19,7 +19,6 @@ import {
   FALLBACK_COLOR,
   RECT_LENGTH,
   RECT_WIDTH,
-  ROOM_H,
   createCylinderGeometry,
   createRectGeometry,
   decorationGeometry,
@@ -28,6 +27,12 @@ import {
   parseRotation,
   type FloorGridData,
 } from '@/utils/floorGrid'
+import {
+  computeWalls,
+  WALL_THICKNESS,
+  WALL_HEIGHT,
+  type WallSegment,
+} from '@/utils/floorGridWall'
 
 const props = defineProps<{
   level: number
@@ -35,13 +40,21 @@ const props = defineProps<{
   roomDevices: Record<string, DeviceType[]>
   layout: Record<string, Cell[]>
   editMode: boolean
-  /** griddata 楼层布局；缺省用 DEFAULT_GRIDDATA */
+  /** User-defined custom walls */
+  customWalls?: { x1: number; z1: number; x2: number; z2: number }[]
+  /** griddata floor layout; falls back to DEFAULT_GRIDDATA when not provided */
   gridData?: FloorGridData
 }>()
 
 const emit = defineEmits<{
   selectRoom: [roomId: string | null]
   toggleCell: [payload: { row: number; col: number }]
+  dropCell: [payload: { row: number; col: number; roomId: string }]
+  dropWall: [payload: { row: number; col: number; dir: 'v' | 'h' }]
+  selectWall: [index: number | null]
+  moveWall: [payload: { index: number; row: number; col: number }]
+  removeWall: [index: number]
+  moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
 }>()
 
 const { t } = useI18n()
@@ -50,6 +63,8 @@ const host = ref<HTMLDivElement>()
 const hoveredRoom = ref<string | null>(null)
 const toastVisible = ref(false)
 const toastStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
+/** Index of the selected custom wall in edit mode */
+const selectedWallIndex = ref<number | null>(null)
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -64,8 +79,10 @@ let floorGroup: THREE.Group | null = null
 
 const CORRIDOR_H = 0.18
 const SLAB_H = 0.12
+/** Room cell display height (matches the exterior walls) */
+const CELL_H = WALL_HEIGHT * 1.2
 
-/** 共享轮廓线缓存（同一 geometry 只派生一次 EdgesGeometry） */
+/** Shared outline cache (each geometry derives its EdgesGeometry only once) */
 const edgesCache = new Map<string, THREE.EdgesGeometry>()
 
 function edgesGeometryFor(geometry: THREE.BufferGeometry): THREE.EdgesGeometry {
@@ -77,7 +94,7 @@ function edgesGeometryFor(geometry: THREE.BufferGeometry): THREE.EdgesGeometry {
   return edges
 }
 
-/** ground 圆盘几何：模块级缓存，避免每次 rebuild 新建泄漏 */
+/** Ground disc geometry: module-level cache to avoid rebuild leaks */
 let groundGeo: THREE.CircleGeometry | null = null
 
 function disposeObject(obj: THREE.Object3D) {
@@ -112,12 +129,16 @@ function rebuildScene() {
   if (!floorGroup) return
   clearFloorGroup()
 
-  const gridData = props.gridData ?? DEFAULT_GRIDDATA
-  const cellToRoom = buildCellToRoomMap(props.layout)
-  const slabGeo = createRectGeometry(CELL_SIZE * 0.98, SLAB_H, CELL_SIZE * 0.98)
+  const layout = props.layout
+  const cellToRoom = buildCellToRoomMap(layout)
 
+  // Draw floor slabs (clickable floor cells)
+  const slabGeo = createRectGeometry(CELL_SIZE * 0.98, SLAB_H, CELL_SIZE * 0.98)
+  const roomGeo = createRectGeometry(CELL_SIZE * 0.92, CELL_H, CELL_SIZE * 0.92)
   for (const cell of INTERIOR_CELLS) {
     if (shouldExcludeCell(props.level, cell.row, cell.col)) continue
+
+    // First draw the base slab
     const mat = new THREE.MeshStandardMaterial({
       color: 0xd8d2c8,
       roughness: 0.9,
@@ -126,62 +147,105 @@ function rebuildScene() {
     const mesh = new THREE.Mesh(slabGeo, mat)
     const { x, z } = cellToWorld(cell.row, cell.col)
     mesh.position.set(x, SLAB_H / 2, z)
-    mesh.receiveShadow = true
-    floorGroup.add(mesh)
-  }
-
-  // 格子：griddata 决定放什么（type）、放哪（xAxis/yAxis）、怎么转（rotate）
-  // 注：DEFAULT_GRIDDATA 是 floor '8' 的演示数据；接入真实数据后请按楼层传入对应 gridData
-  for (const cell of gridData.griddata) {
-    const row = Number(cell.xAxis) + 1
-    const col = Number(cell.yAxis) + 1
-    if (!Number.isFinite(row) || !Number.isFinite(col)) continue
-    const roomId = cellToRoom.get(`${row}-${col}`) ?? null
-    const isRoom = !!roomId
-
-    // 房间格高块、走廊格矮块；几何按尺寸共享，不重复 new
-    const height = isRoom ? ROOM_H : CORRIDOR_H
-    const geometry =
-      cell.type === 'Cylinder'
-        ? createCylinderGeometry(CYLINDER_RADIUS, height)
-        : createRectGeometry(RECT_LENGTH, RECT_WIDTH, height)
-
-    const baseColor = isRoom
-      ? getRoomById(roomId)?.color ?? FALLBACK_COLOR
-      : props.editMode
-        ? '#d6e4ff'
-        : '#f2efe8'
-    const mat = decorationGeometry({ fixedColor: baseColor })
-
-    const { x, z } = gridCellToWorld(cell)
-    const baseY = SLAB_H + height / 2
-    const mesh = new THREE.Mesh(geometry, mat)
-    mesh.rotation.copy(parseRotation(cell.rotate))
-    mesh.position.set(x, baseY, z)
-    mesh.castShadow = true
-    mesh.receiveShadow = true
-    mesh.userData.roomId = roomId
-    mesh.userData.row = row
-    mesh.userData.col = col
-    mesh.userData.kind = isRoom ? 'room' : 'corridor'
-    mesh.userData.baseColor = new THREE.Color(baseColor)
-    mesh.userData.baseY = baseY
+    mesh.userData.row = cell.row
+    mesh.userData.col = cell.col
+    mesh.userData.kind = 'slab'
     floorGroup.add(mesh)
     pickMeshes.push(mesh)
 
-    const key = roomId ?? '__corridor__'
+    // If the cell is assigned to a room, draw the 3D room block
+    const roomId = cellToRoom.get(`${cell.row}-${cell.col}`)
+    if (roomId) {
+      const room = getRoomById(roomId)
+      if (room) {
+        const baseY = SLAB_H + CELL_H / 2
+        const colorMat = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(room.color),
+          roughness: 0.7,
+          metalness: 0.1,
+          transparent: true,
+          opacity: 0.85,
+        })
+        const colorMesh = new THREE.Mesh(roomGeo, colorMat)
+        colorMesh.position.set(x, baseY, z)
+        colorMesh.castShadow = false
+        colorMesh.receiveShadow = false
+        colorMesh.userData.row = cell.row
+        colorMesh.userData.col = cell.col
+        colorMesh.userData.roomId = roomId
+        colorMesh.userData.kind = 'room-cell'
+        colorMesh.userData.baseY = baseY
+        colorMesh.userData.baseColor = new THREE.Color(room.color)
+        floorGroup.add(colorMesh)
+        pickMeshes.push(colorMesh)
+
+        const key = roomId
+        const list = meshesByKey.get(key) || []
+        list.push(colorMesh)
+        meshesByKey.set(key, list)
+      }
+    }
+  }
+
+  // Draw walls (interior intersecting walls hidden in edit mode)
+  const walls = computeWalls(layout, props.editMode, props.customWalls ?? [])
+
+  for (const wall of walls) {
+    const dx = wall.x2 - wall.x1
+    const dz = wall.z2 - wall.z1
+    const length = Math.sqrt(dx * dx + dz * dz)
+    if (length < 0.01) continue
+
+    const isExterior = wall.isExterior
+    const isCustom = wall.isCustom ?? false
+    const thickness = isExterior ? WALL_THICKNESS * 1.5 : WALL_THICKNESS
+    const height = isExterior ? WALL_HEIGHT * 1.2 : WALL_HEIGHT
+
+    const geometry = new THREE.BoxGeometry(length, height, thickness)
+    const isSelectedWall = isCustom && wall.wallIndex === selectedWallIndex.value
+    const mat = new THREE.MeshStandardMaterial({
+      color: isSelectedWall ? 0xe0783c : isExterior ? 0x8B7355 : 0x9E9589,
+      roughness: isExterior ? 0.7 : 0.8,
+      metalness: 0.1,
+    })
+    const mesh = new THREE.Mesh(geometry, mat)
+
+    // Center point
+    const cx = (wall.x1 + wall.x2) / 2
+    const cz = (wall.z1 + wall.z2) / 2
+    const baseY = SLAB_H + height / 2
+    mesh.position.set(cx, baseY, cz)
+
+    // Rotation: horizontal segments along the X axis, vertical segments along the Z axis
+    if (Math.abs(dz) > Math.abs(dx)) {
+      mesh.rotation.y = Math.PI / 2
+    }
+
+    mesh.castShadow = isExterior
+    mesh.receiveShadow = isExterior
+    mesh.userData.roomId = wall.roomId
+    mesh.userData.kind = isExterior ? 'exterior-wall' : 'interior-wall'
+    mesh.userData.isCustom = isCustom
+    mesh.userData.wallIndex = wall.wallIndex
+    mesh.userData.baseY = baseY
+    mesh.userData.baseColor = new THREE.Color(isExterior ? 0x8B7355 : 0x9E9589)
+    floorGroup.add(mesh)
+    pickMeshes.push(mesh)
+
+    const key = wall.roomId ?? '__corridor__'
     const list = meshesByKey.get(key) || []
     list.push(mesh)
     meshesByKey.set(key, list)
 
-    // 房间格轮廓线：仅 Rect（圆柱是光滑体，不画线框）
-    if (isRoom && cell.type === 'Rect') {
+    // Wall edge lines
+    if (isExterior) {
+      const edges = new THREE.EdgesGeometry(geometry)
       const line = new THREE.LineSegments(
-        edgesGeometryFor(geometry),
+        edges,
         new THREE.LineBasicMaterial({
-          color: 0xffffff,
+          color: 0x5a4a3a,
           transparent: true,
-          opacity: props.editMode ? 0.65 : 0.35,
+          opacity: props.editMode ? 0.6 : 0.3,
         }),
       )
       line.position.copy(mesh.position)
@@ -215,7 +279,7 @@ function updateAppearance() {
       const baseColor = (mesh.userData.baseColor as THREE.Color) ?? new THREE.Color(0xd8d2c8)
       mat.color = baseColor
       if (!isRoom) {
-        // 走廊：颜色已由 rebuildScene 按 editMode 算好，仅复位
+        // Corridor: color already computed by rebuildScene per editMode, just reset
         mat.opacity = 1
         mat.emissive = new THREE.Color(0x000000)
         mat.emissiveIntensity = 0
@@ -224,8 +288,8 @@ function updateAppearance() {
       mat.opacity = dimOthers && !isActive ? 0.28 : 0.92
       mat.emissive = new THREE.Color(isActive ? baseColor : 0x000000)
       mat.emissiveIntensity = hovered === key ? 0.45 : selected === key ? 0.28 : 0
-      const baseY = (mesh.userData.baseY as number) ?? SLAB_H + ROOM_H / 2
-      mesh.position.y = isActive ? baseY + 0.12 : baseY
+      const baseY = (mesh.userData.baseY as number) ?? SLAB_H + CELL_H / 2
+      mesh.position.y = isActive ? baseY + CELL_H * 0.1 : baseY
     }
   }
 }
@@ -254,6 +318,18 @@ function onPointerMove(ev: PointerEvent) {
   if (!host.value || !camera || !raycaster) return
   const pos = updatePointer(ev)
   if (!pos) return
+
+  // Dragging: show the target-cell ghost preview
+  if (pointerDownAt && dragSource) {
+    const dx = ev.clientX - pointerDownAt.x
+    const dy = ev.clientY - pointerDownAt.y
+    if (Math.hypot(dx, dy) > 6) {
+      const target = screenToCell(ev.clientX, ev.clientY)
+      showDragGhost(target, dragSource.type)
+      host.value.style.cursor = 'grabbing'
+      return
+    }
+  }
 
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(pickMeshes, false)
@@ -293,30 +369,159 @@ function onPointerMove(ev: PointerEvent) {
 }
 
 function onPointerLeave() {
+  pointerDownAt = null
+  dragSource = null
+  hideDragGhost()
+  if (controls) controls.enabled = true
   hoveredRoom.value = null
   toastVisible.value = false
   updateAppearance()
   if (host.value) host.value.style.cursor = 'grab'
 }
 
+/** Convert screen coordinates to a grid cell coordinate (for drag & drop) */
+function screenToCell(clientX: number, clientY: number): { row: number; col: number } | null {
+  if (!host.value || !camera || !raycaster) return null
+  const rect = host.value.getBoundingClientRect()
+  const x = ((clientX - rect.left) / rect.width) * 2 - 1
+  const y = -((clientY - rect.top) / rect.height) * 2 + 1
+  const vec = new THREE.Vector2(x, y)
+  raycaster.setFromCamera(vec, camera)
+  // Intersection of the ray with the ground plane (y=0)
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+  const intersection = new THREE.Vector3()
+  raycaster.ray.intersectPlane(plane, intersection)
+  if (!intersection) return null
+  // Convert to grid cell
+  const halfCols = 12 / 2
+  const halfRows = 8 / 2
+  const col = Math.round(intersection.x / 1.15 + halfCols + 0.5)
+  const row = Math.round(intersection.z / 1.15 + halfRows + 0.5)
+  if (row < 1 || row > 8 || col < 1 || col > 12) return null
+  return { row, col }
+}
+
+/** Show the drag preview on the target cell */
+function showDragGhost(target: { row: number; col: number } | null, type: 'cell' | 'wall') {
+  if (!scene) return
+  if (!dragGhost) {
+    const geo = new THREE.BoxGeometry(CELL_SIZE * 0.92, CELL_H, CELL_SIZE * 0.92)
+    const mat = new THREE.MeshBasicMaterial({
+      color: type === 'cell' ? 0x2f8f46 : 0xe0783c,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+    })
+    dragGhost = new THREE.Mesh(geo, mat)
+    scene.add(dragGhost)
+  }
+  if (!target) {
+    dragGhost.visible = false
+    return
+  }
+  const { x, z } = cellToWorld(target.row, target.col)
+  dragGhost.position.set(x, SLAB_H + CELL_H / 2, z)
+  dragGhost.visible = true
+}
+
+function hideDragGhost() {
+  if (!dragGhost) return
+  dragGhost.visible = false
+}
+
+function onDragOver(ev: DragEvent) {
+  if (!props.editMode) return
+  ev.preventDefault()
+  ev.dataTransfer!.dropEffect = 'copy'
+}
+
+function onDrop(ev: DragEvent) {
+  if (!props.editMode) return
+  ev.preventDefault()
+  const data = ev.dataTransfer?.getData('application/json')
+  if (!data) return
+  try {
+    const parsed = JSON.parse(data)
+    const cell = screenToCell(ev.clientX, ev.clientY)
+    if (!cell) return
+    if (parsed.type === 'room' && parsed.roomId) {
+      emit('dropCell', { row: cell.row, col: cell.col, roomId: parsed.roomId })
+    } else if (parsed.type === 'wall') {
+      emit('dropWall', { row: cell.row, col: cell.col, dir: parsed.dir === 'h' ? 'h' : 'v' })
+    }
+  } catch { /* invalid data */ }
+}
+
 let pointerDownAt: { x: number; y: number } | null = null
+/** Source object being dragged (cell/wall hit at pointerdown) */
+let dragSource: { type: 'cell'; fromRow: number; fromCol: number } | { type: 'wall'; index: number } | null = null
+/** Ghost preview mesh at the drag target position */
+let dragGhost: THREE.Mesh | null = null
 
 function onPointerDown(ev: PointerEvent) {
   pointerDownAt = { x: ev.clientX, y: ev.clientY }
+  if (!props.editMode || !camera || !raycaster) return
+  updatePointer(ev)
+  raycaster.setFromCamera(pointer, camera)
+  const hits = raycaster.intersectObjects(pickMeshes, false)
+  if (!hits.length) return
+  const hit = hits[0].object
+  if (hit.userData.isCustom && typeof hit.userData.wallIndex === 'number') {
+    dragSource = { type: 'wall', index: hit.userData.wallIndex }
+    if (controls) controls.enabled = false
+  } else if (hit.userData.kind === 'room-cell' && hit.userData.roomId) {
+    dragSource = { type: 'cell', fromRow: hit.userData.row, fromCol: hit.userData.col }
+    if (controls) controls.enabled = false
+  }
 }
 
 function onPointerUp(ev: PointerEvent) {
   if (!camera || !raycaster || !pointerDownAt) return
   const dx = ev.clientX - pointerDownAt.x
   const dy = ev.clientY - pointerDownAt.y
+  const source = dragSource
   pointerDownAt = null
-  if (Math.hypot(dx, dy) > 6) return
+  dragSource = null
+  const isDrag = Math.hypot(dx, dy) > 6
+  hideDragGhost()
+  if (controls) controls.enabled = true
+
+  // Drag-move (cell/wall)
+  if (isDrag && props.editMode && source) {
+    const target = screenToCell(ev.clientX, ev.clientY)
+    if (target) {
+      if (source.type === 'wall') {
+        selectedWallIndex.value = null
+        emit('selectWall', null)
+        emit('moveWall', { index: source.index, row: target.row, col: target.col })
+        rebuildScene()
+        return
+      }
+      if (source.fromRow !== target.row || source.fromCol !== target.col) {
+        emit('moveCell', {
+          fromRow: source.fromRow,
+          fromCol: source.fromCol,
+          row: target.row,
+          col: target.col,
+        })
+        return
+      }
+    }
+    return
+  }
+
+  if (isDrag) return
 
   updatePointer(ev)
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(pickMeshes, false)
   if (!hits.length) {
     if (!props.editMode) emit('selectRoom', null)
+    else if (selectedWallIndex.value !== null) {
+      selectedWallIndex.value = null
+      emit('selectWall', null)
+      rebuildScene()
+    }
     return
   }
 
@@ -326,6 +531,38 @@ function onPointerUp(ev: PointerEvent) {
   const roomId = (hit.userData.roomId as string | null) || null
 
   if (props.editMode) {
+    // Click a custom wall → select/deselect
+    if (hit.userData.isCustom && typeof hit.userData.wallIndex === 'number') {
+      const idx = hit.userData.wallIndex as number
+      if (selectedWallIndex.value === idx) {
+        // Clicking an already-selected wall again → delete it directly
+        selectedWallIndex.value = null
+        emit('selectWall', null)
+        emit('removeWall', idx)
+        rebuildScene()
+        return
+      }
+      selectedWallIndex.value = idx
+      emit('selectWall', idx)
+      rebuildScene()
+      return
+    }
+    // With a wall selected, clicking a cell moves the wall
+    if (selectedWallIndex.value !== null && (hit.userData.kind === 'slab' || hit.userData.kind === 'room-cell')) {
+      const idx = selectedWallIndex.value
+      emit('moveWall', { index: idx, row, col })
+      selectedWallIndex.value = null
+      emit('selectWall', null)
+      return
+    }
+    // Exterior outline is fixed and not editable
+    if (hit.userData.kind === 'exterior-wall') return
+    // Click a cell belonging to another room → select that room, without changing cell ownership
+    const cellRoomId = (hit.userData.roomId as string | null) || null
+    if (cellRoomId && cellRoomId !== props.selectedRoom) {
+      emit('selectRoom', cellRoomId)
+      return
+    }
     if (!props.selectedRoom) return
     emit('toggleCell', { row, col })
     return
@@ -406,6 +643,8 @@ onMounted(() => {
   renderer.domElement.addEventListener('pointerup', onPointerUp)
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('pointerleave', onPointerLeave)
+  host.value.addEventListener('dragover', onDragOver)
+  host.value.addEventListener('drop', onDrop)
   window.addEventListener('resize', onResize)
   animate()
 })
@@ -417,7 +656,13 @@ watch(
 
 watch(
   () => props.editMode,
-  () => rebuildScene(),
+  (v) => {
+    if (!v) {
+      selectedWallIndex.value = null
+      emit('selectWall', null)
+    }
+    rebuildScene()
+  },
 )
 
 watch(
@@ -432,6 +677,21 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => props.customWalls,
+  () => {
+    if (selectedWallIndex.value !== null && props.customWalls) {
+      const maxIndex = props.customWalls.length - 1
+      if (selectedWallIndex.value > maxIndex) {
+        selectedWallIndex.value = null
+        emit('selectWall', null)
+      }
+    }
+    rebuildScene()
+  },
+  { deep: true },
+)
+
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
   window.removeEventListener('resize', onResize)
@@ -439,6 +699,8 @@ onBeforeUnmount(() => {
   renderer?.domElement.removeEventListener('pointerup', onPointerUp)
   renderer?.domElement.removeEventListener('pointermove', onPointerMove)
   renderer?.domElement.removeEventListener('pointerleave', onPointerLeave)
+  host.value?.removeEventListener('dragover', onDragOver)
+  host.value?.removeEventListener('drop', onDrop)
   controls?.dispose()
   clearFloorGroup()
   disposeGeometryCache()

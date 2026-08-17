@@ -10,15 +10,25 @@ const props = defineProps<{
   selectedRoom: string | null
   layout: Record<string, Cell[]>
   editMode: boolean
-  /** 各房间 DB 设备数（key 为 roomId，默认所有设备归入 room-1） */
+  /** User-defined custom walls */
+  customWalls?: { x1: number; z1: number; x2: number; z2: number }[]
+  /** DB device count per room (key is roomId; defaults to room-1 when the DB has no room field) */
   deviceCountMap?: Record<string, number>
+  /** Index of the selected custom wall in edit mode */
+  selectedWallIndex?: number | null
 }>()
 
 const emit = defineEmits<{
   selectRoom: [roomId: string | null]
   'update:editMode': [value: boolean]
   toggleCell: [payload: { row: number; col: number }]
+  dropCell: [payload: { row: number; col: number; roomId: string }]
+  dropWall: [payload: { row: number; col: number; dir: 'v' | 'h' }]
   resetLayout: []
+  selectWall: [index: number | null]
+  moveWall: [payload: { index: number; row: number; col: number }]
+  removeWall: [index: number]
+  moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
 }>()
 
 const { t } = useI18n()
@@ -37,6 +47,52 @@ function cellCount(roomId: string) {
 
 function deviceCount(roomId: string) {
   return props.deviceCountMap?.[roomId] ?? 0
+}
+
+/** Generate a graphics-only drag image (no text) */
+function makeDragImage(color: string | null, dir: 'v' | 'h' | null) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 36
+  canvas.height = 36
+  const ctx = canvas.getContext('2d')!
+  if (color) {
+    ctx.fillStyle = color
+    ctx.fillRect(8, 8, 20, 20)
+  } else if (dir) {
+    ctx.strokeStyle = '#8a6d3b'
+    ctx.lineWidth = 6
+    ctx.lineCap = 'round'
+    if (dir === 'v') {
+      ctx.beginPath()
+      ctx.moveTo(18, 6)
+      ctx.lineTo(18, 30)
+    } else {
+      ctx.beginPath()
+      ctx.moveTo(6, 18)
+      ctx.lineTo(30, 18)
+    }
+    ctx.stroke()
+  }
+  return canvas
+}
+
+/** Room card drag start */
+function onRoomDragStart(ev: DragEvent, roomId: string) {
+  if (!props.editMode) return
+  ev.dataTransfer!.effectAllowed = 'copy'
+  ev.dataTransfer!.setData('application/json', JSON.stringify({ type: 'room', roomId }))
+  const room = FLOOR_ROOMS.find((r) => r.id === roomId)
+  if (room) {
+    ev.dataTransfer!.setDragImage(makeDragImage(room.color, null), 18, 18)
+  }
+}
+
+/** Wall drag start */
+function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
+  if (!props.editMode) return
+  ev.dataTransfer!.effectAllowed = 'copy'
+  ev.dataTransfer!.setData('application/json', JSON.stringify({ type: 'wall', dir }))
+  ev.dataTransfer!.setDragImage(makeDragImage(null, dir), 18, 18)
 }
 </script>
 
@@ -60,6 +116,14 @@ function deviceCount(roomId: string) {
         <a-button v-if="editMode" size="small" danger @click="emit('resetLayout')">
           {{ t('building.resetLayout') }}
         </a-button>
+        <a-button
+          v-if="editMode && selectedWallIndex !== null && selectedWallIndex !== undefined"
+          size="small"
+          danger
+          @click="emit('removeWall', selectedWallIndex)"
+        >
+          {{ t('building.removeSelectedWall') }}
+        </a-button>
         <a-button size="small" :disabled="!selectedRoom" @click="emit('selectRoom', null)">
           {{ t('building.clearRoom') }}
         </a-button>
@@ -74,8 +138,15 @@ function deviceCount(roomId: string) {
           :room-devices="roomDevices"
           :layout="layout"
           :edit-mode="editMode"
+          :custom-walls="customWalls"
           @select-room="(id) => emit('selectRoom', id)"
           @toggle-cell="(p) => emit('toggleCell', p)"
+          @drop-cell="(p) => emit('dropCell', p)"
+          @drop-wall="(p) => emit('dropWall', p)"
+          @select-wall="(i) => emit('selectWall', i)"
+          @move-wall="(p) => emit('moveWall', p)"
+          @remove-wall="(i) => emit('removeWall', i)"
+          @move-cell="(p) => emit('moveCell', p)"
         />
       </div>
 
@@ -87,7 +158,9 @@ function deviceCount(roomId: string) {
           type="button"
           class="legend-item"
           :class="{ active: selectedRoom === room.id }"
+          :draggable="editMode"
           @click="onRoomClick(room.id)"
+          @dragstart="(e) => onRoomDragStart(e, room.id)"
         >
           <i class="swatch" :style="{ background: room.color }" />
           <span>{{ t('building.roomN', { n: room.index }) }}</span>
@@ -95,6 +168,29 @@ function deviceCount(roomId: string) {
           <span class="count dim">{{ deviceCount(room.id) }}</span>
         </button>
         <p v-if="editMode && !selectedRoom" class="legend-hint">{{ t('building.editSelectRoom') }}</p>
+
+        <!-- Wall drag items (shown in edit mode only) -->
+        <div v-if="editMode" class="wall-section">
+          <div class="wall-divider" />
+          <div class="legend-title">{{ t('building.walls') }}</div>
+          <div
+            class="wall-item"
+            draggable="true"
+            @dragstart="(e) => onWallDragStart(e, 'v')"
+          >
+            <span class="wall-icon">┃</span>
+            <span>{{ t('building.dragWallV') }}</span>
+          </div>
+          <div
+            class="wall-item"
+            draggable="true"
+            @dragstart="(e) => onWallDragStart(e, 'h')"
+          >
+            <span class="wall-icon">─</span>
+            <span>{{ t('building.dragWallH') }}</span>
+          </div>
+          <p class="wall-hint">{{ t('building.dragWallHint') }}</p>
+        </div>
       </aside>
     </div>
   </div>
@@ -220,6 +316,46 @@ function deviceCount(roomId: string) {
   font-size: 11px;
   color: #a88955;
   line-height: 1.35;
+}
+
+.wall-section {
+  margin-top: 4px;
+}
+
+.wall-divider {
+  height: 1px;
+  background: #e6e2da;
+  margin: 6px 0;
+}
+
+.wall-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px;
+  cursor: grab;
+  font-size: 12px;
+  color: #0d0d0d;
+  border: 1px dashed #c4a574;
+  border-radius: 4px;
+  background: #faf8f5;
+}
+
+.wall-item:hover {
+  background: #f0eee9;
+}
+
+.wall-hint {
+  margin: 6px 4px 0;
+  font-size: 11px;
+  color: #a88955;
+  line-height: 1.35;
+}
+
+.wall-icon {
+  font-size: 16px;
+  color: #8B7355;
+  font-weight: 700;
 }
 
 @media (max-width: 900px) {

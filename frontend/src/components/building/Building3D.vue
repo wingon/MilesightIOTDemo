@@ -14,6 +14,9 @@ import {
 import {
   envColorFor,
   envRange,
+  fixedTemperatureColor,
+  TEMPERATURE_BAND_COLORS,
+  TEMPERATURE_TICKS,
   type EnvMetric,
   type FloorEnvValue,
 } from '@/utils/envColor'
@@ -28,11 +31,11 @@ import { brand } from '@/theme/colorConfig'
 
 const props = defineProps<{
   selectedFloor: number | null
-  /** WingOnIOT 各樓層真實溫度/濕度（key 為 3D 樓棟樓層號） */
+  /** Real temperature/humidity per floor from WingOnIOT (key is the 3D building level) */
   floorEnv?: Record<number, FloorEnvValue>
-  /** 當前著色指標 */
+  /** Current coloring metric */
   metric?: EnvMetric
-  /** 自訂格子形狀設定（由 DB 驅動，無匹配設定時使用預設長方形） */
+  /** Custom cell shape settings (DB-driven; falls back to default rectangles when no match) */
   cellShapes?: CellShapeConfig[]
 }>()
 
@@ -61,14 +64,14 @@ const meshesByFloor = new Map<number, THREE.Mesh[]>()
 let buildingGroup: THREE.Group | null = null
 
 /**
- * 查詢指定格子的形狀設定
+ * Look up the shape config for a given cell.
  *
- * 設定由 DB 驅動（:cell-shapes prop），不存在匹配時回退為預設長方形。
+ * Settings are DB-driven (the :cell-shapes prop); falls back to the default rectangle when no match.
  *
- * @param floor - 當前樓層（3D 層號 1~11）
- * @param row   - 格子行號（1-based）
- * @param col   - 格子列號（1-based）
- * @returns 匹配的 CellShapeConfig，未找到則回傳 undefined（使用預設長方形）
+ * @param floor - current floor (3D level 1~11)
+ * @param row   - cell row (1-based)
+ * @param col   - cell col (1-based)
+ * @returns matching CellShapeConfig, or undefined when not found (uses the default rectangle)
  */
 function getCellShapeConfig(
   floor: number,
@@ -89,16 +92,22 @@ const SLAB = FLOOR_H + FLOOR_GAP
 
 function floorColor(level: number, selected: number | null, hovered: number | null) {
   if (selected === level || hovered === level) return new THREE.Color(brand.primary)
-  // WingOnIOT 真實資料按當前指標著色（溫度/濕度色帶）
+  // Temperature: uses the fixed 5-band color scale
   const env = props.floorEnv?.[level]
   const metric = props.metric ?? 'temperature'
-  const value = env ? (metric === 'humidity' ? env.humidity : env.temperature) : null
-  if (value != null) {
-    const [min, max] = envRange(props.floorEnv, metric)
-    const color = envColorFor(metric, value, min, max)
-    if (color) return new THREE.Color(color)
+  if (metric === 'temperature') {
+    const value = env?.temperature ?? null
+    const color = fixedTemperatureColor(value)
+    if (color !== '#d9d5cc') return new THREE.Color(color)
+    // No-data fallback gradient
+    const t = level / Math.max(1, FLOOR_COUNT - 1)
+    return new THREE.Color().setHSL(0.08, 0.12, 0.22 + t * 0.28)
   }
-  // 無資料樓層保持預設漸變
+  // Humidity: keeps the original dynamic color scale
+  const value = env?.humidity ?? null
+  const [min, max] = envRange(props.floorEnv, metric)
+  const color = envColorFor(metric, value, min, max)
+  if (color) return new THREE.Color(color)
   const t = level / Math.max(1, FLOOR_COUNT - 1)
   return new THREE.Color().setHSL(0.08, 0.12, 0.22 + t * 0.28)
 }
@@ -130,14 +139,14 @@ function rebuildFloors() {
       })
       mats.push(mat)
       
-      // 根據設定決定形狀：查詢 cellShapes 或使用預設長方形
+      // Determine the shape from settings: look up cellShapes or use the default rectangle
       const shapeConfig = getCellShapeConfig(level, cell.row, cell.col)
       const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
       
-      // Hidden 類型：跳過渲染，不建立 Mesh
+      // Hidden type: skip rendering, no mesh is created
       if (isHiddenType(shapeType)) continue
       
-      // 長方形復用共享的 cellGeo，其他形狀按需建立（有幾何快取）
+      // Rectangles reuse the shared cellGeo; other shapes are created on demand (with a geometry cache)
       const geo = shapeType === 'Rect'
         ? cellGeo
         : createGeometryByType(shapeType, cellSize, FLOOR_H)
@@ -195,7 +204,7 @@ function updateFloorAppearance() {
 }
 
 function deviceCountFor(floor: number) {
-  // WingOnIOT 真實設備數（無該層資料為 0），不顯示 demo 計數
+  // Real WingOnIOT device count (0 when this floor has no data); demo counts are not shown
   return props.floorEnv?.[floor]?.deviceCount ?? 0
 }
 
@@ -325,7 +334,7 @@ watch(
   () => updateFloorAppearance(),
 )
 
-// 真實資料/指標變化時重新整理樓層顏色
+// Refresh floor colors when real data / metric changes
 watch(
   () => props.floorEnv,
   () => updateFloorAppearance(),
@@ -336,27 +345,35 @@ watch(
   () => updateFloorAppearance(),
 )
 
-// 格子形狀設定變化時重建整個樓層（深比較，新增/刪除設定均觸發）
+// Rebuild all floors when the cell shape settings change (deep compare; add/remove settings both trigger)
 watch(
   () => props.cellShapes,
   () => rebuildFloors(),
   { deep: true },
 )
 
-// 圖例（當前指標色帶）
+// Legend (current metric color scale)
 const legendRange = computed(() => envRange(props.floorEnv, props.metric ?? 'temperature'))
 const legendUnit = computed(() => (props.metric === 'humidity' ? '%RH' : '°C'))
 const legendLabel = computed(() =>
   props.metric === 'humidity' ? t('building.metricHumidity') : t('building.metricTemperature'),
 )
-const LEGEND_CELLS = 10
+/** Temperature: fixed 4 swatches + 5 tick values (0,25,50,75,100); humidity: 10 swatches */
+const LEGEND_BAND_COUNT = 4
+const LEGEND_CELLS = computed(() =>
+  props.metric === 'humidity' ? 10 : LEGEND_BAND_COUNT,
+)
 
-/** 圖例色塊顏色 —— 與 3D 樓層同源（envColorFor 取樣） */
+/** Legend swatch color */
 function legendCellColor(i: number) {
-  const [min, max] = legendRange.value
-  const t = (i - 0.5) / LEGEND_CELLS
-  const value = min + t * (max - min)
-  return envColorFor(props.metric ?? 'temperature', value, min, max) ?? '#d9d5cc'
+  if (props.metric === 'humidity') {
+    const [min, max] = legendRange.value
+    const t = (i - 0.5) / 10
+    const value = min + t * (max - min)
+    return envColorFor('humidity', value, min, max) ?? '#d9d5cc'
+  }
+  // Fixed 5-band temperature
+  return TEMPERATURE_BAND_COLORS[i - 1] ?? '#d9d5cc'
 }
 
 onBeforeUnmount(() => {
@@ -405,7 +422,10 @@ onBeforeUnmount(() => {
           :style="{ background: legendCellColor(i) }"
         />
       </div>
-      <div class="legend-scale" aria-hidden="true">
+      <div v-if="metric === 'temperature'" class="legend-scale" aria-hidden="true">
+        <span v-for="tick in TEMPERATURE_TICKS" :key="tick">{{ tick }}</span>
+      </div>
+      <div v-else class="legend-scale" aria-hidden="true">
         <span>{{ legendRange[0] }}</span>
         <span>{{ legendRange[1] }}</span>
       </div>
