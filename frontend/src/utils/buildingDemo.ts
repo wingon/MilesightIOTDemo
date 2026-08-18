@@ -646,3 +646,26 @@ export function computeFloorStats(
     occupancy: env.occupancy,
   }
 }
+
+/** Room metadata for the floor 3D view (index for display, color for rendering). */
+export interface RoomMeta {
+  index: number
+  color: string
+}
+
+/**
+ * Build roomId -> RoomMeta from DB floor rooms.
+ * room_number is parsed to the FLOOR_ROOMS index, and the color is resolved from
+ * the preset palette; unknown rooms fall back to a neutral gray.
+ */
+export function buildRoomMeta(
+  rooms: Array<{ room_id: string; room_number: string }>,
+): Record<string, RoomMeta> {
+  const map: Record<string, RoomMeta> = {}
+  for (const r of rooms) {
+    const index = parseInt(r.room_number, 10) || 0
+    const preset = FLOOR_ROOMS.find((x) => x.index === index)
+    map[r.room_id] = { index, color: preset?.color ?? '#999999' }
+  }
+  return map
+}

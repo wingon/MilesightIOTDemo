@@ -21,26 +21,21 @@ const selectedFloor = ref<number | null>(null)
 const metric = ref<EnvMetric>('temperature')
 
 /**
- * 格子形狀設定列表
+ * Cell shape settings list
  *
- * 由 DB（Building_Cell_Shape 表）驅動，透過 GET /api/v1/building/cell-shapes 拉取，
- * 取代原本前端硬編碼的 cellShape(...) 設定。
- * 傳入 Building3D 的 :cell-shapes prop，覆蓋預設設定。
- *
- * 注意事項：
- *  - floor 為 0 表示「所有樓層」（由 Building3D 內部處理）
- *  - 指定具體樓層號則只在該層生效
- *  - 被 shouldExcludeCell 排除的格子不會渲染，設定無效
+ * Driven by the DB (Building_Cell table), fetched via GET /api/v1/building/cell-shapes,
+ * replacing the old Building_Cell_Shape table and frontend hard-coded settings.
+ * Passed to Building3D via the :cell-shapes prop (one entry per cell: row/col/floor/shape/rotation/color/height).
  */
 const cellShapes = ref<CellShapeConfig[]>([])
 
-/** 從 DB 拉取格子形狀設定；失敗時保持空陣列（全部顯示預設長方形） */
+/** Fetch cell shape settings from the DB; keep empty on failure (fall back to frontend hard-coded rectangles) */
 async function fetchCellShapes() {
   try {
     const { data } = await listBuildingCellShapes()
     cellShapes.value = data ?? []
   } catch (err) {
-    console.warn('[BuildingViewer] 無法載入格子形狀設定（Building_Cell_Shape）：', err)
+    console.warn('[BuildingViewer] Failed to load cell shape settings (Building_Cell):', err)
     cellShapes.value = []
   }
 }
@@ -51,7 +46,9 @@ onMounted(() => {
   // 拉取 WingOnIOT 各樓層真實溫度/濕度 + 設備明細
   store.fetchFloorEnv()
   store.fetchEnvDevices()
-  // 拉取 DB 驅動的格子形狀設定（不阻塞其餘初始化）
+  // Fetch the DB-driven building/floor structure (Building/Floor tables)
+  store.fetchBuildingStructure()
+  // Fetch the DB-driven cell shape settings (Building_Cell table, non-blocking for the rest of the init)
   fetchCellShapes()
   const q = Number(route.query.floor)
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {
@@ -92,7 +89,7 @@ const panelDevices = computed(() => {
   return store.listDeviceInstances(selectedFloor.value, null)
 })
 
-/** 選中樓層對應的 WingOnIOT 真實環境設備（無資料時為空陣列，面板回退 demo） */
+/** Real WingOnIOT environment devices for the selected floor (empty when no data; panel falls back to demo) */
 const panelEnvDevices = computed(() => {
   if (selectedFloor.value == null) return []
   return store.devicesForFloor(selectedFloor.value)
@@ -137,7 +134,9 @@ const panelEnvDevices = computed(() => {
             :floor-env="store.floorEnv"
             :metric="metric"
             :cell-shapes="cellShapes"
+            :building-id="store.buildings[0]?.id"
             @select-floor="onSelectFloor"
+            @refresh-shapes="fetchCellShapes"
           />
         </div>
       </div>

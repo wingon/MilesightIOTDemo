@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Floor3D from '@/components/building/Floor3D.vue'
-import { FLOOR_ROOMS, floorName, type Cell, type DeviceType } from '@/utils/buildingDemo'
+import { floorName, type Cell, type DeviceType, type RoomMeta } from '@/utils/buildingDemo'
 
 const props = defineProps<{
   floor: number
@@ -16,6 +16,10 @@ const props = defineProps<{
   deviceCountMap?: Record<string, number>
   /** Index of the selected custom wall in edit mode */
   selectedWallIndex?: number | null
+  /** DB floor rooms (room_id + room_number) */
+  rooms?: Array<{ room_id: string; room_number: string }>
+  /** roomId -> metadata (index + color) resolved from DB rooms */
+  roomMeta?: Record<string, RoomMeta>
 }>()
 
 const emit = defineEmits<{
@@ -81,9 +85,9 @@ function onRoomDragStart(ev: DragEvent, roomId: string) {
   if (!props.editMode) return
   ev.dataTransfer!.effectAllowed = 'copy'
   ev.dataTransfer!.setData('application/json', JSON.stringify({ type: 'room', roomId }))
-  const room = FLOOR_ROOMS.find((r) => r.id === roomId)
-  if (room) {
-    ev.dataTransfer!.setDragImage(makeDragImage(room.color, null), 18, 18)
+  const meta = props.roomMeta?.[roomId]
+  if (meta) {
+    ev.dataTransfer!.setDragImage(makeDragImage(meta.color, null), 18, 18)
   }
 }
 
@@ -139,6 +143,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           :layout="layout"
           :edit-mode="editMode"
           :custom-walls="customWalls"
+          :room-meta="roomMeta"
           @select-room="(id) => emit('selectRoom', id)"
           @toggle-cell="(p) => emit('toggleCell', p)"
           @drop-cell="(p) => emit('dropCell', p)"
@@ -153,19 +158,19 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
       <aside class="legend">
         <div class="legend-title">{{ t('building.rooms') }}</div>
         <button
-          v-for="room in FLOOR_ROOMS"
-          :key="room.id"
+          v-for="room in rooms"
+          :key="room.room_id"
           type="button"
           class="legend-item"
-          :class="{ active: selectedRoom === room.id }"
+          :class="{ active: selectedRoom === room.room_id }"
           :draggable="editMode"
-          @click="onRoomClick(room.id)"
-          @dragstart="(e) => onRoomDragStart(e, room.id)"
+          @click="onRoomClick(room.room_id)"
+          @dragstart="(e) => onRoomDragStart(e, room.room_id)"
         >
-          <i class="swatch" :style="{ background: room.color }" />
-          <span>{{ t('building.roomN', { n: room.index }) }}</span>
-          <span class="count" :title="t('building.cellCount')">{{ cellCount(room.id) }}</span>
-          <span class="count dim">{{ deviceCount(room.id) }}</span>
+          <i class="swatch" :style="{ background: roomMeta?.[room.room_id]?.color }" />
+          <span>{{ t('building.roomN', { n: roomMeta?.[room.room_id]?.index }) }}</span>
+          <span class="count" :title="t('building.cellCount')">{{ cellCount(room.room_id) }}</span>
+          <span class="count dim">{{ deviceCount(room.room_id) }}</span>
         </button>
         <p v-if="editMode && !selectedRoom" class="legend-hint">{{ t('building.editSelectRoom') }}</p>
 

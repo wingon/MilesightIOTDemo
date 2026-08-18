@@ -8,10 +8,10 @@ import {
   CELL_SIZE,
   INTERIOR_CELLS,
   cellToWorld,
-  getRoomById,
   shouldExcludeCell,
   type Cell,
   type DeviceType,
+  type RoomMeta,
 } from '@/utils/buildingDemo'
 import {
   CYLINDER_RADIUS,
@@ -44,6 +44,8 @@ const props = defineProps<{
   customWalls?: { x1: number; z1: number; x2: number; z2: number }[]
   /** griddata floor layout; falls back to DEFAULT_GRIDDATA when not provided */
   gridData?: FloorGridData
+  /** roomId -> metadata (index + color) resolved from DB rooms */
+  roomMeta?: Record<string, RoomMeta>
 }>()
 
 const emit = defineEmits<{
@@ -156,11 +158,11 @@ function rebuildScene() {
     // If the cell is assigned to a room, draw the 3D room block
     const roomId = cellToRoom.get(`${cell.row}-${cell.col}`)
     if (roomId) {
-      const room = getRoomById(roomId)
-      if (room) {
+      const meta = props.roomMeta?.[roomId]
+      if (meta) {
         const baseY = SLAB_H + CELL_H / 2
         const colorMat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(room.color),
+          color: new THREE.Color(meta.color),
           roughness: 0.7,
           metalness: 0.1,
           transparent: true,
@@ -175,7 +177,7 @@ function rebuildScene() {
         colorMesh.userData.roomId = roomId
         colorMesh.userData.kind = 'room-cell'
         colorMesh.userData.baseY = baseY
-        colorMesh.userData.baseColor = new THREE.Color(room.color)
+        colorMesh.userData.baseColor = new THREE.Color(meta.color)
         floorGroup.add(colorMesh)
         pickMeshes.push(colorMesh)
 
@@ -593,11 +595,11 @@ function animate() {
 const toastTitle = () => {
   if (props.editMode) {
     if (!props.selectedRoom) return t('building.editSelectRoom')
-    const room = getRoomById(props.selectedRoom)
-    return t('building.editClickCell', { n: room?.index ?? '' })
+    const meta = props.roomMeta?.[props.selectedRoom]
+    return t('building.editClickCell', { n: meta?.index ?? '' })
   }
   if (!hoveredRoom.value) return ''
-  return t('building.roomN', { n: getRoomById(hoveredRoom.value)?.index ?? '' })
+  return t('building.roomN', { n: props.roomMeta?.[hoveredRoom.value]?.index ?? '' })
 }
 
 onMounted(() => {

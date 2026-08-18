@@ -28,6 +28,7 @@ import {
   type GridType,
 } from '@/utils/floorGrid'
 import { brand } from '@/theme/colorConfig'
+import { updateCellRotation, updateColCellsRotation, cellEdit, undoEdit, resetGridExtras } from '@/api/building'
 
 const props = defineProps<{
   selectedFloor: number | null
@@ -37,10 +38,13 @@ const props = defineProps<{
   metric?: EnvMetric
   /** Custom cell shape settings (DB-driven; falls back to default rectangles when no match) */
   cellShapes?: CellShapeConfig[]
+  /** Building ID (for batch rotation) */
+  buildingId?: number
 }>()
 
 const emit = defineEmits<{
   selectFloor: [floor: number]
+  refreshShapes: []
 }>()
 
 const { t } = useI18n()
@@ -49,6 +53,17 @@ const host = ref<HTMLDivElement>()
 const hoveredFloor = ref<number | null>(null)
 const toastVisible = ref(false)
 const toastStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
+/** Key of the cell currently logged (row/col), so hover logs once per cell */
+let loggedCellKey = ''
+
+/** Currently selected cell for rotation editing */
+const selectedCell = ref<{
+  floor_id: number
+  row: number
+  col: number
+  floor3d: number
+  rotation: string | null
+} | null>(null)
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -121,43 +136,75 @@ function rebuildFloors() {
   const cellSize = CELL_SIZE * 0.96
   const cellGeo = new THREE.BoxGeometry(cellSize, FLOOR_H, cellSize) as THREE.BufferGeometry
 
+  // DB-driven cell list: group cellShapes by 3D floor. When the DB returns no
+  // shapes, fall back to the hard-coded interior cells (default rectangles).
+  const shapesByFloor = new Map<number, CellShapeConfig[]>()
+  for (const s of props.cellShapes ?? []) {
+    if (s.floor < 1 || s.floor > FLOOR_COUNT) continue
+    const list = shapesByFloor.get(s.floor) ?? []
+    list.push(s)
+    shapesByFloor.set(s.floor, list)
+  }
+  const dbDriven = shapesByFloor.size > 0
+
   for (let i = 0; i < FLOOR_COUNT; i++) {
     const level = i + 1
     const yBase = i * SLAB
     const mats: THREE.MeshStandardMaterial[] = []
     const levelMeshes: THREE.Mesh[] = []
 
-    for (const cell of INTERIOR_CELLS) {
-      if (shouldExcludeCell(level, cell.row, cell.col)) continue
-      
+    // Build the cell list for this floor: DB-driven when available, else interior cells
+    const renderCells: CellShapeConfig[] = []
+    if (dbDriven) {
+      for (const s of shapesByFloor.get(level) ?? []) renderCells.push(s)
+    } else {
+      for (const cell of INTERIOR_CELLS) {
+        if (shouldExcludeCell(level, cell.row, cell.col)) continue
+        renderCells.push({ row: cell.row, col: cell.col, floor: level, shape: 'Rect' })
+      }
+    }
+
+    for (const shapeConfig of renderCells) {
+      // Determine the shape from settings: use DB shape or the default rectangle
+      const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
+
+      // Hidden type: skip rendering, no mesh is created
+      if (isHiddenType(shapeType)) continue
+
+      // Custom color takes priority over the environment (temperature/humidity) color
+      const customColor = shapeConfig?.color ?? null
       const mat = new THREE.MeshStandardMaterial({
-        color: floorColor(level, props.selectedFloor, hoveredFloor.value),
+        color: customColor ? new THREE.Color(customColor) : floorColor(level, props.selectedFloor, hoveredFloor.value),
         metalness: 0.12,
         roughness: 0.55,
         transparent: true,
         opacity: 0.95,
       })
       mats.push(mat)
-      
-      // Determine the shape from settings: look up cellShapes or use the default rectangle
-      const shapeConfig = getCellShapeConfig(level, cell.row, cell.col)
-      const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
-      
-      // Hidden type: skip rendering, no mesh is created
-      if (isHiddenType(shapeType)) continue
-      
+
+      // Custom render height (render_height) overrides the default floor slab height
+      const cellHeight = shapeConfig?.height && shapeConfig.height > 0 ? shapeConfig.height : FLOOR_H
+
       // Rectangles reuse the shared cellGeo; other shapes are created on demand (with a geometry cache)
       const geo = shapeType === 'Rect'
-        ? cellGeo
-        : createGeometryByType(shapeType, cellSize, FLOOR_H)
-      
+        ? (cellHeight === FLOOR_H ? cellGeo : createGeometryByType('Rect', cellSize, cellHeight))
+        : createGeometryByType(shapeType, cellSize, cellHeight)
+
       const mesh = new THREE.Mesh(geo, mat)
-      const { x, z } = cellToWorld(cell.row, cell.col)
-      mesh.position.set(x, yBase + FLOOR_H / 2, z)
+      // DB world position takes priority; falls back to row/col grid calculation
+      const { x: wx, z: wz } = cellToWorld(shapeConfig.row, shapeConfig.col)
+      const hasDbPos = shapeConfig?.x != null && shapeConfig?.y != null && shapeConfig?.z != null
+      const px = hasDbPos ? shapeConfig.x! : wx
+      const py = hasDbPos ? shapeConfig.z! : yBase + FLOOR_H / 2
+      const pz = hasDbPos ? shapeConfig.y! : wz
+      mesh.position.set(px, py, pz)
       if (shapeConfig?.rotation) {
         mesh.rotation.copy(parseRotation(shapeConfig.rotation))
       }
       mesh.userData.floor = level
+      mesh.userData.row = shapeConfig.row
+      mesh.userData.col = shapeConfig.col
+      mesh.userData.customColor = customColor
       mesh.castShadow = true
       mesh.receiveShadow = true
       buildingGroup.add(mesh)
@@ -195,7 +242,10 @@ function updateFloorAppearance() {
     const dimmed = !!(selected && selected !== level && hovered !== level)
     for (const mesh of meshes) {
       const mat = mesh.material as THREE.MeshStandardMaterial
-      mat.color = floorColor(level, selected, hovered)
+      // Custom-colored cells keep their fixed color; others follow temperature/humidity
+      if (!mesh.userData.customColor) {
+        mat.color = floorColor(level, selected, hovered)
+      }
       mat.opacity = dimmed ? 0.28 : 0.95
       mat.emissive = new THREE.Color(isActive ? brand.primary : 0x000000)
       mat.emissiveIntensity = hovered === level ? 0.4 : selected === level ? 0.22 : 0
@@ -216,6 +266,20 @@ function updatePointer(ev: PointerEvent) {
   return { rect, clientX: ev.clientX, clientY: ev.clientY }
 }
 
+/** Print the hovered cell info to the console: row, col, center position and geometry size. */
+function logCellInfo(mesh: THREE.Mesh) {
+  const { row, col } = mesh.userData
+  if (row == null || col == null) return
+  const geo = mesh.geometry
+  geo.computeBoundingBox()
+  const size = new THREE.Vector3()
+  geo.boundingBox?.getSize(size)
+  const { x, y, z } = mesh.position
+  console.log(
+    `格子 行=${row} 列=${col} x=${x.toFixed(2)} y=${y.toFixed(2)} z=${z.toFixed(2)} 长度=${size.z.toFixed(2)} 宽度=${size.x.toFixed(2)} 高度=${size.y.toFixed(2)}`,
+  )
+}
+
 function placeToast(clientX: number, clientY: number, rect: DOMRect) {
   const offset = 14
   let left = clientX - rect.left + offset
@@ -233,7 +297,14 @@ function onPointerMove(ev: PointerEvent) {
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(floorMeshes, false)
   if (hits.length) {
-    const floor = hits[0].object.userData.floor as number
+    const mesh = hits[0].object as THREE.Mesh
+    const floor = mesh.userData.floor as number
+    // Print row/col/position/size once when hovering a new cell
+    const key = `${floor}-${mesh.userData.row}-${mesh.userData.col}`
+    if (loggedCellKey !== key) {
+      loggedCellKey = key
+      logCellInfo(mesh)
+    }
     if (hoveredFloor.value !== floor) {
       hoveredFloor.value = floor
       updateFloorAppearance()
@@ -242,6 +313,7 @@ function onPointerMove(ev: PointerEvent) {
     placeToast(pos.clientX, pos.clientY, pos.rect)
     host.value.style.cursor = 'pointer'
   } else {
+    loggedCellKey = ''
     if (hoveredFloor.value != null) {
       hoveredFloor.value = null
       updateFloorAppearance()
@@ -252,6 +324,7 @@ function onPointerMove(ev: PointerEvent) {
 }
 
 function onPointerLeave() {
+  loggedCellKey = ''
   hoveredFloor.value = null
   toastVisible.value = false
   updateFloorAppearance()
@@ -264,8 +337,133 @@ function onPointerDown(ev: PointerEvent) {
   raycaster.setFromCamera(pointer, camera)
   const hits = raycaster.intersectObjects(floorMeshes, false)
   if (hits.length) {
-    emit('selectFloor', hits[0].object.userData.floor as number)
+    const mesh = hits[0].object as THREE.Mesh
+    const ud = mesh.userData
+    // Find the matching cellShape to get floor_id
+    const shape = props.cellShapes?.find(
+      (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
+    )
+    if (shape?.floor_id != null) {
+      selectedCell.value = {
+        floor_id: shape.floor_id,
+        row: ud.row,
+        col: ud.col,
+        floor3d: ud.floor,
+        rotation: shape.rotation ?? null,
+      }
+    }
+  } else {
+    selectedCell.value = null
   }
+}
+
+async function applyRotation(deg: number) {
+  if (!selectedCell.value) return
+  const rad = deg === 0 ? null : `0,${(deg * Math.PI / 180).toFixed(4)},0`
+  const { floor_id, row, col } = selectedCell.value
+  await updateCellRotation({ floor_id, row_no: row, col_no: col, rotation_xyz: rad })
+  selectedCell.value = { ...selectedCell.value, rotation: rad }
+  emit('refreshShapes')
+}
+
+function isRotationActive(deg: number): boolean {
+  const rot = selectedCell.value?.rotation
+  if (!rot) return deg === 0
+  const parts = rot.split(',').map(Number)
+  const y = parts[1] ?? 0
+  return Math.abs(y - deg * Math.PI / 180) < 0.01
+}
+
+function formatRotation(rot: string | null): string {
+  if (!rot) return '0°'
+  const parts = rot.split(',').map(Number)
+  const y = parts[1] ?? 0
+  return `${Math.round(y * 180 / Math.PI)}°`
+}
+
+/** Edit scope: single cell / entire row / entire column */
+const editScope = ref<'single' | 'row' | 'col'>('single')
+
+/** Operation feedback shown near the edit buttons */
+const editFeedback = ref('')
+let feedbackTimer: ReturnType<typeof setTimeout> | undefined
+
+function showFeedback(msg: string) {
+  editFeedback.value = msg
+  if (feedbackTimer) clearTimeout(feedbackTimer)
+  feedbackTimer = setTimeout(() => { editFeedback.value = '' }, 2500)
+}
+
+async function handleCellEdit(action: 'add' | 'delete') {
+  if (!props.buildingId || !selectedCell.value) return
+  const { row, col, floor_id } = selectedCell.value
+  const res = await cellEdit({
+    building_id: props.buildingId,
+    row_no: row,
+    col_no: col,
+    action,
+    scope: editScope.value,
+    floor_id,
+  })
+  const n = res?.data?.affected ?? 0
+  if (n > 0) {
+    showFeedback(action === 'add' ? `已添加 ${n} 个格子` : `已删除 ${n} 个格子`)
+  } else {
+    showFeedback(action === 'add' ? '无变化：格子已存在' : '无变化：没有可删除的格子')
+  }
+  emit('refreshShapes')
+}
+
+async function handleAppend(scope: 'append_row' | 'append_col') {
+  if (!props.buildingId || !selectedCell.value) return
+  const { row, col, floor_id } = selectedCell.value
+  const res = await cellEdit({
+    building_id: props.buildingId,
+    row_no: row,
+    col_no: col,
+    action: 'add',
+    scope,
+    floor_id,
+  })
+  const n = res?.data?.affected ?? 0
+  if (n > 0) {
+    showFeedback(scope === 'append_row' ? `已追加一行，共 ${n} 个格子` : `已追加一列，共 ${n} 个格子`)
+  } else {
+    showFeedback('追加失败或没有变化')
+  }
+  emit('refreshShapes')
+}
+
+async function handleResetGrid() {
+  if (!props.buildingId) return
+  const res = await resetGridExtras(props.buildingId)
+  const n = res?.data?.affected ?? 0
+  if (n > 0) {
+    showFeedback(`已还原网格，删除 ${n} 个追加格子`)
+  } else {
+    showFeedback('当前无超出网格的格子')
+  }
+  emit('refreshShapes')
+}
+
+async function handleUndo() {
+  const res = await undoEdit()
+  if (res && res.data && res.data.ok) {
+    showFeedback(`已撤回 ${res.data.affected} 个格子`)
+    emit('refreshShapes')
+  } else {
+    showFeedback('没有可撤回的操作')
+  }
+}
+
+async function applyColRotation(deg: number) {
+  if (!props.buildingId || !selectedCell.value) return
+  const rad = deg === 0 ? null : `0,${(deg * Math.PI / 180).toFixed(4)},0`
+  await updateColCellsRotation({ building_id: props.buildingId, col_no: selectedCell.value.col, rotation_xyz: rad })
+  if (selectedCell.value) {
+    selectedCell.value = { ...selectedCell.value, rotation: rad }
+  }
+  emit('refreshShapes')
 }
 
 function onResize() {
@@ -399,7 +597,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="host" class="building3d">
     <div
-      v-show="toastVisible && hoveredFloor != null"
+      v-show="toastVisible && hoveredFloor != null && !selectedCell"
       class="floor-toast"
       :style="toastStyle"
     >
@@ -407,6 +605,65 @@ onBeforeUnmount(() => {
       <div class="toast-devices">
         {{ t('building.toastDevices', { n: deviceCountFor(hoveredFloor ?? 0) }) }}
       </div>
+    </div>
+    <!-- Cell rotation panel -->
+    <div v-if="selectedCell" class="rotate-panel">
+      <div class="rotate-header">
+        <span class="rotate-title">格子 ({{ selectedCell.row }}, {{ selectedCell.col }}) · {{ floorName(selectedCell.floor3d) }}F</span>
+        <button class="rotate-close" @click="selectedCell = null">&times;</button>
+      </div>
+      <div class="rotate-presets">
+        <button
+          v-for="deg in [0, 45, 90, 135, 180, 225, 270, 315]"
+          :key="deg"
+          class="rotate-btn"
+          :class="{ active: isRotationActive(deg) }"
+          @click="applyRotation(deg)"
+        >
+          {{ deg }}°
+        </button>
+      </div>
+      <div class="rotate-current">
+        当前旋转: {{ formatRotation(selectedCell.rotation) }}
+      </div>
+      <div class="rotate-divider" />
+      <div class="rotate-all-label">旋转第{{ selectedCell.col }}列全部格子</div>
+      <div class="rotate-presets">
+        <button
+          v-for="deg in [0, 45, 90, 135, 180, 225, 270, 315]"
+          :key="'col-' + deg"
+          class="rotate-btn rotate-btn-all"
+          @click="applyColRotation(deg)"
+        >
+          {{ deg }}°
+        </button>
+      </div>
+      <div class="rotate-divider" />
+      <div class="rotate-all-label">添加 / 删除格子</div>
+      <div class="edit-scope-row">
+        <button
+          v-for="s in (['single', 'row', 'col'] as const)"
+          :key="s"
+          class="scope-btn"
+          :class="{ active: editScope === s }"
+          @click="editScope = s"
+        >
+          {{ s === 'single' ? '单格' : s === 'row' ? '整行' : '整列' }}
+        </button>
+      </div>
+      <div class="edit-actions">
+        <button class="edit-btn edit-btn-add" @click="handleCellEdit('add')">添加</button>
+        <button class="edit-btn edit-btn-del" @click="handleCellEdit('delete')">删除</button>
+        <button class="edit-btn edit-btn-undo" @click="handleUndo">撤回</button>
+      </div>
+      <div class="edit-actions">
+        <button class="edit-btn edit-btn-append" @click="handleAppend('append_row')">追加一行</button>
+        <button class="edit-btn edit-btn-append" @click="handleAppend('append_col')">追加一列</button>
+      </div>
+      <div class="edit-actions">
+        <button class="edit-btn edit-btn-reset" @click="handleResetGrid">还原网格</button>
+      </div>
+      <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
     <div class="env-legend">
       <div class="legend-head">
@@ -480,6 +737,235 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.82);
+}
+
+/* Cell rotation panel */
+.rotate-panel {
+  position: absolute;
+  z-index: 10;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 300px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.85);
+  border: 1px solid rgba(196, 165, 116, 0.45);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  animation: rotate-panel-in 180ms ease-out;
+}
+
+.rotate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.rotate-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: #f5ead7;
+}
+
+.rotate-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.rotate-close:hover {
+  color: #fff;
+}
+
+.rotate-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rotate-btn {
+  flex: 1 1 auto;
+  min-width: 52px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rotate-btn:hover {
+  background: rgba(196, 165, 116, 0.3);
+  border-color: rgba(196, 165, 116, 0.5);
+}
+
+.rotate-btn.active {
+  background: rgba(196, 165, 116, 0.5);
+  border-color: #c4a574;
+  color: #fff;
+  font-weight: 600;
+}
+
+.rotate-current {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  text-align: center;
+}
+
+.rotate-divider {
+  height: 1px;
+  margin: 8px 0;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.rotate-all-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c4a574;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.rotate-btn-all {
+  background: rgba(196, 165, 116, 0.12);
+  border-color: rgba(196, 165, 116, 0.25);
+  color: #c4a574;
+}
+
+.rotate-btn-all:hover {
+  background: rgba(196, 165, 116, 0.35);
+  border-color: #c4a574;
+  color: #fff;
+}
+
+.edit-scope-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.scope-btn {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.scope-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.scope-btn.active {
+  background: rgba(196, 165, 116, 0.4);
+  border-color: #c4a574;
+  color: #fff;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-feedback {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #81d4fa;
+  font-size: 11px;
+  text-align: center;
+}
+
+.edit-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.edit-btn-add {
+  background: rgba(76, 175, 80, 0.25);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+
+.edit-btn-add:hover {
+  background: rgba(76, 175, 80, 0.45);
+  border-color: #4caf50;
+  color: #fff;
+}
+
+.edit-btn-del {
+  background: rgba(244, 67, 54, 0.2);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #e57373;
+}
+
+.edit-btn-del:hover {
+  background: rgba(244, 67, 54, 0.4);
+  border-color: #f44336;
+  color: #fff;
+}
+
+.edit-btn-undo {
+  background: rgba(156, 39, 176, 0.2);
+  border-color: rgba(156, 39, 176, 0.45);
+  color: #ce93d8;
+}
+
+.edit-btn-undo:hover {
+  background: rgba(156, 39, 176, 0.4);
+  border-color: #9c27b0;
+  color: #fff;
+}
+
+.edit-btn-append {
+  background: rgba(0, 150, 136, 0.2);
+  border-color: rgba(0, 150, 136, 0.45);
+  color: #80cbc4;
+}
+
+.edit-btn-append:hover {
+  background: rgba(0, 150, 136, 0.4);
+  border-color: #009688;
+  color: #fff;
+}
+
+.edit-btn-reset {
+  background: rgba(255, 87, 34, 0.2);
+  border-color: rgba(255, 87, 34, 0.45);
+  color: #ffab91;
+}
+
+.edit-btn-reset:hover {
+  background: rgba(255, 87, 34, 0.4);
+  border-color: #ff5722;
+  color: #fff;
+}
+
+@keyframes rotate-panel-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 .env-legend {

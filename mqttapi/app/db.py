@@ -24,6 +24,10 @@ UG65_JSON_COLUMNS = (
     "payload_json",
 )
 
+# In-memory undo stack shared across Database instances (module-level).
+# Holds the last cell_edit operation so it can be undone by a later request.
+_UNDO_STACK: list[dict[str, Any]] = []
+
 
 class Database:
     def __init__(self, settings: Settings):
@@ -659,96 +663,479 @@ class Database:
         return result
 
     # ------------------------------------------------------------------
-    # 3D 樓棟格子形狀設定（WingOnIOT.Building_Cell_Shape，DB 驅動取代前端硬編碼）
+    # 3D building structure (WingOnIOT.Building / Floor / Building_Cell / Room / Room_Cell)
+    # Cell shapes are driven by the Building_Cell table (replacing the old Building_Cell_Shape)
     # ------------------------------------------------------------------
 
-    def list_cell_shapes(self) -> list[dict[str, Any]]:
-        """啟用中的 3D 樓棟格子形狀設定（WingOnIOT 庫 Building_Cell_Shape 表）。
+    @staticmethod
+    def floor_level_to_3d(level: int) -> int:
+        """Map Floor.level (real floor number) to the 3D building level (1..11).
 
-        欄位名稱與前端 CellShapeConfig 直接對齊（row/col/floor/shape/rotation/color/height），
-        前端無需再做欄位映射。floor=0 表示「所有樓層」。
-
-        DB 中 floors 為 JSON 陣列（如 [3,4,5,6,7]，一個格子一列），此處展開成多筆
-        row/col/floor，保持 API 行為與舊版（一列一樓層）一致。
+        Floor.level semantics:
+          -2=B2/F->1, -1=B1/F->2, 1=G/F->3, 2=1/F->4 ... 8=7/F->10, 9=ROOF->11
         """
+        if level < 0:
+            return level + 3
+        if level == 9:  # ROOF
+            return 11
+        return level + 2
+
+    def list_buildings(self) -> list[dict[str, Any]]:
+        """Enabled buildings (soft-delete aware)."""
         sql = """
-            SELECT
-                row_no   AS `row`,
-                col_no   AS col,
-                floors,
-                shape,
-                rotation,
-                color,
-                height,
-                sort_order
-            FROM Building_Cell_Shape
-            WHERE is_enabled = 1
-            ORDER BY sort_order ASC, row_no ASC, col_no ASC
+            SELECT id, name, code, address, description
+            FROM Building
+            WHERE is_deleted = 0
+            ORDER BY id ASC
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql)
                 rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(row), ()) for row in rows]
 
-        expanded: list[dict[str, Any]] = []
+    def list_floors(self, building_id: int | None = None) -> list[dict[str, Any]]:
+        """Floors of a building (soft-delete aware); level_3d is the 3D level (1..11)."""
+        where = ["f.is_deleted = 0"]
+        params: dict[str, Any] = {}
+        if building_id is not None:
+            where.append("f.building_id = %(building_id)s")
+            params["building_id"] = building_id
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT f.id, f.building_id, f.row_amount, f.column_amount, f.level, f.floor_name
+            FROM Floor f
+            WHERE {clause}
+            ORDER BY f.level ASC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        result = []
         for row in rows:
-            item = self._parse_json_fields(dict(row), ("floors",))
-            floors = item.get("floors")
-            if isinstance(floors, str):
-                try:
-                    floors = json.loads(floors)
-                except json.JSONDecodeError:
-                    logger.warning(
-                        "Building_Cell_Shape row_no=%s col_no=%s: floors 非合法 JSON，已跳過",
-                        item.get("row"),
-                        item.get("col"),
-                    )
-                    continue
-            if not isinstance(floors, list):
-                logger.warning(
-                    "Building_Cell_Shape row_no=%s col_no=%s: floors 非 JSON 陣列，已跳過",
-                    item.get("row"),
-                    item.get("col"),
-                )
-                continue
-            base = {k: v for k, v in item.items() if k != "floors"}
-            seen_floors: set[int] = set()
-            for floor in floors:
-                # 排除 JSON 布林（True 是 int 的子類別）與非整數值，避免 floor=true/3.0 混入
-                if isinstance(floor, int) and not isinstance(floor, bool):
-                    if floor in seen_floors:
-                        logger.warning(
-                            "Building_Cell_Shape row_no=%s col_no=%s: 樓層 %s 重複，已去重",
-                            item.get("row"),
-                            item.get("col"),
-                            floor,
-                        )
-                        continue
-                    seen_floors.add(floor)
-                    expanded.append({**base, "floor": floor})
-                else:
-                    logger.warning(
-                        "Building_Cell_Shape row_no=%s col_no=%s: 樓層值 %r 非整數，已跳過",
-                        item.get("row"),
-                        item.get("col"),
-                        floor,
-                    )
-            if not floors:
-                logger.warning(
-                    "Building_Cell_Shape row_no=%s col_no=%s: floors 為空陣列，此格子不會出現在 API",
-                    item.get("row"),
-                    item.get("col"),
-                )
+            item = self._parse_json_fields(dict(row), ())
+            item["level_3d"] = self.floor_level_to_3d(int(item["level"]))
+            result.append(item)
+        return result
 
-        # 維持與舊 SQL 相同的排序：sort_order → row → col → floor
-        expanded.sort(
-            key=lambda x: (
-                x.get("sort_order") or 0,
-                x.get("row") or 0,
-                x.get("col") or 0,
-                x.get("floor") or 0,
-            )
-        )
-        for item in expanded:
-            item.pop("sort_order", None)
-        return expanded
+    def list_cell_shapes(self, building_id: int | None = None) -> list[dict[str, Any]]:
+        """Enabled cell shape settings driven by Building_Cell (replaces Building_Cell_Shape).
+
+        Maps Building_Cell columns to the frontend CellShapeConfig shape:
+          row_no->row, col_no->col, Floor.level->floor (3D), shape,
+          rotation_xyz->rotation, color, render_height->height.
+        x/y/z are the DB world coordinates (x=col-axis, y=row-axis, z=vertical height);
+        the frontend uses them for mesh positioning.
+        is_active=0 is exposed as shape='Hidden'.
+        Soft-delete aware: only non-deleted cells of non-deleted floors/buildings are returned.
+        """
+        where = ["c.is_deleted = 0", "f.is_deleted = 0", "b.is_deleted = 0"]
+        params: dict[str, Any] = {}
+        if building_id is not None:
+            where.append("c.building_id = %(building_id)s")
+            params["building_id"] = building_id
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT
+                c.row_no,
+                c.col_no,
+                f.level,
+                c.floor_id,
+                c.x,
+                c.y,
+                c.z,
+                c.shape,
+                c.rotation_xyz,
+                c.color,
+                c.render_height,
+                c.is_active
+            FROM Building_Cell c
+            JOIN Floor f ON f.id = c.floor_id
+            JOIN Building b ON b.id = c.building_id
+            WHERE {clause}
+            ORDER BY f.level ASC, c.row_no ASC, c.col_no ASC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = self._parse_json_fields(dict(row), ())
+            shape = item.get("shape") or "Rect"
+            # is_active=0 -> Hidden (not rendered); NULL treated as active
+            is_active = item.get("is_active")
+            if is_active is not None and int(is_active) == 0:
+                shape = "Hidden"
+            result.append({
+                "row": int(item["row_no"]),
+                "col": int(item["col_no"]),
+                "floor": self.floor_level_to_3d(int(item["level"])),
+                "floor_id": int(item["floor_id"]),
+                "x": float(item["x"]),
+                "y": float(item["y"]),
+                "z": float(item["z"]),
+                "shape": shape,
+                "rotation": item.get("rotation_xyz"),
+                "color": item.get("color"),
+                "height": item.get("render_height"),
+            })
+        return result
+
+    def list_floor_cells(self, floor_id: int) -> list[dict[str, Any]]:
+        """All non-deleted cells of a floor (requires the floor not soft-deleted)."""
+        sql = """
+            SELECT c.id, c.building_id, c.floor_id, c.row_no, c.col_no,
+                   c.x, c.y, c.z, c.length, c.width, c.cell_height, c.rotation_xyz,
+                   c.is_active, c.shape, c.color, c.render_height
+            FROM Building_Cell c
+            JOIN Floor f ON f.id = c.floor_id AND f.is_deleted = 0
+            WHERE c.floor_id = %(floor_id)s AND c.is_deleted = 0
+            ORDER BY c.row_no ASC, c.col_no ASC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"floor_id": floor_id})
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(row), ()) for row in rows]
+
+    def list_floor_rooms(self, floor_id: int) -> list[dict[str, Any]]:
+        """Rooms of a floor plus their occupied cells (via Room_Cell).
+
+        Soft-delete aware: skips deleted floor/rooms/cells; returns each room
+        with its cell list (row/col) ready for the frontend room layout.
+        """
+        rooms_sql = """
+            SELECT r.id, r.room_id, r.building_id, r.floor_id, r.room_number, r.room_type, r.area
+            FROM Room r
+            JOIN Floor f ON f.id = r.floor_id AND f.is_deleted = 0
+            WHERE r.floor_id = %(floor_id)s AND r.is_deleted = 0
+            ORDER BY r.id ASC
+        """
+        relations_sql = """
+            SELECT rc.room_ref_id, c.row_no, c.col_no
+            FROM Room_Cell rc
+            JOIN Room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+            JOIN Building_Cell c ON c.id = rc.cell_id AND c.is_deleted = 0
+            JOIN Floor f ON f.id = rc.floor_id AND f.is_deleted = 0
+            WHERE rc.floor_id = %(floor_id)s
+            ORDER BY rc.room_ref_id ASC, c.row_no ASC, c.col_no ASC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(rooms_sql, {"floor_id": floor_id})
+                room_rows = cur.fetchall() or []
+                cur.execute(relations_sql, {"floor_id": floor_id})
+                rel_rows = cur.fetchall() or []
+
+        rooms = [self._parse_json_fields(dict(r), ()) for r in room_rows]
+        by_ref = {r["id"]: r for r in rooms}
+        for r in rooms:
+            r["cells"] = []
+        for rel in rel_rows:
+            room = by_ref.get(rel["room_ref_id"])
+            if room is None:
+                continue
+                room["cells"].append({"row": int(rel["row_no"]), "col": int(rel["col_no"])})
+        return rooms
+
+    def update_cell_rotation(
+        self, floor_id: int, row_no: int, col_no: int, rotation_xyz: str | None
+    ) -> bool:
+        """Update rotation_xyz for a single cell. Returns True if a row was updated."""
+        sql = """
+            UPDATE Building_Cell
+            SET rotation_xyz = %(rotation)s
+            WHERE floor_id = %(floor_id)s
+              AND row_no = %(row_no)s
+              AND col_no = %(col_no)s
+              AND is_deleted = 0
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "rotation": rotation_xyz,
+                    "floor_id": floor_id,
+                    "row_no": row_no,
+                    "col_no": col_no,
+                })
+                return cur.rowcount > 0
+
+    def update_all_cells_rotation(
+        self, building_id: int, rotation_xyz: str | None
+    ) -> int:
+        """Update rotation_xyz for all non-deleted cells of a building. Returns affected count."""
+        sql = """
+            UPDATE Building_Cell
+            SET rotation_xyz = %(rotation)s
+            WHERE building_id = %(building_id)s
+              AND is_deleted = 0
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "rotation": rotation_xyz,
+                    "building_id": building_id,
+                })
+                return cur.rowcount
+
+    def cell_edit(
+        self,
+        building_id: int,
+        row_no: int,
+        col_no: int,
+        action: str,
+        scope: str,
+        floor_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Add or delete cells (single / row / col).
+
+        - add: ensure Rect cells exist (update shape if non-Rect, un-delete if soft-deleted, insert if absent)
+        - delete: soft-delete matching cells (is_deleted=1)
+        """
+        affected = 0
+        undo_ops: list[dict[str, Any]] = []
+
+        if action == "delete":
+            where = ["building_id = %(bid)s", "is_deleted = 0"]
+            params: dict[str, Any] = {"bid": building_id}
+            if scope == "single":
+                where.append("floor_id = %(fid)s")
+                where.append("row_no = %(row)s")
+                where.append("col_no = %(col)s")
+                params.update({"fid": floor_id, "row": row_no, "col": col_no})
+            elif scope == "row":
+                # limit to the current floor, otherwise a whole row across all
+                # floors gets deleted (far more than the user expects)
+                where.append("floor_id = %(fid)s")
+                where.append("row_no = %(row)s")
+                params.update({"fid": floor_id, "row": row_no})
+            elif scope == "col":
+                # col scope = same (row, col) across ALL floors (vertical pillar)
+                where.append("row_no = %(row)s")
+                where.append("col_no = %(col)s")
+                params.update({"row": row_no, "col": col_no})
+
+            with self.wingon_connection() as conn:
+                with conn.cursor() as cur:
+                    # Snapshot before delete
+                    snap_sql = f"SELECT id, floor_id, row_no, col_no, shape, rotation_xyz, color, render_height, is_active FROM Building_Cell WHERE {' AND '.join(where)}"
+                    cur.execute(snap_sql, params)
+                    for s in cur.fetchall() or []:
+                        undo_ops.append({
+                            "action": "restore",
+                            "id": int(s["id"]),
+                            "shape": s.get("shape"),
+                            "rotation_xyz": s.get("rotation_xyz"),
+                            "color": s.get("color"),
+                            "render_height": s.get("render_height"),
+                            "is_active": int(s.get("is_active", 1)),
+                        })
+                    cur.execute(f"UPDATE Building_Cell SET is_deleted = 1 WHERE {' AND '.join(where)}", params)
+                    affected = cur.rowcount
+
+            _UNDO_STACK.clear()
+            _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+            return {"ok": True, "affected": affected}
+
+        # action == "add"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, level FROM Floor WHERE building_id = %(bid)s AND is_deleted = 0 ORDER BY level",
+                    {"bid": building_id},
+                )
+                floors = cur.fetchall() or []
+
+        if not floors:
+            return {"ok": False, "affected": 0, "error": "No floors found"}
+
+        if scope == "single":
+            pairs = [(row_no, col_no)]
+        elif scope == "row":
+            pairs = [(row_no, c) for c in range(1, 13)]
+        elif scope == "col":
+            # col scope = same (row, col) across ALL floors
+            pairs = [(row_no, col_no)]
+        elif scope in ("append_row", "append_col"):
+            # Append a new row (below the current bottom) or a new column
+            # (to the right of the current edge) across every floor.
+            with self.wingon_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT MAX(row_no) AS mr, MAX(col_no) AS mc FROM Building_Cell WHERE building_id = %(bid)s AND is_deleted = 0",
+                        {"bid": building_id},
+                    )
+                    max_row_col = cur.fetchone()
+            max_row = int(max_row_col["mr"] or 0)
+            max_col = int(max_row_col["mc"] or 0)
+            if scope == "append_row":
+                new_row = max_row + 1
+                pairs = [(new_row, c) for c in range(1, max_col + 1)]
+            else:
+                new_col = max_col + 1
+                pairs = [(r, new_col) for r in range(1, max_row + 1)]
+        else:
+            return {"ok": False, "affected": 0, "error": f"Unknown scope: {scope}"}
+
+        for fl in floors:
+            fid = int(fl["id"])
+            if scope == "single" and fid != floor_id:
+                continue
+            level = int(fl["level"])
+            if level < 0:
+                level_3d = level + 3
+            elif level == 9:
+                level_3d = 11
+            else:
+                level_3d = level + 2
+            z_val = round((level_3d - 1) * 0.84 + 0.38, 3)
+
+            for (r, c) in pairs:
+                with self.wingon_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT id, shape, is_active FROM Building_Cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 0",
+                            {"fid": fid, "row": r, "col": c},
+                        )
+                        existing = cur.fetchone()
+                        if existing:
+                            old_shape = existing.get("shape")
+                            old_active = int(existing.get("is_active", 1) or 1)
+                            if (old_shape and old_shape != "Rect") or old_active == 0:
+                                undo_ops.append({
+                                    "action": "update_shape",
+                                    "id": int(existing["id"]),
+                                    "old_shape": old_shape,
+                                    "old_active": old_active,
+                                })
+                                cur.execute(
+                                    "UPDATE Building_Cell SET shape = 'Rect', is_active = 1 WHERE id = %(id)s",
+                                    {"id": int(existing["id"])},
+                                )
+                                affected += 1
+                            continue
+
+                        cur.execute(
+                            "SELECT id FROM Building_Cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 1",
+                            {"fid": fid, "row": r, "col": c},
+                        )
+                        deleted_row = cur.fetchone()
+                        if deleted_row:
+                            undo_ops.append({"action": "re_delete", "id": int(deleted_row["id"])})
+                            cur.execute("UPDATE Building_Cell SET is_deleted = 0 WHERE id = %(id)s", {"id": int(deleted_row["id"])})
+                            affected += 1
+                        else:
+                            x_val = round((c - 6.5) * 1.15, 3)
+                            y_val = round((r - 4.5) * 1.15, 3)
+                            cur.execute(
+                                """INSERT INTO Building_Cell
+                                   (building_id, floor_id, row_no, col_no, x, y, z,
+                                    length, width, cell_height, rotation_xyz,
+                                    is_active, shape, color, render_height, is_deleted)
+                                   VALUES (%(bid)s, %(fid)s, %(row)s, %(col)s,
+                                           %(x)s, %(y)s, %(z)s,
+                                           1.150, 1.150, 0.000, NULL,
+                                           1, 'Rect', NULL, NULL, 0)""",
+                                {"bid": building_id, "fid": fid, "row": r, "col": c,
+                                 "x": x_val, "y": y_val, "z": z_val},
+                            )
+                            undo_ops.append({"action": "delete_new", "id": cur.lastrowid})
+                            affected += 1
+
+        _UNDO_STACK.clear()
+        _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+        return {"ok": True, "affected": affected}
+
+    def undo_last_edit(self) -> dict[str, Any]:
+        """Undo the last cell_edit operation."""
+        if not _UNDO_STACK:
+            return {"ok": False, "affected": 0, "error": "Nothing to undo"}
+
+        last = _UNDO_STACK.pop()
+        ops = last["ops"]
+        affected = 0
+
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                for op in ops:
+                    if op["action"] == "delete_new":
+                        cur.execute("DELETE FROM Building_Cell WHERE id = %(id)s", {"id": op["id"]})
+                        affected += cur.rowcount
+                    elif op["action"] == "re_delete":
+                        cur.execute("UPDATE Building_Cell SET is_deleted = 1 WHERE id = %(id)s", {"id": op["id"]})
+                        affected += cur.rowcount
+                    elif op["action"] == "restore":
+                        cur.execute(
+                            """UPDATE Building_Cell SET is_deleted = 0, shape = %(shape)s,
+                               rotation_xyz = %(rotation)s, color = %(color)s,
+                               render_height = %(rh)s, is_active = %(active)s
+                               WHERE id = %(id)s""",
+                            {"id": op["id"], "shape": op["shape"],
+                             "rotation": op["rotation_xyz"], "color": op["color"],
+                             "rh": op["render_height"], "active": op["is_active"]},
+                        )
+                        affected += cur.rowcount
+                    elif op["action"] == "update_shape":
+                        cur.execute(
+                            "UPDATE Building_Cell SET shape = %(shape)s, is_active = %(active)s WHERE id = %(id)s",
+                            {"id": op["id"], "shape": op["old_shape"], "active": op.get("old_active", 1)},
+                        )
+                        affected += cur.rowcount
+
+        return {"ok": True, "affected": affected}
+
+    def reset_grid_extras(self, building_id: int) -> dict[str, Any]:
+        """Soft-delete every cell beyond the base 8x12 grid (row>8 or col>12).
+
+        Undo restores all removed cells.
+        """
+        where = "building_id = %(bid)s AND is_deleted = 0 AND (row_no > 8 OR col_no > 12)"
+        undo_ops: list[dict[str, Any]] = []
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT id, shape, rotation_xyz, color, render_height, is_active FROM Building_Cell WHERE {where}",
+                    {"bid": building_id},
+                )
+                for s in cur.fetchall() or []:
+                    undo_ops.append({
+                        "action": "restore",
+                        "id": int(s["id"]),
+                        "shape": s.get("shape"),
+                        "rotation_xyz": s.get("rotation_xyz"),
+                        "color": s.get("color"),
+                        "render_height": s.get("render_height"),
+                        "is_active": int(s.get("is_active", 1)),
+                    })
+                cur.execute(
+                    f"UPDATE Building_Cell SET is_deleted = 1 WHERE {where}",
+                    {"bid": building_id},
+                )
+                affected = cur.rowcount
+
+        _UNDO_STACK.clear()
+        _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+        return {"ok": True, "affected": affected}
+
+    def update_col_cells_rotation(
+        self, building_id: int, col_no: int, rotation_xyz: str | None
+    ) -> int:
+        """Update rotation_xyz for all non-deleted cells of a given column. Returns affected count."""
+        sql = """
+            UPDATE Building_Cell
+            SET rotation_xyz = %(rotation)s
+            WHERE building_id = %(building_id)s
+              AND col_no = %(col_no)s
+              AND is_deleted = 0
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "rotation": rotation_xyz,
+                    "building_id": building_id,
+                    "col_no": col_no,
+                })
+                return cur.rowcount

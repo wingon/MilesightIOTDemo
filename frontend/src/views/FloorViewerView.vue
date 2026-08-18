@@ -6,7 +6,7 @@ import { message } from 'ant-design-vue'
 import FloorModelPanel from '@/components/building/FloorModelPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
 import { useBuildingStore } from '@/stores/building'
-import { FLOOR_COUNT, FLOOR_ROOMS, floorName } from '@/utils/buildingDemo'
+import { FLOOR_COUNT, buildRoomMeta, floorName, type Cell } from '@/utils/buildingDemo'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -36,6 +36,8 @@ watch(
     store.ensureFloor(n)
     // Fetch real WingOnIOT environment devices (this page must show DB devices, not demo)
     store.fetchEnvDevices()
+    // Fetch the DB building structure then the floor rooms (Room / Room_Cell)
+    store.fetchBuildingStructure().then(() => store.fetchFloorRooms(n))
     selectedRoom.value = null
     editMode.value = false
     selectedWallIndex.value = null
@@ -48,9 +50,22 @@ const roomDevices = computed(() => {
   return store.getFloorMap(floor.value)
 })
 
+/** DB floor rooms (Room table, with occupied cells) */
+const dbRooms = computed(() => {
+  if (!floorValid.value) return []
+  return store.getFloorRooms(floor.value)
+})
+
+/** roomId -> metadata (index + color) resolved from DB rooms */
+const roomMeta = computed(() => buildRoomMeta(dbRooms.value))
+
 const layout = computed(() => {
   if (!floorValid.value) return {}
-  return store.getFloorLayout(floor.value)
+  const map: Record<string, Cell[]> = {}
+  for (const r of dbRooms.value) {
+    map[r.room_id] = r.cells.map((c) => ({ row: c.row, col: c.col }))
+  }
+  return map
 })
 
 const customWalls = computed(() => {
@@ -69,11 +84,14 @@ const panelEnvDevices = computed(() => {
   return store.devicesForFloor(floor.value)
 })
 
-/** DB device count per room (DB has no room field, so all devices default to room-1) */
+/** DB device count per room (DB has no room field, so all devices default to room_number=1) */
 const deviceCountMap = computed(() => {
   const map: Record<string, number> = {}
-  for (const room of FLOOR_ROOMS) map[room.id] = 0
-  if (panelEnvDevices.value.length) map['room-1'] = panelEnvDevices.value.length
+  for (const r of dbRooms.value) map[r.room_id] = 0
+  if (panelEnvDevices.value.length) {
+    const first = dbRooms.value.find((r) => parseInt(r.room_number, 10) === 1)
+    if (first) map[first.room_id] = panelEnvDevices.value.length
+  }
   return map
 })
 
@@ -176,8 +194,8 @@ function backToBuilding() {
 
 const roomLabel = computed(() => {
   if (!selectedRoom.value) return null
-  const room = FLOOR_ROOMS.find((r) => r.id === selectedRoom.value)
-  return room ? t('building.roomN', { n: room.index }) : selectedRoom.value
+  const meta = roomMeta.value[selectedRoom.value]
+  return meta ? t('building.roomN', { n: meta.index }) : selectedRoom.value
 })
 </script>
 
@@ -204,6 +222,8 @@ const roomLabel = computed(() => {
           :custom-walls="customWalls"
           :device-count-map="deviceCountMap"
           :selected-wall-index="selectedWallIndex"
+          :rooms="dbRooms"
+          :room-meta="roomMeta"
           @select-room="onSelectRoom"
           @update:edit-mode="(v) => (editMode = v)"
           @toggle-cell="onToggleCell"

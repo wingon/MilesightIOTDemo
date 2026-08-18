@@ -2,6 +2,14 @@ import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getFloorEnvironmentSummary, listEnvironmentDevices, type EnvironmentDevice } from '@/api/environment'
 import {
+  listBuildings,
+  listBuildingFloors,
+  listFloorRooms,
+  type BuildingInfo,
+  type FloorInfo,
+  type FloorRoom,
+} from '@/api/building'
+import {
   buildCellToRoomMap,
   computeFloorStats,
   createDefaultFloorInventory,
@@ -83,6 +91,54 @@ export const useBuildingStore = defineStore('building', () => {
   /** Real environment devices for a given 3D level */
   function devicesForFloor(level: number): EnvironmentDevice[] {
     return envDevices.value.filter((d) => d.level === level)
+  }
+
+  /** DB-driven building structure: Building / Floor (level_3d maps to 3D level 1..11) */
+  const buildings = ref<BuildingInfo[]>([])
+  const floors = ref<FloorInfo[]>([])
+  let structureFetched = false
+
+  /** floor_id -> rooms with their occupied cells (from Room / Room_Cell) */
+  const floorRooms = reactive<Record<number, FloorRoom[]>>({})
+
+  /** Fetch the building + floor list once; retriable on failure */
+  async function fetchBuildingStructure() {
+    if (structureFetched) return
+    structureFetched = true
+    try {
+      const { data: b } = await listBuildings()
+      buildings.value = b ?? []
+      const { data: f } = await listBuildingFloors(buildings.value[0]?.id)
+      floors.value = f ?? []
+    } catch (err) {
+      console.warn('[building] fetchBuildingStructure failed:', err)
+      structureFetched = false
+    }
+  }
+
+  /** Map a 3D level (1..11) to the DB Floor id */
+  function floorIdByLevel(level3d: number): number | null {
+    const f = floors.value.find((x) => x.level_3d === level3d)
+    return f?.id ?? null
+  }
+
+  /** Fetch rooms (with occupied cells) of a 3D level into floorRooms */
+  async function fetchFloorRooms(level3d: number) {
+    const fid = floorIdByLevel(level3d)
+    if (fid == null) return
+    try {
+      const { data } = await listFloorRooms(fid)
+      floorRooms[fid] = data ?? []
+    } catch (err) {
+      console.warn('[building] fetchFloorRooms failed:', err)
+    }
+  }
+
+  /** Rooms of a 3D level (empty when the DB has no data for this floor) */
+  function getFloorRooms(level3d: number): FloorRoom[] {
+    const fid = floorIdByLevel(level3d)
+    if (fid == null) return []
+    return floorRooms[fid] ?? []
   }
 
   /** floor -> inventory devices registered to that floor */
@@ -440,6 +496,12 @@ export const useBuildingStore = defineStore('building', () => {
     envDevices,
     fetchEnvDevices,
     devicesForFloor,
+    buildings,
+    floors,
+    fetchBuildingStructure,
+    floorIdByLevel,
+    fetchFloorRooms,
+    getFloorRooms,
     floorInventory,
     roomDeviceIds,
     floorLayouts,
