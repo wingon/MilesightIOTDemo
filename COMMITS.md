@@ -44,3 +44,12 @@ refactor: 3D 樓棟相關資料表改為全小寫命名
 - 同步更新後端 db.py 全部 SQL 查詢、building.py docstring、前端注釋中的資料表名稱
 - 更新 WingOnIOT_DDL_Data.sql（生產備份）與 migrate_building_structure.sql、migrate_cell_shape.sql 表名
 - 新增 migrate_lowercase_tables.sql：可重複執行的表名小寫化遷移腳本（偵測舊表自動 RENAME，Linux 大小寫敏感環境必用）
+
+## 2026-08-20 16:35
+feat: 新增人流時數統計頁面
+
+- 後端新增 people_count 路由：GET /api/v1/people-count/hourly（分頁 + 日期/時段/通道/IP 篩選）、GET /api/v1/people-count/channels（通道下拉）
+- db.py 新增 people_count_hourly 查詢，依篩選條件強制使用 idx_date_channel_hour / uk_date_hour_ip 索引
+- 新增 SQL 索引遷移腳本（idx_date_channel_hour 複合索引）
+- 前端新增 PeopleCountListView 頁面：日期範圍/時段/通道/IP 篩選、服務端分頁表格
+- 新增 peopleCount.ts API、側欄選單與路由（/people-count），並補上 en / zh-TW i18n

@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -620,6 +620,93 @@ class Database:
             [self._parse_json_fields(dict(r), ()) for r in rows],
             total,
         )
+
+    # ------------------------------------------------------------------
+    # WingOnIOT people count (people_count_hourly)
+    # ------------------------------------------------------------------
+
+    def list_people_count_hourly(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated people_count_hourly list with optional filters.
+
+        Supported filters map to the following indexes so the WHERE clause can
+        be answered by an index range scan:
+          - (date, channel_name, hour) via idx_date_channel_hour
+          - (date, hour, ip_address) via uk_date_hour_ip
+        """
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if date_from is not None:
+            where.append("date >= %(date_from)s")
+            params["date_from"] = date_from
+        if date_to is not None:
+            where.append("date <= %(date_to)s")
+            params["date_to"] = date_to
+        if hour is not None:
+            where.append("hour = %(hour)s")
+            params["hour"] = hour
+        if ip_address:
+            where.append("ip_address = %(ip_address)s")
+            params["ip_address"] = ip_address
+        if channel_name:
+            where.append("channel_name = %(channel_name)s")
+            params["channel_name"] = channel_name
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+
+        # Pick the best index for the active filters and force it. The table is
+        # small, so without FORCE INDEX the optimizer may fall back to a full
+        # table scan even though an index range scan is available.
+        if channel_name:
+            # (date, channel_name, hour) covers channel_name + date + hour
+            force_index = "FORCE INDEX (idx_date_channel_hour)"
+        else:
+            # (date, hour, ip_address) covers date + hour + ip_address
+            force_index = "FORCE INDEX (uk_date_hour_ip)"
+
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM people_count_hourly {force_index} WHERE {clause}",
+                    params,
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                sql = f"""
+                    SELECT *
+                    FROM people_count_hourly {force_index}
+                    WHERE {clause}
+                    ORDER BY date DESC, hour DESC, id DESC
+                    LIMIT %(limit)s OFFSET %(offset)s
+                """
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return (
+            [self._parse_json_fields(dict(row), ()) for row in rows],
+            total,
+        )
+
+    def list_people_count_channels(self) -> list[str]:
+        """Distinct channel_name values for the filter dropdown (uses index)."""
+        sql = """
+            SELECT DISTINCT channel_name
+            FROM people_count_hourly
+            ORDER BY channel_name
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall() or []
+        return [str(r["channel_name"]) for r in rows]
 
     def floor_environment_summary(self) -> list[dict[str, Any]]:
         """按楼层聚合：每台设备取最新一条监测记录，楼层温度/湿度为该层设备中位值均值。"""

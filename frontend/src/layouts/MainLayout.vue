@@ -12,6 +12,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   GlobalOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons-vue'
 import { useAppStore } from '@/stores/app'
 import type { AppLocale } from '@/i18n'
@@ -70,6 +71,12 @@ const menuItems = computed(() =>
       icon: () => h(ApiOutlined),
       label: t('menu.devices'),
       path: '/devices',
+    },
+    {
+      key: 'people-count',
+      icon: () => h(DatabaseOutlined),
+      label: t('menu.peopleCount'),
+      path: '/people-count',
     },
   ].filter((item) => !item.hidden)
 )

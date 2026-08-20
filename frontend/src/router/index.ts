@@ -44,6 +44,12 @@ const router = createRouter({
           meta: { titleKey: 'menu.buildingViewer' },
         },
         {
+          path: 'people-count',
+          name: 'people-count',
+          component: () => import('@/views/PeopleCountListView.vue'),
+          meta: { titleKey: 'menu.peopleCount' },
+        },
+        {
           path: 'building-viewer/floor/:floor',
           name: 'floor-viewer',
           component: () => import('@/views/FloorViewerView.vue'),
