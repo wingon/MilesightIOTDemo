@@ -27,13 +27,13 @@ CREATE DATABASE /*!32312 IF NOT EXISTS*/ `WingOnIOT` /*!40100 DEFAULT CHARACTER 
 USE `WingOnIOT`;
 
 --
--- Table structure for table `Building`
+-- Table structure for table `building`
 --
 
-DROP TABLE IF EXISTS `Building`;
+DROP TABLE IF EXISTS `building`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Building` (
+CREATE TABLE `building` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `name` varchar(64) NOT NULL COMMENT '樓棟名稱',
   `code` varchar(32) DEFAULT NULL COMMENT '樓棟唯一代碼',
@@ -49,30 +49,30 @@ CREATE TABLE `Building` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Building`
+-- Dumping data for table `building`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Building` WRITE;
-/*!40000 ALTER TABLE `Building` DISABLE KEYS */;
-INSERT INTO `Building` VALUES
+LOCK TABLES `building` WRITE;
+/*!40000 ALTER TABLE `building` DISABLE KEYS */;
+INSERT INTO `building` VALUES
 (4,'WingOn 大樓','WINGON',NULL,NULL,0,'2026-08-18 03:11:05.433','2026-08-18 03:11:05.433');
-/*!40000 ALTER TABLE `Building` ENABLE KEYS */;
+/*!40000 ALTER TABLE `building` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Building_Cell`
+-- Table structure for table `building_cell`
 --
 
-DROP TABLE IF EXISTS `Building_Cell`;
+DROP TABLE IF EXISTS `building_cell`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Building_Cell` (
+CREATE TABLE `building_cell` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `building_id` bigint(20) unsigned NOT NULL COMMENT '樓棟外鍵（冗餘列，由複合外鍵強制與樓層一致）',
-  `floor_id` bigint(20) unsigned NOT NULL COMMENT '樓層外鍵，指向 Floor.id',
+  `floor_id` bigint(20) unsigned NOT NULL COMMENT '樓層外鍵，指向 floor.id',
   `row_no` smallint(5) unsigned NOT NULL COMMENT '行號，1-based',
   `col_no` smallint(5) unsigned NOT NULL COMMENT '列號，1-based',
   `x` decimal(10,3) NOT NULL COMMENT '位置 x',
@@ -94,20 +94,20 @@ CREATE TABLE `Building_Cell` (
   KEY `idx_id_floor` (`id`,`floor_id`),
   KEY `idx_building_floor` (`building_id`,`floor_id`),
   KEY `idx_floor_active` (`floor_id`,`is_active`),
-  CONSTRAINT `fk_cell_floor` FOREIGN KEY (`building_id`, `floor_id`) REFERENCES `Floor` (`building_id`, `id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_cell_floor` FOREIGN KEY (`building_id`, `floor_id`) REFERENCES `floor` (`building_id`, `id`) ON DELETE CASCADE,
   CONSTRAINT `chk_cell_coord` CHECK (`row_no` >= 1 and `col_no` >= 1),
   CONSTRAINT `chk_isdel` CHECK (`is_deleted` in (0,1))
 ) ENGINE=InnoDB AUTO_INCREMENT=7091 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='樓棟格子表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Building_Cell`
+-- Dumping data for table `building_cell`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Building_Cell` WRITE;
-/*!40000 ALTER TABLE `Building_Cell` DISABLE KEYS */;
-INSERT INTO `Building_Cell` VALUES
+LOCK TABLES `building_cell` WRITE;
+/*!40000 ALTER TABLE `building_cell` DISABLE KEYS */;
+INSERT INTO `building_cell` VALUES
 (4192,4,46,1,1,-6.325,-4.025,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:12:23.592'),
 (4193,4,46,2,1,-6.325,-2.875,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:04:15.705'),
 (4194,4,46,3,1,-6.325,-1.725,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:04:15.705'),
@@ -1120,19 +1120,19 @@ INSERT INTO `Building_Cell` VALUES
 (5659,4,56,7,1,-6.325,2.875,8.780,1.150,1.150,0.000,'0,4.7124,0',1,'Triangle',NULL,NULL,0,'2026-08-18 03:27:36.779','2026-08-18 06:45:26.648'),
 (5661,4,56,6,12,6.325,1.725,8.780,1.150,1.150,0.000,NULL,1,'Triangle',NULL,NULL,0,'2026-08-18 03:27:36.779','2026-08-18 06:45:18.086'),
 (5662,4,56,7,11,5.175,2.875,8.780,1.150,1.150,0.000,NULL,1,'Triangle',NULL,NULL,0,'2026-08-18 03:27:36.779','2026-08-18 06:45:26.701');
-/*!40000 ALTER TABLE `Building_Cell` ENABLE KEYS */;
+/*!40000 ALTER TABLE `building_cell` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Building_Cell_Shape_old`
+-- Table structure for table `building_cell_shape_old`
 --
 
-DROP TABLE IF EXISTS `Building_Cell_Shape_old`;
+DROP TABLE IF EXISTS `building_cell_shape_old`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Building_Cell_Shape_old` (
+CREATE TABLE `building_cell_shape_old` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `row_no` tinyint(3) unsigned NOT NULL COMMENT '格子行號，1-based，1~8（南→北）',
   `col_no` tinyint(3) unsigned NOT NULL COMMENT '格子列號，1-based，1~12（西→東）',
@@ -1152,13 +1152,13 @@ CREATE TABLE `Building_Cell_Shape_old` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Building_Cell_Shape_old`
+-- Dumping data for table `building_cell_shape_old`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Building_Cell_Shape_old` WRITE;
-/*!40000 ALTER TABLE `Building_Cell_Shape_old` DISABLE KEYS */;
-INSERT INTO `Building_Cell_Shape_old` VALUES
+LOCK TABLES `building_cell_shape_old` WRITE;
+/*!40000 ALTER TABLE `building_cell_shape_old` DISABLE KEYS */;
+INSERT INTO `building_cell_shape_old` VALUES
 (1,8,11,3,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:00:05.199'),
 (2,8,11,4,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:01:16.093'),
 (3,8,11,5,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:00:05.199'),
@@ -1174,19 +1174,19 @@ INSERT INTO `Building_Cell_Shape_old` VALUES
 (13,7,12,5,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:00:05.199'),
 (14,7,12,6,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:00:05.199'),
 (15,7,12,7,'Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 02:00:05.199','2026-08-13 02:00:05.199');
-/*!40000 ALTER TABLE `Building_Cell_Shape_old` ENABLE KEYS */;
+/*!40000 ALTER TABLE `building_cell_shape_old` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Building_Cell_Shape_old2`
+-- Table structure for table `building_cell_shape_old2`
 --
 
-DROP TABLE IF EXISTS `Building_Cell_Shape_old2`;
+DROP TABLE IF EXISTS `building_cell_shape_old2`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Building_Cell_Shape_old2` (
+CREATE TABLE `building_cell_shape_old2` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `row_no` tinyint(3) unsigned NOT NULL COMMENT '格子行號，1-based，1~8（南→北）',
   `col_no` tinyint(3) unsigned NOT NULL COMMENT '格子列號，1-based，1~12（西→東）',
@@ -1206,20 +1206,20 @@ CREATE TABLE `Building_Cell_Shape_old2` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Building_Cell_Shape_old2`
+-- Dumping data for table `building_cell_shape_old2`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Building_Cell_Shape_old2` WRITE;
-/*!40000 ALTER TABLE `Building_Cell_Shape_old2` DISABLE KEYS */;
-INSERT INTO `Building_Cell_Shape_old2` VALUES
+LOCK TABLES `building_cell_shape_old2` WRITE;
+/*!40000 ALTER TABLE `building_cell_shape_old2` DISABLE KEYS */;
+INSERT INTO `building_cell_shape_old2` VALUES
 (1,7,11,'[3,4,5,6,7]','Rect','0,0,0',NULL,NULL,0,1,'2026-08-13 03:03:18.923','2026-08-13 03:04:32.557'),
 (2,7,12,'[3,4,5,6,7]','Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 03:03:18.923','2026-08-13 03:03:18.923'),
 (3,8,11,'[3,4,5,6,7]','Triangle','0,0,0',NULL,NULL,0,1,'2026-08-13 03:03:18.923','2026-08-13 03:03:18.923'),
 (4,1,1,'[0]',NULL,NULL,'#4CAF50',NULL,1,1,'2026-08-13 03:03:18.935','2026-08-13 03:11:47.915'),
 (5,2,3,'[1]','Rect','0,0.785,0','#FF9800',1.500,2,1,'2026-08-13 03:03:18.935','2026-08-13 03:03:18.935'),
 (6,6,5,'[2,3]','Triangle','0,0,0',NULL,NULL,0,0,'2026-08-13 03:03:18.935','2026-08-13 03:03:18.935');
-/*!40000 ALTER TABLE `Building_Cell_Shape_old2` ENABLE KEYS */;
+/*!40000 ALTER TABLE `building_cell_shape_old2` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
@@ -88862,13 +88862,13 @@ COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Floor`
+-- Table structure for table `floor`
 --
 
-DROP TABLE IF EXISTS `Floor`;
+DROP TABLE IF EXISTS `floor`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Floor` (
+CREATE TABLE `floor` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `building_id` bigint(20) unsigned NOT NULL COMMENT '樓棟外鍵，指向 building.id',
   `row_amount` smallint(5) unsigned NOT NULL COMMENT '網格行數',
@@ -88881,20 +88881,20 @@ CREATE TABLE `Floor` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_building_level` (`building_id`,`level`,`is_deleted`),
   KEY `idx_building_id` (`building_id`,`id`),
-  CONSTRAINT `fk_bt_building` FOREIGN KEY (`building_id`) REFERENCES `Building` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_bt_building` FOREIGN KEY (`building_id`) REFERENCES `building` (`id`) ON DELETE CASCADE,
   CONSTRAINT `chk_isdel` CHECK (`is_deleted` in (0,1)),
   CONSTRAINT `chk_level_valid` CHECK (`level` in (-2,-1,1,2,3,4,5,6,7,8,9))
 ) ENGINE=InnoDB AUTO_INCREMENT=61 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='樓棟樓層表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Floor`
+-- Dumping data for table `floor`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Floor` WRITE;
-/*!40000 ALTER TABLE `Floor` DISABLE KEYS */;
-INSERT INTO `Floor` VALUES
+LOCK TABLES `floor` WRITE;
+/*!40000 ALTER TABLE `floor` DISABLE KEYS */;
+INSERT INTO `floor` VALUES
 (46,4,8,12,-2,'B2/F',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435'),
 (47,4,8,12,-1,'B1/F',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435'),
 (48,4,8,12,1,'G/F',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435'),
@@ -88906,19 +88906,19 @@ INSERT INTO `Floor` VALUES
 (54,4,8,12,7,'6/F',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435'),
 (55,4,8,12,8,'7/F',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435'),
 (56,4,8,12,9,'ROOF',0,'2026-08-18 03:11:05.435','2026-08-18 03:11:05.435');
-/*!40000 ALTER TABLE `Floor` ENABLE KEYS */;
+/*!40000 ALTER TABLE `floor` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Room`
+-- Table structure for table `room`
 --
 
-DROP TABLE IF EXISTS `Room`;
+DROP TABLE IF EXISTS `room`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Room` (
+CREATE TABLE `room` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `room_id` varchar(36) NOT NULL COMMENT '全局唯一房間 UUID（業務鍵）',
   `building_id` bigint(20) unsigned NOT NULL COMMENT '樓棟外鍵',
@@ -88934,21 +88934,21 @@ CREATE TABLE `Room` (
   UNIQUE KEY `uk_room_number` (`building_id`,`floor_id`,`room_number`,`is_deleted`),
   KEY `idx_id_floor` (`id`,`floor_id`),
   KEY `idx_floor_id` (`floor_id`),
-  CONSTRAINT `fk_room_building` FOREIGN KEY (`building_id`) REFERENCES `Building` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_room_floor` FOREIGN KEY (`building_id`, `floor_id`) REFERENCES `Floor` (`building_id`, `id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_room_building` FOREIGN KEY (`building_id`) REFERENCES `building` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_room_floor` FOREIGN KEY (`building_id`, `floor_id`) REFERENCES `floor` (`building_id`, `id`) ON DELETE CASCADE,
   CONSTRAINT `chk_area_nonneg` CHECK (`area` is null or `area` >= 0),
   CONSTRAINT `chk_isdel` CHECK (`is_deleted` in (0,1))
 ) ENGINE=InnoDB AUTO_INCREMENT=382 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='房間表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Room`
+-- Dumping data for table `room`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Room` WRITE;
-/*!40000 ALTER TABLE `Room` DISABLE KEYS */;
-INSERT INTO `Room` VALUES
+LOCK TABLES `room` WRITE;
+/*!40000 ALTER TABLE `room` DISABLE KEYS */;
+INSERT INTO `room` VALUES
 (255,'room-46-1',4,46,'1',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516'),
 (256,'room-47-1',4,47,'1',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516'),
 (257,'room-48-1',4,48,'1',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516'),
@@ -89070,19 +89070,19 @@ INSERT INTO `Room` VALUES
 (373,'room-54-11',4,54,'11',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516'),
 (374,'room-55-11',4,55,'11',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516'),
 (375,'room-56-11',4,56,'11',NULL,NULL,0,'2026-08-18 03:11:05.516','2026-08-18 03:11:05.516');
-/*!40000 ALTER TABLE `Room` ENABLE KEYS */;
+/*!40000 ALTER TABLE `room` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
 
 --
--- Table structure for table `Room_Cell`
+-- Table structure for table `room_cell`
 --
 
-DROP TABLE IF EXISTS `Room_Cell`;
+DROP TABLE IF EXISTS `room_cell`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8mb4 */;
-CREATE TABLE `Room_Cell` (
+CREATE TABLE `room_cell` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `room_ref_id` bigint(20) unsigned NOT NULL COMMENT '房間外鍵（代理鍵）',
   `floor_id` bigint(20) unsigned NOT NULL COMMENT '樓層外鍵，保證同樓層',
@@ -89093,19 +89093,19 @@ CREATE TABLE `Room_Cell` (
   UNIQUE KEY `uk_room_cell` (`room_ref_id`,`floor_id`,`cell_id`),
   KEY `idx_cell_id` (`cell_id`,`floor_id`),
   KEY `idx_floor_id` (`floor_id`),
-  CONSTRAINT `fk_rc_cell` FOREIGN KEY (`cell_id`, `floor_id`) REFERENCES `Building_Cell` (`id`, `floor_id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_rc_room` FOREIGN KEY (`room_ref_id`, `floor_id`) REFERENCES `Room` (`id`, `floor_id`) ON DELETE CASCADE
+  CONSTRAINT `fk_rc_cell` FOREIGN KEY (`cell_id`, `floor_id`) REFERENCES `building_cell` (`id`, `floor_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_rc_room` FOREIGN KEY (`room_ref_id`, `floor_id`) REFERENCES `room` (`id`, `floor_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=1534 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='房間佔用格子關聯表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Dumping data for table `Room_Cell`
+-- Dumping data for table `room_cell`
 --
 
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
-LOCK TABLES `Room_Cell` WRITE;
-/*!40000 ALTER TABLE `Room_Cell` DISABLE KEYS */;
-INSERT INTO `Room_Cell` VALUES
+LOCK TABLES `room_cell` WRITE;
+/*!40000 ALTER TABLE `room_cell` DISABLE KEYS */;
+INSERT INTO `room_cell` VALUES
 (1023,255,46,4200,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1024,255,46,4194,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1025,255,46,4199,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
@@ -89612,7 +89612,7 @@ INSERT INTO `Room_Cell` VALUES
 (1526,353,56,5499,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1527,353,56,5506,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1528,353,56,5498,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520');
-/*!40000 ALTER TABLE `Room_Cell` ENABLE KEYS */;
+/*!40000 ALTER TABLE `room_cell` ENABLE KEYS */;
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;

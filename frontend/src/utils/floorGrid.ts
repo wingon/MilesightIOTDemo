@@ -82,7 +82,7 @@ export interface CellShapeConfig {
    *   1 = B2/F, 2 = B1/F, 3 = G/F, 4 = 1/F ... 10 = 7/F, 11 = ROOF
    */
   floor: number
-  /** DB Floor.id (used for operations such as updating rotation_xyz) */
+  /** DB floor.id (used for operations such as updating rotation_xyz) */
   floor_id?: number
   /** Shape type: 'Rect'(rectangle) | 'Cylinder' | 'Triangle' | 'Hidden'(not rendered) */
   shape: GridType
@@ -92,11 +92,11 @@ export interface CellShapeConfig {
   rotation?: string
   /** Optional: custom height (world units); when absent, uses the default floor height */
   height?: number
-  /** Optional: world coordinate x (column direction), from Building_Cell.x */
+  /** Optional: world coordinate x (column direction), from building_cell.x */
   x?: number
-  /** Optional: world coordinate y (row direction), from Building_Cell.y */
+  /** Optional: world coordinate y (row direction), from building_cell.y */
   y?: number
-  /** Optional: world coordinate z (vertical height), from Building_Cell.z */
+  /** Optional: world coordinate z (vertical height), from building_cell.z */
   z?: number
 }
 

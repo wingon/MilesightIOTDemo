@@ -36,3 +36,11 @@ feat: 樓棟結構改為 DB 驅動，新增儲存格旋轉與編輯
 - Building3D 支援 DB 座標/自訂顏色/自訂高度渲染，並新增旋轉面板（0~315°）與格子編輯面板
 - 樓層檢視改由 DB 房間（Room / Room_Cell）驅動布局與圖例，新增 buildRoomMeta 房間元資料對應
 - 移除舊版 milesight_data.sql，新增 WingOnIOT_DDL_Data.sql（生產備份）與 migrate_building_structure.sql（遷移腳本）
+
+## 2026-08-20 15:22
+refactor: 3D 樓棟相關資料表改為全小寫命名
+
+- 將 Building / Floor / Building_Cell / Room / Room_Cell（及備份表）統一改為小寫：building / floor / building_cell / room / room_cell
+- 同步更新後端 db.py 全部 SQL 查詢、building.py docstring、前端注釋中的資料表名稱
+- 更新 WingOnIOT_DDL_Data.sql（生產備份）與 migrate_building_structure.sql、migrate_cell_shape.sql 表名
+- 新增 migrate_lowercase_tables.sql：可重複執行的表名小寫化遷移腳本（偵測舊表自動 RENAME，Linux 大小寫敏感環境必用）

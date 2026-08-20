@@ -31,7 +31,7 @@ def list_cell_shapes(
     building_id: int | None = None,
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """3D building cell shape settings (driven by Building_Cell, not soft-deleted)."""
+    """3D building cell shape settings (driven by building_cell, not soft-deleted)."""
     return db.list_cell_shapes(building_id)
 
 

@@ -663,15 +663,15 @@ class Database:
         return result
 
     # ------------------------------------------------------------------
-    # 3D building structure (WingOnIOT.Building / Floor / Building_Cell / Room / Room_Cell)
-    # Cell shapes are driven by the Building_Cell table (replacing the old Building_Cell_Shape)
+    # 3D building structure (WingOnIOT.building / floor / building_cell / room / room_cell)
+    # Cell shapes are driven by the building_cell table (replacing the old building_cell_shape)
     # ------------------------------------------------------------------
 
     @staticmethod
     def floor_level_to_3d(level: int) -> int:
-        """Map Floor.level (real floor number) to the 3D building level (1..11).
+        """Map floor.level (real floor number) to the 3D building level (1..11).
 
-        Floor.level semantics:
+        floor.level semantics:
           -2=B2/F->1, -1=B1/F->2, 1=G/F->3, 2=1/F->4 ... 8=7/F->10, 9=ROOF->11
         """
         if level < 0:
@@ -684,7 +684,7 @@ class Database:
         """Enabled buildings (soft-delete aware)."""
         sql = """
             SELECT id, name, code, address, description
-            FROM Building
+            FROM building
             WHERE is_deleted = 0
             ORDER BY id ASC
         """
@@ -704,7 +704,7 @@ class Database:
         clause = " AND ".join(where)
         sql = f"""
             SELECT f.id, f.building_id, f.row_amount, f.column_amount, f.level, f.floor_name
-            FROM Floor f
+            FROM floor f
             WHERE {clause}
             ORDER BY f.level ASC
         """
@@ -720,10 +720,10 @@ class Database:
         return result
 
     def list_cell_shapes(self, building_id: int | None = None) -> list[dict[str, Any]]:
-        """Enabled cell shape settings driven by Building_Cell (replaces Building_Cell_Shape).
+        """Enabled cell shape settings driven by building_cell (replaces building_cell_shape).
 
-        Maps Building_Cell columns to the frontend CellShapeConfig shape:
-          row_no->row, col_no->col, Floor.level->floor (3D), shape,
+        Maps building_cell columns to the frontend CellShapeConfig shape:
+          row_no->row, col_no->col, floor.level->floor (3D), shape,
           rotation_xyz->rotation, color, render_height->height.
         x/y/z are the DB world coordinates (x=col-axis, y=row-axis, z=vertical height);
         the frontend uses them for mesh positioning.
@@ -750,9 +750,9 @@ class Database:
                 c.color,
                 c.render_height,
                 c.is_active
-            FROM Building_Cell c
-            JOIN Floor f ON f.id = c.floor_id
-            JOIN Building b ON b.id = c.building_id
+            FROM building_cell c
+            JOIN floor f ON f.id = c.floor_id
+            JOIN building b ON b.id = c.building_id
             WHERE {clause}
             ORDER BY f.level ASC, c.row_no ASC, c.col_no ASC
         """
@@ -790,8 +790,8 @@ class Database:
             SELECT c.id, c.building_id, c.floor_id, c.row_no, c.col_no,
                    c.x, c.y, c.z, c.length, c.width, c.cell_height, c.rotation_xyz,
                    c.is_active, c.shape, c.color, c.render_height
-            FROM Building_Cell c
-            JOIN Floor f ON f.id = c.floor_id AND f.is_deleted = 0
+            FROM building_cell c
+            JOIN floor f ON f.id = c.floor_id AND f.is_deleted = 0
             WHERE c.floor_id = %(floor_id)s AND c.is_deleted = 0
             ORDER BY c.row_no ASC, c.col_no ASC
         """
@@ -802,24 +802,24 @@ class Database:
         return [self._parse_json_fields(dict(row), ()) for row in rows]
 
     def list_floor_rooms(self, floor_id: int) -> list[dict[str, Any]]:
-        """Rooms of a floor plus their occupied cells (via Room_Cell).
+        """Rooms of a floor plus their occupied cells (via room_cell).
 
         Soft-delete aware: skips deleted floor/rooms/cells; returns each room
         with its cell list (row/col) ready for the frontend room layout.
         """
         rooms_sql = """
             SELECT r.id, r.room_id, r.building_id, r.floor_id, r.room_number, r.room_type, r.area
-            FROM Room r
-            JOIN Floor f ON f.id = r.floor_id AND f.is_deleted = 0
+            FROM room r
+            JOIN floor f ON f.id = r.floor_id AND f.is_deleted = 0
             WHERE r.floor_id = %(floor_id)s AND r.is_deleted = 0
             ORDER BY r.id ASC
         """
         relations_sql = """
             SELECT rc.room_ref_id, c.row_no, c.col_no
-            FROM Room_Cell rc
-            JOIN Room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
-            JOIN Building_Cell c ON c.id = rc.cell_id AND c.is_deleted = 0
-            JOIN Floor f ON f.id = rc.floor_id AND f.is_deleted = 0
+            FROM room_cell rc
+            JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+            JOIN building_cell c ON c.id = rc.cell_id AND c.is_deleted = 0
+            JOIN floor f ON f.id = rc.floor_id AND f.is_deleted = 0
             WHERE rc.floor_id = %(floor_id)s
             ORDER BY rc.room_ref_id ASC, c.row_no ASC, c.col_no ASC
         """
@@ -846,7 +846,7 @@ class Database:
     ) -> bool:
         """Update rotation_xyz for a single cell. Returns True if a row was updated."""
         sql = """
-            UPDATE Building_Cell
+            UPDATE building_cell
             SET rotation_xyz = %(rotation)s
             WHERE floor_id = %(floor_id)s
               AND row_no = %(row_no)s
@@ -868,7 +868,7 @@ class Database:
     ) -> int:
         """Update rotation_xyz for all non-deleted cells of a building. Returns affected count."""
         sql = """
-            UPDATE Building_Cell
+            UPDATE building_cell
             SET rotation_xyz = %(rotation)s
             WHERE building_id = %(building_id)s
               AND is_deleted = 0
@@ -921,7 +921,7 @@ class Database:
             with self.wingon_connection() as conn:
                 with conn.cursor() as cur:
                     # Snapshot before delete
-                    snap_sql = f"SELECT id, floor_id, row_no, col_no, shape, rotation_xyz, color, render_height, is_active FROM Building_Cell WHERE {' AND '.join(where)}"
+                    snap_sql = f"SELECT id, floor_id, row_no, col_no, shape, rotation_xyz, color, render_height, is_active FROM building_cell WHERE {' AND '.join(where)}"
                     cur.execute(snap_sql, params)
                     for s in cur.fetchall() or []:
                         undo_ops.append({
@@ -933,7 +933,7 @@ class Database:
                             "render_height": s.get("render_height"),
                             "is_active": int(s.get("is_active", 1)),
                         })
-                    cur.execute(f"UPDATE Building_Cell SET is_deleted = 1 WHERE {' AND '.join(where)}", params)
+                    cur.execute(f"UPDATE building_cell SET is_deleted = 1 WHERE {' AND '.join(where)}", params)
                     affected = cur.rowcount
 
             _UNDO_STACK.clear()
@@ -944,7 +944,7 @@ class Database:
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, level FROM Floor WHERE building_id = %(bid)s AND is_deleted = 0 ORDER BY level",
+                    "SELECT id, level FROM floor WHERE building_id = %(bid)s AND is_deleted = 0 ORDER BY level",
                     {"bid": building_id},
                 )
                 floors = cur.fetchall() or []
@@ -965,7 +965,7 @@ class Database:
             with self.wingon_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT MAX(row_no) AS mr, MAX(col_no) AS mc FROM Building_Cell WHERE building_id = %(bid)s AND is_deleted = 0",
+                        "SELECT MAX(row_no) AS mr, MAX(col_no) AS mc FROM building_cell WHERE building_id = %(bid)s AND is_deleted = 0",
                         {"bid": building_id},
                     )
                     max_row_col = cur.fetchone()
@@ -997,7 +997,7 @@ class Database:
                 with self.wingon_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "SELECT id, shape, is_active FROM Building_Cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 0",
+                            "SELECT id, shape, is_active FROM building_cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 0",
                             {"fid": fid, "row": r, "col": c},
                         )
                         existing = cur.fetchone()
@@ -1012,26 +1012,26 @@ class Database:
                                     "old_active": old_active,
                                 })
                                 cur.execute(
-                                    "UPDATE Building_Cell SET shape = 'Rect', is_active = 1 WHERE id = %(id)s",
+                                    "UPDATE building_cell SET shape = 'Rect', is_active = 1 WHERE id = %(id)s",
                                     {"id": int(existing["id"])},
                                 )
                                 affected += 1
                             continue
 
                         cur.execute(
-                            "SELECT id FROM Building_Cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 1",
+                            "SELECT id FROM building_cell WHERE floor_id = %(fid)s AND row_no = %(row)s AND col_no = %(col)s AND is_deleted = 1",
                             {"fid": fid, "row": r, "col": c},
                         )
                         deleted_row = cur.fetchone()
                         if deleted_row:
                             undo_ops.append({"action": "re_delete", "id": int(deleted_row["id"])})
-                            cur.execute("UPDATE Building_Cell SET is_deleted = 0 WHERE id = %(id)s", {"id": int(deleted_row["id"])})
+                            cur.execute("UPDATE building_cell SET is_deleted = 0 WHERE id = %(id)s", {"id": int(deleted_row["id"])})
                             affected += 1
                         else:
                             x_val = round((c - 6.5) * 1.15, 3)
                             y_val = round((r - 4.5) * 1.15, 3)
                             cur.execute(
-                                """INSERT INTO Building_Cell
+                                """INSERT INTO building_cell
                                    (building_id, floor_id, row_no, col_no, x, y, z,
                                     length, width, cell_height, rotation_xyz,
                                     is_active, shape, color, render_height, is_deleted)
@@ -1062,14 +1062,14 @@ class Database:
             with conn.cursor() as cur:
                 for op in ops:
                     if op["action"] == "delete_new":
-                        cur.execute("DELETE FROM Building_Cell WHERE id = %(id)s", {"id": op["id"]})
+                        cur.execute("DELETE FROM building_cell WHERE id = %(id)s", {"id": op["id"]})
                         affected += cur.rowcount
                     elif op["action"] == "re_delete":
-                        cur.execute("UPDATE Building_Cell SET is_deleted = 1 WHERE id = %(id)s", {"id": op["id"]})
+                        cur.execute("UPDATE building_cell SET is_deleted = 1 WHERE id = %(id)s", {"id": op["id"]})
                         affected += cur.rowcount
                     elif op["action"] == "restore":
                         cur.execute(
-                            """UPDATE Building_Cell SET is_deleted = 0, shape = %(shape)s,
+                            """UPDATE building_cell SET is_deleted = 0, shape = %(shape)s,
                                rotation_xyz = %(rotation)s, color = %(color)s,
                                render_height = %(rh)s, is_active = %(active)s
                                WHERE id = %(id)s""",
@@ -1080,7 +1080,7 @@ class Database:
                         affected += cur.rowcount
                     elif op["action"] == "update_shape":
                         cur.execute(
-                            "UPDATE Building_Cell SET shape = %(shape)s, is_active = %(active)s WHERE id = %(id)s",
+                            "UPDATE building_cell SET shape = %(shape)s, is_active = %(active)s WHERE id = %(id)s",
                             {"id": op["id"], "shape": op["old_shape"], "active": op.get("old_active", 1)},
                         )
                         affected += cur.rowcount
@@ -1097,7 +1097,7 @@ class Database:
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT id, shape, rotation_xyz, color, render_height, is_active FROM Building_Cell WHERE {where}",
+                    f"SELECT id, shape, rotation_xyz, color, render_height, is_active FROM building_cell WHERE {where}",
                     {"bid": building_id},
                 )
                 for s in cur.fetchall() or []:
@@ -1111,7 +1111,7 @@ class Database:
                         "is_active": int(s.get("is_active", 1)),
                     })
                 cur.execute(
-                    f"UPDATE Building_Cell SET is_deleted = 1 WHERE {where}",
+                    f"UPDATE building_cell SET is_deleted = 1 WHERE {where}",
                     {"bid": building_id},
                 )
                 affected = cur.rowcount
@@ -1125,7 +1125,7 @@ class Database:
     ) -> int:
         """Update rotation_xyz for all non-deleted cells of a given column. Returns affected count."""
         sql = """
-            UPDATE Building_Cell
+            UPDATE building_cell
             SET rotation_xyz = %(rotation)s
             WHERE building_id = %(building_id)s
               AND col_no = %(col_no)s

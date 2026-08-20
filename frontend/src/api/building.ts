@@ -65,7 +65,7 @@ export function listBuildingFloors(buildingId?: number) {
   })
 }
 
-/** Fetch 3D building cell shape settings (driven by Building_Cell, replaces Building_Cell_Shape) */
+/** Fetch 3D building cell shape settings (driven by building_cell, replaces building_cell_shape) */
 export function listBuildingCellShapes(buildingId?: number) {
   return api.get<CellShapeConfig[]>('/api/v1/building/cell-shapes', {
     params: { building_id: buildingId },

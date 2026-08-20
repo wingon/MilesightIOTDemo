@@ -10,27 +10,27 @@ USE WingOnIOT;
 -- 本腳本可重複執行（冪等）：
 --   1) 若現有表是舊版結構（floor_no 一列一樓層），會自動改名保留資料、
 --      建立新表並把各樓層聚合為 JSON 陣列遷入；遷移完成後舊表保留為備份
---      （Building_Cell_Shape_old），確認無誤後可手動執行 DROP TABLE 刪除；
+--      （building_cell_shape_old），確認無誤後可手動執行 DROP TABLE 刪除；
 --   2) 若已是新結構或表不存在，直接沿用 / 建立並寫入種子資料。
 
 -- ── 自動遷移：偵測舊版結構 ──────────────────────────────────────
 SET @tbl_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
-                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Building_Cell_Shape');
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'building_cell_shape');
 SET @is_old = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Building_Cell_Shape'
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'building_cell_shape'
                  AND COLUMN_NAME = 'floor_no');
 
 -- 舊表改名（先清除可能殘留的同名舊表，避免 RENAME 衝突）
 SET @sql = IF(@tbl_exists = 1 AND @is_old = 1,
-              'DROP TABLE IF EXISTS Building_Cell_Shape_old', 'SELECT 1');
+              'DROP TABLE IF EXISTS building_cell_shape_old', 'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 SET @sql = IF(@tbl_exists = 1 AND @is_old = 1,
-              'RENAME TABLE Building_Cell_Shape TO Building_Cell_Shape_old', 'SELECT 1');
+              'RENAME TABLE building_cell_shape TO building_cell_shape_old', 'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- ── 建立新表 ────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS Building_Cell_Shape (
+CREATE TABLE IF NOT EXISTS building_cell_shape (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   row_no      TINYINT UNSIGNED NOT NULL COMMENT '格子行號，1-based，1~8（南→北）',
   col_no      TINYINT UNSIGNED NOT NULL COMMENT '格子列號，1-based，1~12（西→東）',
@@ -56,29 +56,29 @@ CREATE TABLE IF NOT EXISTS Building_Cell_Shape (
 -- 同一 (row, col) 的樓層合併為 JSON 陣列；若該格曾設 floor_no=0（所有樓層），
 -- 整組合併為 [0]。JSON_ARRAYAGG 的樓層順序不保證，後端展開時會重新排序。
 -- 若同一 (row, col) 原本存在多組不同設定（不同 shape 等），遷移會自動中止並
--- 保留舊表（Building_Cell_Shape_old），需先人工合併後再重新執行本腳本。
+-- 保留舊表（building_cell_shape_old），需先人工合併後再重新執行本腳本。
 SET @has_old_data = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
-                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Building_Cell_Shape_old');
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'building_cell_shape_old');
 
 -- 衝突偵測：同一 (row, col) 是否有多組不同設定（動態執行，避免舊表不存在時報錯）
 -- 先按配置 GROUP BY 得到每個 (row,col) 的配置組，再判斷組數是否 > 1
 SET @sql = IF(@has_old_data = 1,
-              'SET @conflict = (SELECT COUNT(*) FROM (SELECT row_no, col_no FROM (SELECT row_no, col_no FROM Building_Cell_Shape_old GROUP BY row_no, col_no, shape, rotation, color, height, sort_order, is_enabled) g GROUP BY row_no, col_no HAVING COUNT(*) > 1) c)',
+              'SET @conflict = (SELECT COUNT(*) FROM (SELECT row_no, col_no FROM (SELECT row_no, col_no FROM building_cell_shape_old GROUP BY row_no, col_no, shape, rotation, color, height, sort_order, is_enabled) g GROUP BY row_no, col_no HAVING COUNT(*) > 1) c)',
               'SET @conflict = 0');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- 遷移條件：有舊表 且 無衝突 且 新表為空（新表已有資料代表已遷移過，避免重複）
-SET @new_rows = (SELECT COUNT(*) FROM Building_Cell_Shape);
+SET @new_rows = (SELECT COUNT(*) FROM building_cell_shape);
 SET @do_migrate = IF(@has_old_data = 1 AND @conflict = 0 AND @new_rows = 0, 1, 0);
 
 -- 符合條件才執行聚合遷移
 SET @sql = IF(@do_migrate = 1,
-              'INSERT INTO Building_Cell_Shape
+              'INSERT INTO building_cell_shape
                  (row_no, col_no, floors, shape, rotation, color, height, sort_order, is_enabled)
                SELECT row_no, col_no,
                       CASE WHEN SUM(floor_no = 0) > 0 THEN ''[0]'' ELSE JSON_ARRAYAGG(floor_no) END,
                       shape, rotation, color, height, sort_order, is_enabled
-               FROM Building_Cell_Shape_old
+               FROM building_cell_shape_old
                GROUP BY row_no, col_no, shape, rotation, color, height, sort_order, is_enabled',
               'SELECT 1');
 PREPARE s FROM @sql;
@@ -89,13 +89,13 @@ DEALLOCATE PREPARE s;
 
 -- 衝突時輸出提示（舊表保留，等待人工合併後重跑）
 SET @sql = IF(@has_old_data = 1 AND @conflict > 0,
-              'SELECT ''警告：同一 (row,col) 存在多組不同設定，遷移已跳過；舊表 Building_Cell_Shape_old 已保留，請人工合併後再執行本腳本'' AS migrate_warning',
+              'SELECT ''警告：同一 (row,col) 存在多組不同設定，遷移已跳過；舊表 building_cell_shape_old 已保留，請人工合併後再執行本腳本'' AS migrate_warning',
               'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- 遷移成功：保留舊表為備份，提示可手動清理
 SET @sql = IF(@migrated > 0,
-              'SELECT ''遷移完成：舊資料已遷入 Building_Cell_Shape；備份表 Building_Cell_Shape_old 已保留，確認無誤後可手動執行 DROP TABLE Building_Cell_Shape_old'' AS migrate_info',
+              'SELECT ''遷移完成：舊資料已遷入 building_cell_shape；備份表 building_cell_shape_old 已保留，確認無誤後可手動執行 DROP TABLE building_cell_shape_old'' AS migrate_info',
               'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
@@ -109,7 +109,7 @@ PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 --   (6, 5) 2~3F → Triangle，但停用（is_enabled=0，API 不回傳）
 SET @seed_ok = IF(@has_old_data = 0 OR @conflict = 0, 1, 0);
 SET @sql = IF(@seed_ok = 1,
-              'INSERT IGNORE INTO Building_Cell_Shape (row_no, col_no, floors, shape, rotation, color, height, sort_order, is_enabled) VALUES
+              'INSERT IGNORE INTO building_cell_shape (row_no, col_no, floors, shape, rotation, color, height, sort_order, is_enabled) VALUES
                  (8, 11, ''[3,4,5,6,7]'',   ''Triangle'', ''0,0,0'',     NULL,      NULL,  0, 1),
                  (7, 11, ''[3,4,5,6,7]'',   ''Rect'',     ''0,0,0'',     NULL,      NULL,  0, 1),
                  (7, 12, ''[3,4,5,6,7]'',   ''Triangle'', ''0,0,0'',     NULL,      NULL,  0, 1),
@@ -120,8 +120,8 @@ SET @sql = IF(@seed_ok = 1,
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- 常用查詢範例（僅供參考，後端已實作）：
---   某格子的設定：   SELECT * FROM Building_Cell_Shape WHERE row_no = 8 AND col_no = 11;
---   某樓層生效的格子： SELECT * FROM Building_Cell_Shape WHERE JSON_CONTAINS(floors, '3');
---   啟用中的設定：   SELECT * FROM Building_Cell_Shape WHERE is_enabled = 1;
+--   某格子的設定：   SELECT * FROM building_cell_shape WHERE row_no = 8 AND col_no = 11;
+--   某樓層生效的格子： SELECT * FROM building_cell_shape WHERE JSON_CONTAINS(floors, '3');
+--   啟用中的設定：   SELECT * FROM building_cell_shape WHERE is_enabled = 1;
 --   每個格子佔用幾個樓層： SELECT row_no, col_no, JSON_LENGTH(floors) AS floor_count
---                            FROM Building_Cell_Shape;
+--                            FROM building_cell_shape;

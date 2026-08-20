@@ -23,8 +23,8 @@ const metric = ref<EnvMetric>('temperature')
 /**
  * Cell shape settings list
  *
- * Driven by the DB (Building_Cell table), fetched via GET /api/v1/building/cell-shapes,
- * replacing the old Building_Cell_Shape table and frontend hard-coded settings.
+ * Driven by the DB (building_cell table), fetched via GET /api/v1/building/cell-shapes,
+ * replacing the old building_cell_shape table and frontend hard-coded settings.
  * Passed to Building3D via the :cell-shapes prop (one entry per cell: row/col/floor/shape/rotation/color/height).
  */
 const cellShapes = ref<CellShapeConfig[]>([])
@@ -35,7 +35,7 @@ async function fetchCellShapes() {
     const { data } = await listBuildingCellShapes()
     cellShapes.value = data ?? []
   } catch (err) {
-    console.warn('[BuildingViewer] Failed to load cell shape settings (Building_Cell):', err)
+    console.warn('[BuildingViewer] Failed to load cell shape settings (building_cell):', err)
     cellShapes.value = []
   }
 }
@@ -46,9 +46,9 @@ onMounted(() => {
   // 拉取 WingOnIOT 各樓層真實溫度/濕度 + 設備明細
   store.fetchFloorEnv()
   store.fetchEnvDevices()
-  // Fetch the DB-driven building/floor structure (Building/Floor tables)
+  // Fetch the DB-driven building/floor structure (building/floor tables)
   store.fetchBuildingStructure()
-  // Fetch the DB-driven cell shape settings (Building_Cell table, non-blocking for the rest of the init)
+  // Fetch the DB-driven cell shape settings (building_cell table, non-blocking for the rest of the init)
   fetchCellShapes()
   const q = Number(route.query.floor)
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {

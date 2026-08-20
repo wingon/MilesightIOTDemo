@@ -36,7 +36,7 @@ watch(
     store.ensureFloor(n)
     // Fetch real WingOnIOT environment devices (this page must show DB devices, not demo)
     store.fetchEnvDevices()
-    // Fetch the DB building structure then the floor rooms (Room / Room_Cell)
+    // Fetch the DB building structure then the floor rooms (room / room_cell)
     store.fetchBuildingStructure().then(() => store.fetchFloorRooms(n))
     selectedRoom.value = null
     editMode.value = false
