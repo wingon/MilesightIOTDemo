@@ -61,3 +61,22 @@ feat: 支援大屏（iframe 嵌入）模式
 - app store 新增 applyLargeScreenMode()：解析 ls 參數、寫入 --ls-scale CSS 變數，並在 main.ts 掛載前執行避免閃爍
 - 大屏模式下隱藏側欄與 header，內容區去 margin 鋪滿視口；頁面高度依縮放比例折算避免捲軸
 - global.less 新增 --ls-scale / --ls-content-offset 變數與 html.ls-on 規則；Building/Floor 檢視頁高度改用變數計算
+
+## 2026-08-21 12:12
+feat: 精修大屏模式與 3D 自動旋轉
+
+- Building3D 新增自動旋轉：播放/暫停按鈕與速率滑桿（0.5×~4×）；大屏模式以固定週期旋轉並隱藏控制項
+- 溫度色帶改為實際範圍 0/10/20/30/35°C（藍→青→黃→紅），圖例改為連續漸層色條並新增漸層節點
+- 大屏模式新增卡片式版面（largeScreen.less）：標題卡/3D 卡/指標卡，隱藏操作列與提示，加入淡入動畫
+- 樓宇檢視標題加入 Wing On Logo（僅大屏顯示）；i18n 新增旋轉控制文案、副標題改為永安貨倉大廈
+- 側欄選單 hover/選中樣式與金色細滾動條、header 細節修飾；PC 端卡片/KPI/表格表頭精修（html:not(.ls-on) 隔離）
+
+feat: PC 端与大屏的隔离方式
+
+- 代碼位置：
+  - frontend/src/stores/app.ts:27-41 — applyLargeScreenMode() 函式
+  - frontend/src/styles/largeScreen.less — 大屏樣式覆蓋（新建檔案）
+  - frontend/src/main.ts:9-10 — import './styles/global.less' + import './styles/largeScreen.less'
+- 展示方式
+  - {url}?ls=1.5 大屏模式（預設） 項目預設解析度：1920×1080。驗證通過：瀏覽器 1920×1080 viewport 無捲動條
+  - PC端3D建筑可调节，大屏是硬编码

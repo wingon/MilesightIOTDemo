@@ -22,33 +22,42 @@ function hsl(h: number, s: number, l: number) {
 }
 
 /**
- * Fixed 5-band temperature scale: 0 → 25 → 50 → 75 → 100
- * Each band maps to a color range (low → high):
- *   0~25:   blue (cold)
- *   25~50:  cyan-green (cool)
- *   50~75:  yellow (warm)
- *   75~100: red (hot)
+ * Fixed temperature scale: 0 → 10 → 20 → 30 → 35 (°C)
+ * Bands map low → high to a cold → hot gradient (blue → cyan → yellow → red):
+ *   0~10:   blue (cold)
+ *   10~20:  cyan-green (cool)
+ *   20~30:  yellow (warm)
+ *   30~35:  red (hot)
  */
 export const TEMPERATURE_BANDS: { from: number; to: number; color: string }[] = [
-  { from: 0, to: 25, color: hsl(0.60, 0.65, 0.50) },
-  { from: 25, to: 50, color: hsl(0.45, 0.55, 0.48) },
-  { from: 50, to: 75, color: hsl(0.14, 0.70, 0.52) },
-  { from: 75, to: 100, color: hsl(0.00, 0.72, 0.50) },
+  { from: 0, to: 10, color: hsl(0.60, 0.65, 0.45) },
+  { from: 10, to: 20, color: hsl(0.48, 0.60, 0.48) },
+  { from: 20, to: 30, color: hsl(0.28, 0.65, 0.50) },
+  { from: 30, to: 35, color: hsl(0.06, 0.78, 0.52) },
 ]
 
-/** Fixed temperature band tick values */
-export const TEMPERATURE_TICKS = [0, 25, 50, 75, 100]
+/** Fixed temperature tick values */
+export const TEMPERATURE_TICKS = [0, 10, 20, 30, 35]
 
-/** Fixed temperature band colors (for legend swatches, 4 bands) */
+/** Fixed temperature band colors (for legend swatches / gradient stops) */
 export const TEMPERATURE_BAND_COLORS = TEMPERATURE_BANDS.map((b) => b.color)
 
-/** Temperature color scale: blue → cyan-green → yellow → red (fixed 5 bands) */
+/** Continuous gradient stops (one color per tick) for the temperature legend bar */
+export const TEMPERATURE_GRADIENT_STOPS = [
+  hsl(0.60, 0.65, 0.45), // 0
+  hsl(0.48, 0.60, 0.48), // 10
+  hsl(0.28, 0.65, 0.50), // 20
+  hsl(0.12, 0.78, 0.54), // 30
+  hsl(0.00, 0.78, 0.50), // 35
+]
+
+/** Temperature color scale: blue → cyan → yellow → red (fixed 5 bands) */
 export function temperatureColor(value: number | null, _min: number, _max: number): string | null {
   if (value == null) return null
   for (const band of TEMPERATURE_BANDS) {
     if (value >= band.from && value < band.to) return band.color
   }
-  if (value >= 100) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
+  if (value >= 35) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
   return TEMPERATURE_BANDS[0].color
 }
 
@@ -58,7 +67,7 @@ export function fixedTemperatureColor(value: number | null): string {
   for (const band of TEMPERATURE_BANDS) {
     if (value >= band.from && value < band.to) return band.color
   }
-  if (value >= 100) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
+  if (value >= 35) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
   return TEMPERATURE_BANDS[0].color
 }
 
@@ -80,12 +89,12 @@ export function envColorFor(
     : humidityColor(value, min, max)
 }
 
-/** Get min/max of the current metric across floors; temperature uses fixed 0~100, humidity is dynamic */
+/** Get min/max of the current metric across floors; temperature uses fixed 0~35, humidity is dynamic */
 export function envRange(
   floorEnv: Record<number, FloorEnvValue> | undefined,
   metric: EnvMetric,
 ): [number, number] {
-  if (metric === 'temperature') return [0, 100]
+  if (metric === 'temperature') return [0, 35]
   if (!floorEnv) return HUMIDITY_RANGE_DEFAULT
   let min: number | null = null
   let max: number | null = null

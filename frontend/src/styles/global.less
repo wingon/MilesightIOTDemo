@@ -58,3 +58,89 @@ a {
   letter-spacing: 0.02em;
   text-transform: none;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   PC 端专属精修
+   全部用 html:not(.ls-on) 隔离 → 大屏（html.ls-on）完全不受影响
+   ══════════════════════════════════════════════════════════════ */
+html:not(.ls-on) {
+  /* ── 卡片：统一圆角 + 金色 hover 反馈（品牌签名线） ── */
+  .ov-card,
+  .stat-card,
+  .device-card,
+  .card {
+    border-radius: 6px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .ov-card:hover,
+  .stat-card:hover,
+  .device-card:hover,
+  .card:hover {
+    border-color: #c4a574;
+    box-shadow: 0 4px 14px rgba(196, 165, 116, 0.16);
+  }
+
+  /* 楼栋 3D / 面板 / 设备面板 */
+  .pane-3d,
+  .dash,
+  .device-panel {
+    border-radius: 8px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .pane-3d:hover,
+  .dash:hover,
+  .device-panel:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+  }
+
+  /* ── antd 卡片 ── */
+  .ant-card {
+    border-radius: 8px;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .ant-card:hover {
+    border-color: #d4b88a;
+    box-shadow: 0 4px 14px rgba(196, 165, 116, 0.1);
+  }
+
+  /* ── KPI 数值：品牌金强调（大屏颜色由 largeScreen.less 自行控制） ── */
+  .ant-statistic-content-value {
+    color: #a88955;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ant-statistic-content-suffix {
+    font-size: 13px;
+    color: #6b6b6b;
+  }
+
+  /* ── 表格表头：米金底 + 更深文字，层次更稳 ── */
+  .ant-table-thead > tr > th {
+    background: #faf8f5 !important;
+    color: #4a4438;
+  }
+
+  /* ── 报表页 insights 卡片 hover 微提升 ── */
+  .insight-card {
+    transition: border-color 0.18s ease;
+  }
+
+  .insight-card:hover {
+    border-color: #d4b88a;
+  }
+
+  /* ── 页面 hero 区：底部金色细线（与顶栏呼应） ── */
+  .report-hero,
+  .page-hero {
+    box-shadow: 0 1px 0 0 #d9c9a3;
+  }
+
+  /* ── 报表页 badge：统一圆角 ── */
+  .badge {
+    border-radius: 4px;
+  }
+}

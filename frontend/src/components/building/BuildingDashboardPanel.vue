@@ -584,7 +584,7 @@ function onPick(floor: number) {
 /* 目前僅顯示 樓層/連通/溫度/濕度 四欄（其餘欄位註解保留）：
 @floor-cols: 72px 64px 40px 52px 52px 52px 48px 48px 52px 48px 48px 48px 44px 44px 44px;
 */
-@floor-cols: 72px 104px 64px 64px;
+@floor-cols: 72px 104px 92px 84px;
 
 /* 舊欄位群組標頭樣式（多餘欄位已屏蔽，暫註解保留）：
 .list-groups {

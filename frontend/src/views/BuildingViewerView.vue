@@ -99,9 +99,12 @@ const panelEnvDevices = computed(() => {
 <template>
   <div class="building-viewer">
     <div class="page-intro">
-      <div>
-        <h1>{{ t('building.title') }}</h1>
-        <p>{{ t('building.subtitle') }}</p>
+      <div class="intro-title">
+        <img class="intro-logo" src="/wingon-logo.png" alt="Wing On" />
+        <div>
+          <h1>{{ t('building.title') }}</h1>
+          <p>{{ t('building.subtitle') }}</p>
+        </div>
       </div>
       <div class="intro-actions">
         <a-button v-if="selectedFloor != null" @click="clearFloor">
@@ -191,6 +194,22 @@ const panelEnvDevices = computed(() => {
     color: #6b6b6b;
     font-size: 13px;
   }
+}
+
+/* Wing On logo — hidden by default, shown only in large-screen mode (html.ls-on) */
+.intro-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.intro-logo {
+  display: none;
+  width: 44px;
+  height: auto;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .intro-actions {

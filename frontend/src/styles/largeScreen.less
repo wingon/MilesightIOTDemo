@@ -1,0 +1,629 @@
+/*
+ * Large-screen (iframe embed) card-style layout overrides.
+ *
+ * Activated by the `html.ls-on` class (set via ?ls=<scale> URL param).
+ * All selectors are scoped under html.ls-on so the PC desktop layout is
+ * completely unaffected.
+ *
+ * Layout structure (matching reference design):
+ *   - Warm gray background (#e6e2da)
+ *   - Three white cards with rounded corners and subtle shadows:
+ *     1. Title card  — full-width, logo + title + subtitle
+ *     2. 3D card     — left, building model
+ *     3. Metrics card — right, per-floor metrics table
+ */
+
+/* ── Page background ── */
+html.ls-on,
+html.ls-on body,
+html.ls-on #app {
+  background: #e6e2da;
+}
+
+/* ── Shell: remove default margins so cards sit flush ── */
+html.ls-on .shell.ls-shell {
+  background: transparent;
+}
+
+html.ls-on .main {
+  background: transparent;
+}
+
+/* ── Card base style ── */
+html.ls-on .page-intro,
+html.ls-on .pane-3d,
+html.ls-on .dash {
+  background: #fff;
+  border: 1px solid #d9d5cc;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+/* ── Card hover lift effect ── */
+html.ls-on .pane-3d:hover,
+html.ls-on .dash:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+/* ── Viewer container: add padding for card spacing ── */
+html.ls-on .building-viewer {
+  gap: 10px;
+  padding: 10px;
+}
+
+/* ── Title card ── */
+html.ls-on .page-intro {
+  padding: 16px 24px;
+  align-items: center;
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  border-bottom: 2px solid #c4a574;
+}
+
+html.ls-on .page-intro h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0d0d0d;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+html.ls-on .page-intro p {
+  margin: 4px 0 0;
+  color: #6b6b6b;
+  font-size: 12px;
+}
+
+/* ── Workspace: gap between left and right cards ── */
+html.ls-on .workspace {
+  gap: 10px;
+}
+
+/* ── 3D card ── */
+html.ls-on .pane-3d {
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Metrics card (right panel) ── */
+html.ls-on .dash {
+  overflow: hidden;
+}
+
+/* ── Dashboard page specific styles ── */
+html.ls-on .stat-card {
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  border-radius: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+html.ls-on .stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* ── KPI number emphasis ── */
+html.ls-on .ant-statistic-content-value {
+  font-size: 28px !important;
+  font-weight: 700;
+  color: #c4a574;
+  letter-spacing: -0.02em;
+}
+
+html.ls-on .ant-statistic-content-suffix {
+  font-size: 14px;
+  color: #6b6b6b;
+}
+
+/* ── Chart card styling ── */
+html.ls-on .ant-card {
+  border-radius: 10px;
+  border: 1px solid #e6e2da;
+  overflow: hidden;
+}
+
+html.ls-on .ant-card-head {
+  background: linear-gradient(180deg, #faf8f5 0%, #fff 100%);
+  border-bottom: 1px solid #e6e2da;
+  padding: 12px 16px;
+  min-height: auto;
+}
+
+html.ls-on .ant-card-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0d0d0d;
+  padding: 0;
+}
+
+/* ── Chart subtitle styling ── */
+html.ls-on .chart-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b6b6b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  padding-left: 4px;
+}
+
+/* ── KPI row styling ── */
+html.ls-on .kpi-row {
+  background: #faf8f5;
+  border-radius: 8px;
+  padding: 12px 8px;
+  margin-bottom: 12px;
+  border: 1px solid #f0ece5;
+}
+
+/* ── Page hero section ── */
+html.ls-on .page-hero {
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  border: 1px solid #e6e2da;
+}
+
+html.ls-on .hero-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+/* Show the Wing On logo next to the page title */
+html.ls-on .intro-logo {
+  display: block;
+}
+
+/* Hide action buttons (Temperature / Humidity / Jump to floor) */
+html.ls-on .intro-actions {
+  display: none;
+}
+
+/* Hide 3D viewport hint label */
+html.ls-on .pane-label {
+  display: none;
+}
+
+/* Hide auto-rotate controls (rotation still runs in background) */
+html.ls-on .auto-rotate {
+  display: none;
+}
+
+/* Hide legend bottom note */
+html.ls-on .legend-note {
+  display: none;
+}
+
+/* Hide footer hint */
+html.ls-on .foot {
+  display: none;
+}
+
+/* Hide Building health summary block (Connected/Registered, progress bar, stats).
+   NOT deleted — can be restored by removing this rule. */
+html.ls-on .block.health {
+  display: none;
+}
+
+/* ── Fade-in animation for cards ── */
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+html.ls-on .page-intro,
+html.ls-on .pane-3d,
+html.ls-on .dash,
+html.ls-on .stat-card {
+  animation: cardFadeIn 0.4s ease-out;
+}
+
+html.ls-on .stat-card:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+html.ls-on .stat-card:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+/* ── Dashboard page styles ── */
+html.ls-on .page-hero {
+  padding: 12px 0 16px;
+  margin-bottom: 12px;
+  border-bottom: none;
+  background: transparent;
+}
+
+html.ls-on .hero-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+html.ls-on .hero-sub {
+  font-size: 12px;
+  color: #6b6b6b;
+}
+
+html.ls-on .stat-cards {
+  gap: 10px !important;
+}
+
+html.ls-on .stat-card {
+  border-radius: 10px;
+  border: 1px solid #e6e2da;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+html.ls-on .stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+html.ls-on .stat-card .ant-card-head {
+  background: linear-gradient(180deg, #faf8f5 0%, #fff 100%);
+  border-bottom: 1px solid #e6e2da;
+  padding: 10px 16px;
+  min-height: auto;
+}
+
+html.ls-on .stat-card .ant-card-head-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0d0d0d;
+  padding: 0;
+}
+
+html.ls-on .stat-card .ant-statistic-content-value {
+  font-size: 26px !important;
+  font-weight: 700;
+  color: #c4a574;
+}
+
+/* ── Building viewer styles ── */
+html.ls-on .building-viewer {
+  gap: 10px;
+  padding: 10px;
+}
+
+html.ls-on .building-viewer .page-intro {
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  border-radius: 12px;
+  padding: 14px 20px;
+  border: 1px solid #e6e2da;
+  border-bottom: 2px solid #c4a574;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  align-items: center;
+}
+
+html.ls-on .building-viewer .page-intro h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0d0d0d;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+html.ls-on .building-viewer .page-intro p {
+  font-size: 12px;
+  color: #6b6b6b;
+  margin: 4px 0 0;
+}
+
+html.ls-on .building-viewer .intro-logo {
+  display: block;
+  width: 48px;
+}
+
+html.ls-on .building-viewer .intro-actions {
+  display: none;
+}
+
+html.ls-on .building-viewer .pane-label {
+  display: none;
+}
+
+html.ls-on .building-viewer .pane-3d {
+  border-radius: 12px;
+  border: 1px solid #d9d5cc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+html.ls-on .building-viewer .pane-3d:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+html.ls-on .building-viewer .right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+html.ls-on .building-viewer .auto-rotate {
+  display: none;
+}
+
+html.ls-on .building-viewer .legend-note {
+  display: none;
+}
+
+html.ls-on .building-viewer .foot {
+  display: none;
+}
+
+html.ls-on .building-viewer .block.health {
+  display: none;
+}
+
+/* ── Dashboard panel styles ── */
+html.ls-on .dash {
+  border-radius: 12px;
+  border: 1px solid #d9d5cc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+html.ls-on .dash .head {
+  background: linear-gradient(180deg, #faf8f5 0%, #fff 100%);
+  padding: 14px 16px;
+  border-bottom: 1px solid #e6e2da;
+}
+
+html.ls-on .dash .head h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+html.ls-on .dash .head p {
+  font-size: 11px;
+  color: #6b6b6b;
+}
+
+html.ls-on .dash .demo {
+  font-size: 9px;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+html.ls-on .dash .scroll {
+  padding: 10px;
+  gap: 10px;
+}
+
+html.ls-on .dash .health {
+  border-radius: 8px;
+  background: linear-gradient(135deg, #fafaf8 0%, #f5f3ef 100%);
+  border: 1px solid #e6e2da;
+  padding: 12px;
+}
+
+html.ls-on .dash .health-num strong {
+  font-size: 26px;
+  color: #c4a574;
+}
+
+html.ls-on .dash .health-pct {
+  font-size: 20px;
+  color: #3d7a5a;
+}
+
+html.ls-on .dash .bar {
+  border-radius: 3px;
+  height: 5px;
+  background: #e6e2da;
+}
+
+html.ls-on .dash .bar-fill {
+  border-radius: 3px;
+  background: linear-gradient(90deg, #c4a574 0%, #d4b88a 100%);
+}
+
+html.ls-on .dash .floor-row {
+  border-radius: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  border: 1px solid transparent;
+  margin-bottom: 2px;
+}
+
+html.ls-on .dash .floor-row:hover {
+  background: #fafaf8;
+  border-color: #e6e2da;
+}
+
+html.ls-on .dash .floor-row.selected {
+  background: rgba(196, 165, 116, 0.12);
+  border-color: #c4a574;
+}
+
+html.ls-on .dash .floor-id {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+html.ls-on .dash .m {
+  font-size: 12px;
+}
+
+html.ls-on .dash .m.online {
+  color: #3d7a5a;
+  font-weight: 700;
+}
+
+html.ls-on .dash .m.muted {
+  color: #6b6b6b;
+}
+
+html.ls-on .dash .alert-card {
+  border-radius: 8px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+html.ls-on .dash .alert-card.metric {
+  background: linear-gradient(135deg, rgba(196, 165, 116, 0.08) 0%, rgba(196, 165, 116, 0.04) 100%);
+  border: 1px solid rgba(168, 137, 85, 0.3);
+}
+
+html.ls-on .dash .alert-card.metric:hover {
+  background: rgba(196, 165, 116, 0.15);
+  border-color: rgba(168, 137, 85, 0.5);
+}
+
+html.ls-on .dash .alert-card.mqtt {
+  background: linear-gradient(135deg, rgba(180, 35, 24, 0.06) 0%, rgba(180, 35, 24, 0.02) 100%);
+  border: 1px solid rgba(180, 35, 24, 0.25);
+}
+
+html.ls-on .dash .alert-card.mqtt:hover {
+  background: rgba(180, 35, 24, 0.1);
+  border-color: rgba(180, 35, 24, 0.4);
+}
+
+html.ls-on .dash .pill {
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+html.ls-on .dash .filter {
+  border-radius: 4px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+html.ls-on .dash .filter.on {
+  background: #c4a574;
+  color: #fff;
+  border-color: #c4a574;
+}
+
+html.ls-on .dash .foot {
+  display: none;
+}
+
+/* ── Device detail panel styles ── */
+html.ls-on .device-panel {
+  border-radius: 12px;
+  border: 1px solid #d9d5cc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+html.ls-on .device-panel .panel-head {
+  background: linear-gradient(180deg, #faf8f5 0%, #fff 100%);
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid #e6e2da;
+}
+
+html.ls-on .device-panel .panel-head h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+html.ls-on .device-panel .panel-head p {
+  font-size: 12px;
+  color: #6b6b6b;
+}
+
+html.ls-on .device-panel .demo-badge,
+html.ls-on .device-panel .live-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+html.ls-on .device-panel .nav {
+  background: #faf8f5;
+  border-right: 1px solid #e6e2da;
+  padding: 10px 8px;
+}
+
+html.ls-on .device-panel .nav-item {
+  border-radius: 6px;
+  padding: 8px 10px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+html.ls-on .device-panel .nav-item:hover {
+  background: #fff;
+}
+
+html.ls-on .device-panel .nav-item.active {
+  background: #fff;
+  border-color: #c4a574;
+  box-shadow: inset 3px 0 0 #c4a574;
+}
+
+html.ls-on .device-panel .nav-type {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+html.ls-on .device-panel .charts {
+  padding: 10px;
+  gap: 10px;
+}
+
+html.ls-on .device-panel .device-card {
+  border-radius: 8px;
+  border: 1px solid #e6e2da;
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  padding: 12px;
+  transition: border-color 0.15s ease;
+}
+
+html.ls-on .device-panel .device-card.active {
+  border-color: #c4a574;
+  box-shadow: 0 2px 8px rgba(196, 165, 116, 0.15);
+}
+
+html.ls-on .device-panel .device-type {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0d0d0d;
+}
+
+html.ls-on .device-panel .device-id {
+  font-size: 10px;
+  color: #6b6b6b;
+}
+
+html.ls-on .device-panel .metrics {
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+html.ls-on .device-panel .metric {
+  border-radius: 6px;
+  border: 1px solid #f0ece5;
+  background: #faf8f5;
+  padding: 8px 10px;
+}
+
+html.ls-on .device-panel .m-label {
+  font-size: 10px;
+  color: #6b6b6b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+html.ls-on .device-panel .m-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c4a574;
+}

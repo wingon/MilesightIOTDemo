@@ -16,6 +16,7 @@ import {
   envRange,
   fixedTemperatureColor,
   TEMPERATURE_BAND_COLORS,
+  TEMPERATURE_GRADIENT_STOPS,
   TEMPERATURE_TICKS,
   type EnvMetric,
   type FloorEnvValue,
@@ -55,6 +56,14 @@ const toastVisible = ref(false)
 const toastStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
 /** Key of the cell currently logged (row/col), so hover logs once per cell */
 let loggedCellKey = ''
+
+/** Auto-rotate the building body around the Y axis */
+const autoRotate = ref(true)
+/** Rotate speed multiplier (0.5× ~ 4×) */
+const rotateSpeed = ref(1)
+
+/** 大屏模式：每圈旋转时间（秒），硬编码配置 */
+const LS_ROTATION_PERIOD = 45
 
 /** Currently selected cell for rotation editing */
 const selectedCell = ref<{
@@ -477,6 +486,18 @@ function onResize() {
 
 function animate() {
   animId = requestAnimationFrame(animate)
+  // Slow auto-rotation of the building body (rate adjustable via rotateSpeed)
+  if (buildingGroup && autoRotate.value) {
+    // 大屏模式：使用固定的旋转周期；PC端：使用用户控制的速度
+    const isLsMode = document.documentElement.classList.contains('ls-on')
+    if (isLsMode) {
+      // 大屏模式：每帧旋转角度 = 2π / (周期 × 帧率)，约60fps
+      const radiansPerFrame = (2 * Math.PI) / (LS_ROTATION_PERIOD * 60)
+      buildingGroup.rotation.y += radiansPerFrame
+    } else {
+      buildingGroup.rotation.y += 0.004 * rotateSpeed.value
+    }
+  }
   controls?.update()
   if (renderer && scene && camera) renderer.render(scene, camera)
 }
@@ -524,6 +545,15 @@ onMounted(() => {
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('pointerleave', onPointerLeave)
   window.addEventListener('resize', onResize)
+  // Respect reduced-motion: start without auto-rotation (大屏模式下强制开启)
+  const isLsMode = document.documentElement.classList.contains('ls-on')
+  if (!isLsMode && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    autoRotate.value = false
+  }
+  // 大屏模式下强制开启自动旋转
+  if (isLsMode) {
+    autoRotate.value = true
+  }
   animate()
 })
 
@@ -573,6 +603,12 @@ function legendCellColor(i: number) {
   // Fixed 5-band temperature
   return TEMPERATURE_BAND_COLORS[i - 1] ?? '#d9d5cc'
 }
+
+/** Continuous temperature gradient (0 → 10 → 20 → 30 → 35) for the legend bar */
+const legendGradientStyle = computed(() => {
+  if (props.metric === 'humidity') return ''
+  return `linear-gradient(90deg, ${TEMPERATURE_GRADIENT_STOPS.join(', ')})`
+})
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
@@ -665,13 +701,46 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
+    <div class="auto-rotate">
+      <button
+        type="button"
+        class="ar-toggle"
+        :class="{ on: autoRotate }"
+        @click="autoRotate = !autoRotate"
+      >
+        {{ autoRotate ? t('building.rotatePause') : t('building.rotatePlay') }}
+      </button>
+      <span class="ar-label">{{ t('building.rotateSpeed') }}</span>
+      <input
+        v-model.number="rotateSpeed"
+        class="ar-slider"
+        type="range"
+        min="0.5"
+        max="4"
+        step="0.5"
+        :aria-label="t('building.rotateSpeed')"
+      />
+      <span class="ar-value">{{ rotateSpeed.toFixed(1) }}×</span>
+    </div>
     <div class="env-legend">
       <div class="legend-head">
         <span class="legend-title">{{ legendLabel }}</span>
         <span class="legend-unit">{{ legendUnit }}</span>
         <span class="legend-live" aria-hidden="true" />
       </div>
-      <div class="legend-bar" role="img" :aria-label="`${legendLabel} · ${legendRange[0]} – ${legendRange[1]} ${legendUnit}`">
+      <div
+        v-if="metric === 'temperature'"
+        class="legend-bar legend-bar-gradient"
+        role="img"
+        :aria-label="`${legendLabel} · ${TEMPERATURE_TICKS[0]} – ${TEMPERATURE_TICKS[TEMPERATURE_TICKS.length - 1]} ${legendUnit}`"
+        :style="{ background: legendGradientStyle }"
+      />
+      <div
+        v-else
+        class="legend-bar"
+        role="img"
+        :aria-label="`${legendLabel} · ${legendRange[0]} – ${legendRange[1]} ${legendUnit}`"
+      >
         <span
           v-for="i in LEGEND_CELLS"
           :key="i"
@@ -1071,6 +1140,70 @@ onBeforeUnmount(() => {
   50% {
     box-shadow: 0 0 0 5px rgba(196, 165, 116, 0.1);
   }
+}
+
+.auto-rotate {
+  position: absolute;
+  z-index: 6;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.72);
+  border: 1px solid rgba(196, 165, 116, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+  animation: legend-in 240ms ease-out;
+}
+
+.ar-toggle {
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.ar-toggle:hover {
+  background: rgba(196, 165, 116, 0.3);
+  border-color: rgba(196, 165, 116, 0.5);
+}
+
+.ar-toggle.on {
+  background: rgba(196, 165, 116, 0.5);
+  border-color: #c4a574;
+  color: #fff;
+}
+
+.ar-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ar-slider {
+  width: 88px;
+  height: 4px;
+  accent-color: #c4a574;
+  cursor: pointer;
+}
+
+.ar-value {
+  min-width: 34px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #d4b88a;
 }
 
 @media (prefers-reduced-motion: reduce) {

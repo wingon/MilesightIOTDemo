@@ -198,14 +198,45 @@ function onLocaleChange(value: unknown) {
     background: #1a1a1a;
   }
 
+  :deep(.ant-menu-dark .ant-menu-item) {
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+
+  :deep(.ant-menu-dark .ant-menu-item:hover) {
+    background: rgba(196, 165, 116, 0.14) !important;
+    color: #f5ead7 !important;
+  }
+
+  :deep(.ant-menu-dark .ant-menu-item:hover .anticon) {
+    color: #f5ead7 !important;
+  }
+
   :deep(.ant-menu-dark .ant-menu-item-selected) {
     background: #c4a574 !important;
     color: #0d0d0d !important;
     font-weight: 600;
+    box-shadow: inset 3px 0 0 #0d0d0d;
   }
 
   :deep(.ant-menu-dark .ant-menu-item-selected .anticon) {
     color: #0d0d0d !important;
+  }
+
+  /* 侧边栏细金色滚动条 */
+  :deep(.ant-layout-sider-children)::-webkit-scrollbar,
+  .sider::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  :deep(.ant-layout-sider-children)::-webkit-scrollbar-thumb,
+  .sider::-webkit-scrollbar-thumb {
+    background: rgba(196, 165, 116, 0.35);
+    border-radius: 3px;
+  }
+
+  :deep(.ant-layout-sider-children)::-webkit-scrollbar-track,
+  .sider::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
@@ -271,6 +302,7 @@ function onLocaleChange(value: unknown) {
   border-bottom: 1px solid #e6e2da;
   height: 64px;
   line-height: 1.2;
+  box-shadow: 0 1px 0 0 #d9c9a3;
 }
 
 .trigger {
@@ -288,9 +320,9 @@ function onLocaleChange(value: unknown) {
 
 .header-title {
   font-size: 16px;
-  font-weight: 650;
+  font-weight: 700;
   color: #0d0d0d;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 
 .header-right {
