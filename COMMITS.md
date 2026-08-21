@@ -53,3 +53,11 @@ feat: 新增人流時數統計頁面
 - 新增 SQL 索引遷移腳本（idx_date_channel_hour 複合索引）
 - 前端新增 PeopleCountListView 頁面：日期範圍/時段/通道/IP 篩選、服務端分頁表格
 - 新增 peopleCount.ts API、側欄選單與路由（/people-count），並補上 en / zh-TW i18n
+
+## 2026-08-21 09:55
+feat: 支援大屏（iframe 嵌入）模式
+
+- 透過 URL 參數 ?ls=<scale> 啟動大屏模式：整頁 zoom 等比放大（預設 1.5、上限 3），用於 iframe 嵌入展示
+- app store 新增 applyLargeScreenMode()：解析 ls 參數、寫入 --ls-scale CSS 變數，並在 main.ts 掛載前執行避免閃爍
+- 大屏模式下隱藏側欄與 header，內容區去 margin 鋪滿視口；頁面高度依縮放比例折算避免捲軸
+- global.less 新增 --ls-scale / --ls-content-offset 變數與 html.ls-on 規則；Building/Floor 檢視頁高度改用變數計算

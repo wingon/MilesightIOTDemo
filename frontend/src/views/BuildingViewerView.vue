@@ -168,7 +168,7 @@ const panelEnvDevices = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100vh - 96px);
+  height: calc((100vh / var(--ls-scale, 1)) - var(--ls-content-offset, 96px));
   min-height: 560px;
 }
 

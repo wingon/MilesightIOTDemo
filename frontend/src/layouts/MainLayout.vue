@@ -107,8 +107,9 @@ function onLocaleChange(value: unknown) {
 </script>
 
 <template>
-  <a-layout class="shell">
+  <a-layout class="shell" :class="{ 'ls-shell': appStore.largeScreen }">
     <a-layout-sider
+      v-if="!appStore.largeScreen"
       collapsible
       :collapsed="appStore.sidebarCollapsed"
       :trigger="null"
@@ -135,8 +136,12 @@ function onLocaleChange(value: unknown) {
       />
     </a-layout-sider>
 
-    <a-layout class="main" :style="{ marginLeft: mainOffset }">
-      <a-layout-header class="header">
+    <a-layout
+      class="main"
+      :class="{ 'ls-main': appStore.largeScreen }"
+      :style="appStore.largeScreen ? undefined : { marginLeft: mainOffset }"
+    >
+      <a-layout-header v-if="!appStore.largeScreen" class="header">
         <a-button type="text" class="trigger" @click="appStore.toggleSidebar">
           <MenuUnfoldOutlined v-if="appStore.sidebarCollapsed" />
           <MenuFoldOutlined v-else />
@@ -156,7 +161,7 @@ function onLocaleChange(value: unknown) {
         </div>
       </a-layout-header>
 
-      <a-layout-content class="content">
+      <a-layout-content class="content" :class="{ 'ls-content': appStore.largeScreen }">
         <router-view />
       </a-layout-content>
     </a-layout>
@@ -167,6 +172,11 @@ function onLocaleChange(value: unknown) {
 .shell {
   min-height: 100vh;
   background: #f7f7f5;
+}
+
+/* 大屏模式：整页已 zoom 放大，视口高度需按缩放比例折算，避免出现滚动条 */
+.shell.ls-shell {
+  min-height: calc(100vh / var(--ls-scale, 1));
 }
 
 .sider {
@@ -200,7 +210,7 @@ function onLocaleChange(value: unknown) {
 }
 
 .main {
-  min-height: 100vh;
+  min-height: calc(100vh / var(--ls-scale, 1));
   transition: margin-left 0.2s;
 }
 
@@ -297,6 +307,11 @@ function onLocaleChange(value: unknown) {
 
 .content {
   margin: 16px;
-  min-height: calc(100vh - 96px);
+  min-height: calc((100vh / var(--ls-scale, 1)) - var(--ls-content-offset, 96px));
+}
+
+/* 大屏模式内容区：去掉 margin，铺满视口（高度已由 .content 的变量计算覆盖） */
+.content.ls-content {
+  margin: 0;
 }
 </style>

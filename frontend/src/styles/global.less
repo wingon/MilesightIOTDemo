@@ -9,6 +9,16 @@
   --brand-canvas: #f7f7f5;
   --brand-line: #e6e2da;
   --brand-muted: #6b6b6b;
+  /* 大屏模式缩放比例（由 ?ls=<scale> 注入，普通模式为 1） */
+  --ls-scale: 1;
+  /* 普通模式内容区相对视口的高度偏移（header 64px + content 上下 margin 32px） */
+  --ls-content-offset: 96px;
+}
+
+/* 大屏（iframe 嵌入）模式：整页 zoom 放大，字号/布局随分辨率等比放大 */
+html.ls-on {
+  zoom: var(--ls-scale);
+  --ls-content-offset: 0px;
 }
 
 html,
