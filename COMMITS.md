@@ -80,3 +80,10 @@ feat: PC 端与大屏的隔离方式
 - 展示方式
   - {url}?ls=1.5 大屏模式（預設） 項目預設解析度：1920×1080。驗證通過：瀏覽器 1920×1080 viewport 無捲動條
   - PC端3D建筑可调节，大屏是硬编码
+
+## 2026-08-21 16:15
+feat: 精簡樓宇儀表板，新增 Ubuntu 部署腳本
+
+- BuildingDashboardPanel 移除面板標頭（標題/副標/即時徽章）與健康概況區塊及底部提示，配合大屏卡片版面精簡
+- 新增 Ubuntu 部署管理腳本 manage.sh：管理 subscriber / api_server 的 start / stop / restart / status（含 PID、日誌、殘留進程清理）
+- 新增前端管理腳本 manage_frontend.sh：管理 vite 前端（npm run dev）的啟動/停止/重啟/狀態，自動定位 npm（含 nvm 路徑）

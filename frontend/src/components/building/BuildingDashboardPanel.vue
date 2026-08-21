@@ -80,51 +80,7 @@ function onPick(floor: number) {
 
 <template>
   <aside class="dash">
-    <header class="head">
-      <div>
-        <h2>{{ t('buildingDash.title') }}</h2>
-        <p>{{ t('buildingDash.subtitle') }}</p>
-      </div>
-      <span class="demo live">{{ t('building.liveData') }}</span>
-    </header>
-
     <div class="scroll">
-      <!-- Primary health -->
-      <section class="block health">
-        <div class="health-top">
-          <div>
-            <div class="kicker">{{ t('buildingDash.connectedRatio') }}</div>
-            <div class="health-num">
-              <strong>{{ summary.connected }}</strong>
-              <span>/ {{ summary.registered }}</span>
-            </div>
-          </div>
-          <div class="health-pct">{{ onlinePct }}%</div>
-        </div>
-        <div class="bar" aria-hidden="true">
-          <i class="bar-fill" :style="{ width: `${onlinePct}%` }" />
-        </div>
-        <div class="health-meta">
-          <span>
-            {{ t('buildingDash.registered') }}
-            <b>{{ summary.registered }}</b>
-          </span>
-          <span :class="{ bad: failRatePct > 3 }">
-            {{ t('buildingDash.failed') }}
-            <b>{{ summary.failed }}</b>
-            <i>({{ failRatePct }}%)</i>
-          </span>
-          <span :class="{ warn: summary.metricAlertFloors > 0 }">
-            {{ t('buildingDash.metricAlertFloors') }}
-            <b>{{ summary.metricAlertFloors }}</b>
-          </span>
-          <span :class="{ bad: summary.mqttAlertFloors > 0 }">
-            {{ t('buildingDash.mqttAlertFloors') }}
-            <b>{{ summary.mqttAlertFloors }}</b>
-          </span>
-        </div>
-      </section>
-
       <!-- Per-floor metrics list -->
       <section class="block floors">
         <div class="floors-head">
@@ -270,8 +226,6 @@ function onPick(floor: number) {
         </button>
       </section>
     </div>
-
-    <footer class="foot">{{ t('buildingDash.clickFloorHint') }}</footer>
   </aside>
 </template>
 
