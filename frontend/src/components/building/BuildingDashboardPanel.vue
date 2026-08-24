@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useBuildingStore } from '@/stores/building'
+import { useBuildingStore, TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
 import { floorName, type FloorStats } from '@/utils/buildingDemo'
+import type { FloorDeviceStats } from '@/stores/building'
 
 defineProps<{
   selectedFloor?: number | null
@@ -16,6 +17,10 @@ const { t } = useI18n()
 const store = useBuildingStore()
 
 const filter = ref<'all' | 'alert'>('all')
+
+/** 详情弹窗：当前选中的楼层统计 */
+const detailFloor = ref<FloorDeviceStats | null>(null)
+const detailFloorName = ref('')
 
 const summary = computed(() => store.buildingSummary)
 
@@ -75,6 +80,36 @@ function alertReasons(f: FloorStats) {
 
 function onPick(floor: number) {
   emit('selectFloor', floor)
+}
+
+/** 获取楼层的设备级统计 */
+function getDeviceStats(level: number): FloorDeviceStats | undefined {
+  return store.floorDeviceStats.find((s) => s.level === level)
+}
+
+/** 判断楼层温度是否超标 */
+function isTempExceeding(level: number): boolean {
+  const stats = getDeviceStats(level)
+  return !!stats && stats.tempExceeding.length > 0
+}
+
+/** 判断楼层湿度是否超标 */
+function isHumidityExceeding(level: number): boolean {
+  const stats = getDeviceStats(level)
+  return !!stats && stats.humidityExceeding.length > 0
+}
+
+/** 点击楼层行时，打开详情弹窗（而非跳转3D） */
+function onDetailPick(floor: number) {
+  const stats = getDeviceStats(floor)
+  if (stats) {
+    detailFloor.value = stats
+    detailFloorName.value = t('building.level', { n: floorName(floor) })
+  }
+}
+
+function closeDetail() {
+  detailFloor.value = null
 }
 </script>
 
@@ -154,21 +189,8 @@ function onPick(floor: number) {
             <div class="list-legend" aria-hidden="true">
               <span class="sticky leg-floor">{{ t('buildingDash.colFloor') }}</span>
               <span class="leg-online">{{ t('buildingDash.metricOnline') }}</span>
-              <span>{{ t('buildingDash.metricTemp') }}</span>
-              <span>{{ t('buildingDash.metricHumidity') }}</span>
-              <!-- 舊欄位標題（暫時註解保留）：
-              <span>{{ t('buildingDash.metricFail') }}</span>
-              <span>{{ t('buildingDash.metricCurrent') }}</span>
-              <span>{{ t('buildingDash.metricCableTemp') }}</span>
-              <span>{{ t('buildingDash.metricCo2') }}</span>
-              <span>{{ t('buildingDash.metricPm25') }}</span>
-              <span>{{ t('buildingDash.metricPeriodIn') }}</span>
-              <span>{{ t('buildingDash.metricPeriodOut') }}</span>
-              <span>{{ t('buildingDash.metricOccupancy') }}</span>
-              <span>{{ t('buildingDash.metricCt') }}</span>
-              <span>{{ t('buildingDash.metricAm') }}</span>
-              <span>{{ t('buildingDash.metricVs') }}</span>
-              -->
+              <span>{{ t('buildingDash.metricTempMax') }}</span>
+              <span>{{ t('buildingDash.metricHumidityMax') }}</span>
             </div>
 
             <button
@@ -180,35 +202,26 @@ function onPick(floor: number) {
                 selected: selectedFloor === f.floor,
                 'alert-metric': f.metricAlert,
                 'alert-mqtt': f.mqttAlert && !f.metricAlert,
+                'alert-temp-max': isTempExceeding(f.floor),
+                'alert-humidity-max': isHumidityExceeding(f.floor),
               }"
               :title="alertReasons(f).join(' · ') || undefined"
-              @click="onPick(f.floor)"
+              @click="onDetailPick(f.floor)"
             >
               <div class="sticky floor-id">{{ t('building.level', { n: floorName(f.floor) }) }}</div>
               <span class="m online">{{ f.connected }}/{{ f.registered }}</span>
-              <span class="m muted">{{ f.temperature != null ? `${f.temperature}°` : '--' }}</span>
-              <span class="m muted">{{ f.humidity != null ? `${f.humidity}%` : '--' }}</span>
-              <!-- 舊欄位資料（暫時註解保留）：
-              <span class="m fail" :class="{ bad: f.mqttAlert }">
-                {{ f.failed > 0 ? f.failed : '—' }}
-              </span>
-              <span class="m">{{ f.current != null ? f.current : '--' }}</span>
-              <span class="m muted">{{ f.cableTemp != null ? `${f.cableTemp}°` : '--' }}</span>
               <span
-                class="m co2"
-                :class="{ warn: f.metricAlert }"
-                :title="t('buildingDash.co2WarnHint')"
+                class="m"
+                :class="{ 'exceeding-temp': isTempExceeding(f.floor) }"
               >
-                {{ f.co2 != null ? f.co2 : '--' }}
+                {{ getDeviceStats(f.floor)?.temperature.max != null ? `${getDeviceStats(f.floor)!.temperature.max}°` : '--' }}
               </span>
-              <span class="m">{{ f.pm25 != null ? f.pm25 : '--' }}</span>
-              <span class="m">{{ f.periodIn != null ? f.periodIn : '--' }}</span>
-              <span class="m">{{ f.periodOut != null ? f.periodOut : '--' }}</span>
-              <span class="m">{{ f.occupancy != null ? f.occupancy : '--' }}</span>
-              <span class="m type ct">{{ f.byType.CT103 }}</span>
-              <span class="m type am">{{ f.byType.AM319 }}</span>
-              <span class="m type vs">{{ f.byType.VS135 }}</span>
-              -->
+              <span
+                class="m"
+                :class="{ 'exceeding-humidity': isHumidityExceeding(f.floor) }"
+              >
+                {{ getDeviceStats(f.floor)?.humidity.max != null ? `${getDeviceStats(f.floor)!.humidity.max}%` : '--' }}
+              </span>
             </button>
           </div>
         </div>
@@ -256,6 +269,76 @@ function onPick(floor: number) {
         </button>
       </section>
     </div>
+
+    <!-- 楼层详情弹窗 -->
+    <Teleport to="body">
+      <div v-if="detailFloor" class="floor-detail-overlay" @click.self="closeDetail">
+        <div class="floor-detail-modal">
+          <div class="modal-header">
+            <h3>{{ detailFloorName }} {{ t('buildingDash.detailTitle') }}</h3>
+            <button type="button" class="modal-close" @click="closeDetail">✕</button>
+          </div>
+          <div class="modal-body">
+            <!-- 温度统计 -->
+            <div class="stat-section">
+              <div class="stat-section-title">{{ t('buildingDash.metricTemp') }}</div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailMax') }}</span>
+                <span class="stat-value" :class="{ 'exceeding-temp': detailFloor.tempExceeding.length > 0 }">
+                  {{ detailFloor.temperature.max != null ? `${detailFloor.temperature.max}°` : '--' }}
+                </span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailMin') }}</span>
+                <span class="stat-value">
+                  {{ detailFloor.temperature.min != null ? `${detailFloor.temperature.min}°` : '--' }}
+                </span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailAvg') }}</span>
+                <span class="stat-value">
+                  {{ detailFloor.temperature.avg != null ? `${detailFloor.temperature.avg}°` : '--' }}
+                </span>
+              </div>
+              <div v-if="detailFloor.tempExceeding.length > 0" class="exceeding-list">
+                <div class="exceeding-title">{{ t('buildingDash.detailExceeding') }} (>{{ TEMP_THRESHOLD }}°)</div>
+                <div v-for="sn in detailFloor.tempExceeding" :key="`t-${sn}`" class="exceeding-item">
+                  {{ sn }}
+                </div>
+              </div>
+            </div>
+            <!-- 湿度统计 -->
+            <div class="stat-section">
+              <div class="stat-section-title">{{ t('buildingDash.metricHumidity') }}</div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailMax') }}</span>
+                <span class="stat-value" :class="{ 'exceeding-humidity': detailFloor.humidityExceeding.length > 0 }">
+                  {{ detailFloor.humidity.max != null ? `${detailFloor.humidity.max}%` : '--' }}
+                </span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailMin') }}</span>
+                <span class="stat-value">
+                  {{ detailFloor.humidity.min != null ? `${detailFloor.humidity.min}%` : '--' }}
+                </span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">{{ t('buildingDash.detailAvg') }}</span>
+                <span class="stat-value">
+                  {{ detailFloor.humidity.avg != null ? `${detailFloor.humidity.avg}%` : '--' }}
+                </span>
+              </div>
+              <div v-if="detailFloor.humidityExceeding.length > 0" class="exceeding-list humidity">
+                <div class="exceeding-title humidity">{{ t('buildingDash.detailExceeding') }} (>{{ HUMIDITY_THRESHOLD }}%)</div>
+                <div v-for="sn in detailFloor.humidityExceeding" :key="`h-${sn}`" class="exceeding-item">
+                  {{ sn }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -550,6 +633,132 @@ function onPick(floor: number) {
   padding: 12px 0;
 }
 
+/* 楼层详情弹窗 */
+.floor-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floor-detail-modal {
+  background: #fff;
+  border: 1px solid #e6e2da;
+  width: 360px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e6e2da;
+
+  h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 650;
+    color: #0d0d0d;
+  }
+}
+
+.modal-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: #6b6b6b;
+  cursor: pointer;
+  padding: 2px 6px;
+
+  &:hover {
+    color: #0d0d0d;
+  }
+}
+
+.modal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stat-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-section-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: #6b6b6b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #6b6b6b;
+}
+
+.stat-value {
+  font-size: 14px;
+  font-weight: 650;
+  color: #0d0d0d;
+  font-variant-numeric: tabular-nums;
+
+  &.exceeding-temp {
+    color: #b42318;
+  }
+
+  &.exceeding-humidity {
+    color: #1677ff;
+  }
+}
+
+.exceeding-list {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: rgba(180, 35, 24, 0.06);
+  border: 1px solid rgba(180, 35, 24, 0.2);
+
+  &.humidity {
+    background: rgba(22, 119, 255, 0.06);
+    border-color: rgba(22, 119, 255, 0.2);
+  }
+}
+
+.exceeding-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: #b42318;
+  margin-bottom: 4px;
+
+  &.humidity {
+    color: #1677ff;
+  }
+}
+
+.exceeding-item {
+  font-size: 12px;
+  color: #0d0d0d;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 0;
+}
+
 .floor-scroll {
   overflow-x: auto;
   overflow-y: visible;
@@ -663,6 +872,14 @@ function onPick(floor: number) {
   &.alert-mqtt:not(.selected) {
     background: rgba(180, 35, 24, 0.03);
   }
+
+  &.alert-temp-max:not(.selected) {
+    background: rgba(180, 35, 24, 0.05);
+  }
+
+  &.alert-humidity-max:not(.selected) {
+    background: rgba(22, 119, 255, 0.05);
+  }
 }
 
 .sticky {
@@ -716,6 +933,16 @@ function onPick(floor: number) {
 
   &.muted {
     color: #6b6b6b;
+  }
+
+  &.exceeding-temp {
+    color: #b42318;
+    font-weight: 700;
+  }
+
+  &.exceeding-humidity {
+    color: #1677ff;
+    font-weight: 700;
   }
 
   /* 舊欄位樣式（多餘欄位已屏蔽，暫註解保留）：

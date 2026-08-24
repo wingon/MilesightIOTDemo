@@ -1,6 +1,23 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getFloorEnvironmentSummary, listEnvironmentDevices, type EnvironmentDevice } from '@/api/environment'
+
+/** 阈值常量：温度 >28℃ 或湿度 >75% 视为超标 */
+export const TEMP_THRESHOLD = 28
+export const HUMIDITY_THRESHOLD = 75
+
+/** 每层楼的设备级统计（基于各设备最新中位值） */
+export interface FloorDeviceStats {
+  level: number
+  temperature: { max: number | null; min: number | null; avg: number | null }
+  humidity: { max: number | null; min: number | null; avg: number | null }
+  /** 超温传感器 SN 列表 */
+  tempExceeding: string[]
+  /** 超湿传感器 SN 列表 */
+  humidityExceeding: string[]
+  /** 是否有任一指标超标 */
+  hasAlert: boolean
+}
 import {
   listBuildings,
   listBuildingFloors,
@@ -450,6 +467,69 @@ export const useBuildingStore = defineStore('building', () => {
     return list
   })
 
+  /** 每层楼设备级温湿度统计（max/min/avg + 超标设备列表） */
+  const floorDeviceStats = computed<FloorDeviceStats[]>(() => {
+    const statsMap: Record<number, { temps: { val: number; sn: string }[]; humids: { val: number; sn: string }[] }> = {}
+    for (const d of envDevices.value) {
+      if (d.level == null || d.level < 1 || d.level > FLOOR_COUNT) continue
+      if (!statsMap[d.level]) statsMap[d.level] = { temps: [], humids: [] }
+      if (d.temperatureMedian != null) {
+        statsMap[d.level].temps.push({ val: d.temperatureMedian, sn: d.sn })
+      }
+      if (d.humidityMedian != null) {
+        statsMap[d.level].humids.push({ val: d.humidityMedian, sn: d.sn })
+      }
+    }
+    const result: FloorDeviceStats[] = []
+    for (let level = 1; level <= FLOOR_COUNT; level++) {
+      const entry = statsMap[level]
+      if (!entry || (entry.temps.length === 0 && entry.humids.length === 0)) {
+        result.push({
+          level,
+          temperature: { max: null, min: null, avg: null },
+          humidity: { max: null, min: null, avg: null },
+          tempExceeding: [],
+          humidityExceeding: [],
+          hasAlert: false,
+        })
+        continue
+      }
+      // 温度统计
+      let tMax: number | null = null
+      let tMin: number | null = null
+      let tSum = 0
+      const tempExceeding: string[] = []
+      for (const t of entry.temps) {
+        if (tMax === null || t.val > tMax) tMax = t.val
+        if (tMin === null || t.val < tMin) tMin = t.val
+        tSum += t.val
+        if (t.val > TEMP_THRESHOLD) tempExceeding.push(t.sn)
+      }
+      const tAvg = entry.temps.length > 0 ? Math.round((tSum / entry.temps.length) * 10) / 10 : null
+      // 湿度统计
+      let hMax: number | null = null
+      let hMin: number | null = null
+      let hSum = 0
+      const humidityExceeding: string[] = []
+      for (const h of entry.humids) {
+        if (hMax === null || h.val > hMax) hMax = h.val
+        if (hMin === null || h.val < hMin) hMin = h.val
+        hSum += h.val
+        if (h.val > HUMIDITY_THRESHOLD) humidityExceeding.push(h.sn)
+      }
+      const hAvg = entry.humids.length > 0 ? Math.round((hSum / entry.humids.length) * 10) / 10 : null
+      result.push({
+        level,
+        temperature: { max: tMax, min: tMin, avg: tAvg },
+        humidity: { max: hMax, min: hMin, avg: hAvg },
+        tempExceeding,
+        humidityExceeding,
+        hasAlert: tempExceeding.length > 0 || humidityExceeding.length > 0,
+      })
+    }
+    return result
+  })
+
   const buildingSummary = computed(() => {
     const floors = allFloorStats.value
     const byType: Record<DeviceType, number> = { CT103: 0, AM319: 0, VS135: 0 }
@@ -496,6 +576,7 @@ export const useBuildingStore = defineStore('building', () => {
     envDevices,
     fetchEnvDevices,
     devicesForFloor,
+    floorDeviceStats,
     buildings,
     floors,
     fetchBuildingStructure,

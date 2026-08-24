@@ -99,3 +99,11 @@ feat: 大屏模式字級調校與儀表板復原
 - pane-label 點擊事件觸發編輯提醒計數，超過 3 次後觸發 toggleEditMode() 並短暫高亮邊框（.pane-label.flash，邊框變金色 0.5 秒）
 - BuildingViewerView 增加 onBeforeUnmount 清理定時器、EDIT_HINT_REQUIRED=3 邏輯、editHintCount/flash 狀態，並在 pane-label 加入 .flash 類別的 CSS 定義
 - i18n 新增 13 組編輯相關文案：editHintTag、editModeOnTag、editModeOn、editModeOff、editDone、saveChangesTitle/content/ok/cancel/savedSuccess、changesDiscarded、discardFailed（en.ts 與 zh-TW.ts 同步）
+
+## 2026-08-24 11:17
+feat: 樓層溫濕度詳情彈窗與超標高亮
+
+- stores/building.ts 新增 TEMP_THRESHOLD(28)/HUMIDITY_THRESHOLD(75) 常數與 FloorDeviceStats 介面，新增 floorDeviceStats 計算屬性（每層 max/min/avg 與超標傳感器 SN 清單）
+- BuildingDashboardPanel 點擊樓層改為開啟詳情彈窗（Teleport），顯示溫/濕度 最高/最低/平均 及超標傳感器清單
+- 列表溫/濕度欄改顯示最大值，超標樓層以紅（溫）/藍（濕）高亮並加 alert-temp-max / alert-humidity-max 樣式
+- i18n 新增 metricTempMax/metricHumidityMax/detailTitle/detailMax/detailMin/detailAvg/detailExceeding（en.ts 與 zh-TW.ts 同步）
