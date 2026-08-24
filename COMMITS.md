@@ -107,3 +107,11 @@ feat: 樓層溫濕度詳情彈窗與超標高亮
 - BuildingDashboardPanel 點擊樓層改為開啟詳情彈窗（Teleport），顯示溫/濕度 最高/最低/平均 及超標傳感器清單
 - 列表溫/濕度欄改顯示最大值，超標樓層以紅（溫）/藍（濕）高亮並加 alert-temp-max / alert-humidity-max 樣式
 - i18n 新增 metricTempMax/metricHumidityMax/detailTitle/detailMax/detailMin/detailAvg/detailExceeding（en.ts 與 zh-TW.ts 同步）
+
+## 2026-08-24 16:22
+refactor: 樓層點擊改直跳樓層視圖，超標高亮移入裝置面板
+
+- BuildingDashboardPanel 移除樓層詳情彈窗（Teleport/modal 與相關 CSS），點擊樓層行改 emit enterFloor 直接跳轉樓層視圖
+- BuildingViewerView 新增 onDashboardEnterFloor：點擊儀表板樓層呼叫 store.ensureFloor 後 router 跳轉 floor-viewer
+- DeviceDetailPanel 匯入 TEMP/HUMIDITY 閾值，新增 isTempAbnormal/isHumidityAbnormal/isEnvAbnormal；envBlocks 將異常設備排最前
+- 裝置溫/濕度數值超標時加 exceeding-temp / exceeding-humidity 紅/藍高亮（列表樓層仍保留 alert-temp-max / alert-humidity-max 底色）

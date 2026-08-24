@@ -120,6 +120,12 @@ function enterFloor() {
   router.push({ name: 'floor-viewer', params: { floor: String(selectedFloor.value) } })
 }
 
+/** Per-floor metrics 列表点击楼层行：直接跳转到对应楼层 */
+function onDashboardEnterFloor(floor: number) {
+  store.ensureFloor(floor)
+  router.push({ name: 'floor-viewer', params: { floor: String(floor) } })
+}
+
 function onFloorSelectChange(v: unknown) {
   if (typeof v === 'number') {
     onSelectFloor(v)
@@ -194,6 +200,7 @@ const panelEnvDevices = computed(() => {
           v-if="selectedFloor == null"
           :selected-floor="selectedFloor"
           @select-floor="onSelectFloor"
+          @enter-floor="onDashboardEnterFloor"
         />
         <DeviceDetailPanel
           v-else

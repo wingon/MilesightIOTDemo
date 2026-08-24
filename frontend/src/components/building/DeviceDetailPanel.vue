@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import type { EnvironmentDevice } from '@/api/environment'
+import { TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
 import {
   buildAm319Option,
   buildCt103Option,
@@ -115,8 +116,26 @@ const dropdownOptions = computed(() =>
   })),
 )
 
-/** WingOnIOT 真实设备（envDevices 传入时优先） */
-const envBlocks = computed(() => props.envDevices || [])
+/** 设备温度是否超标 */
+function isTempAbnormal(d: EnvironmentDevice): boolean {
+  return d.temperatureMedian != null && d.temperatureMedian > TEMP_THRESHOLD
+}
+
+/** 设备湿度是否超标 */
+function isHumidityAbnormal(d: EnvironmentDevice): boolean {
+  return d.humidityMedian != null && d.humidityMedian > HUMIDITY_THRESHOLD
+}
+
+/** 设备温度或湿度任一超标即为异常 */
+function isEnvAbnormal(d: EnvironmentDevice): boolean {
+  return isTempAbnormal(d) || isHumidityAbnormal(d)
+}
+
+/** WingOnIOT 真实设备（envDevices 传入时优先；温度/湿度异常的设备排最前） */
+const envBlocks = computed(() => {
+  const list = props.envDevices || []
+  return [...list].sort((a, b) => Number(isEnvAbnormal(b)) - Number(isEnvAbnormal(a)))
+})
 
 /** 真实设备模式：envDevices 已传入即强制启用；无设备时显示空状态，不回退 demo */
 const envMode = computed(() => props.envDevices !== undefined)
@@ -330,13 +349,13 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
             <div class="metrics">
               <div class="metric">
                 <span class="m-label">{{ t('dashboard.charts.temperature') }}</span>
-                <span class="m-value">
+                <span class="m-value" :class="{ 'exceeding-temp': isTempAbnormal(dev) }">
                   {{ dev.temperatureMedian != null ? `${dev.temperatureMedian}°C` : '--' }}
                 </span>
               </div>
               <div class="metric">
                 <span class="m-label">{{ t('dashboard.charts.humidity') }}</span>
-                <span class="m-value">
+                <span class="m-value" :class="{ 'exceeding-humidity': isHumidityAbnormal(dev) }">
                   {{ dev.humidityMedian != null ? `${dev.humidityMedian}%RH` : '--' }}
                 </span>
               </div>
@@ -654,6 +673,16 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   font-size: 15px;
   font-weight: 650;
   color: #0d0d0d;
+
+  &.exceeding-temp {
+    color: #b42318;
+    font-weight: 700;
+  }
+
+  &.exceeding-humidity {
+    color: #1677ff;
+    font-weight: 700;
+  }
 }
 
 .env-updated {

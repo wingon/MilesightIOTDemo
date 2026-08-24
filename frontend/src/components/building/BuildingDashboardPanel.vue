@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useBuildingStore, TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
+import { useBuildingStore } from '@/stores/building'
 import { floorName, type FloorStats } from '@/utils/buildingDemo'
 import type { FloorDeviceStats } from '@/stores/building'
 
@@ -11,16 +11,13 @@ defineProps<{
 
 const emit = defineEmits<{
   selectFloor: [floor: number]
+  enterFloor: [floor: number]
 }>()
 
 const { t } = useI18n()
 const store = useBuildingStore()
 
 const filter = ref<'all' | 'alert'>('all')
-
-/** 详情弹窗：当前选中的楼层统计 */
-const detailFloor = ref<FloorDeviceStats | null>(null)
-const detailFloorName = ref('')
 
 const summary = computed(() => store.buildingSummary)
 
@@ -99,17 +96,9 @@ function isHumidityExceeding(level: number): boolean {
   return !!stats && stats.humidityExceeding.length > 0
 }
 
-/** 点击楼层行时，打开详情弹窗（而非跳转3D） */
+/** 点击楼层行：直接进入对应楼层 */
 function onDetailPick(floor: number) {
-  const stats = getDeviceStats(floor)
-  if (stats) {
-    detailFloor.value = stats
-    detailFloorName.value = t('building.level', { n: floorName(floor) })
-  }
-}
-
-function closeDetail() {
-  detailFloor.value = null
+  emit('enterFloor', floor)
 }
 </script>
 
@@ -269,76 +258,6 @@ function closeDetail() {
         </button>
       </section>
     </div>
-
-    <!-- 楼层详情弹窗 -->
-    <Teleport to="body">
-      <div v-if="detailFloor" class="floor-detail-overlay" @click.self="closeDetail">
-        <div class="floor-detail-modal">
-          <div class="modal-header">
-            <h3>{{ detailFloorName }} {{ t('buildingDash.detailTitle') }}</h3>
-            <button type="button" class="modal-close" @click="closeDetail">✕</button>
-          </div>
-          <div class="modal-body">
-            <!-- 温度统计 -->
-            <div class="stat-section">
-              <div class="stat-section-title">{{ t('buildingDash.metricTemp') }}</div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailMax') }}</span>
-                <span class="stat-value" :class="{ 'exceeding-temp': detailFloor.tempExceeding.length > 0 }">
-                  {{ detailFloor.temperature.max != null ? `${detailFloor.temperature.max}°` : '--' }}
-                </span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailMin') }}</span>
-                <span class="stat-value">
-                  {{ detailFloor.temperature.min != null ? `${detailFloor.temperature.min}°` : '--' }}
-                </span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailAvg') }}</span>
-                <span class="stat-value">
-                  {{ detailFloor.temperature.avg != null ? `${detailFloor.temperature.avg}°` : '--' }}
-                </span>
-              </div>
-              <div v-if="detailFloor.tempExceeding.length > 0" class="exceeding-list">
-                <div class="exceeding-title">{{ t('buildingDash.detailExceeding') }} (>{{ TEMP_THRESHOLD }}°)</div>
-                <div v-for="sn in detailFloor.tempExceeding" :key="`t-${sn}`" class="exceeding-item">
-                  {{ sn }}
-                </div>
-              </div>
-            </div>
-            <!-- 湿度统计 -->
-            <div class="stat-section">
-              <div class="stat-section-title">{{ t('buildingDash.metricHumidity') }}</div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailMax') }}</span>
-                <span class="stat-value" :class="{ 'exceeding-humidity': detailFloor.humidityExceeding.length > 0 }">
-                  {{ detailFloor.humidity.max != null ? `${detailFloor.humidity.max}%` : '--' }}
-                </span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailMin') }}</span>
-                <span class="stat-value">
-                  {{ detailFloor.humidity.min != null ? `${detailFloor.humidity.min}%` : '--' }}
-                </span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">{{ t('buildingDash.detailAvg') }}</span>
-                <span class="stat-value">
-                  {{ detailFloor.humidity.avg != null ? `${detailFloor.humidity.avg}%` : '--' }}
-                </span>
-              </div>
-              <div v-if="detailFloor.humidityExceeding.length > 0" class="exceeding-list humidity">
-                <div class="exceeding-title humidity">{{ t('buildingDash.detailExceeding') }} (>{{ HUMIDITY_THRESHOLD }}%)</div>
-                <div v-for="sn in detailFloor.humidityExceeding" :key="`h-${sn}`" class="exceeding-item">
-                  {{ sn }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </aside>
 </template>
 
@@ -631,132 +550,6 @@ function closeDetail() {
   font-size: 12px;
   color: #6b6b6b;
   padding: 12px 0;
-}
-
-/* 楼层详情弹窗 */
-.floor-detail-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.floor-detail-modal {
-  background: #fff;
-  border: 1px solid #e6e2da;
-  width: 360px;
-  max-width: 90vw;
-  max-height: 80vh;
-  overflow: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #e6e2da;
-
-  h3 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 650;
-    color: #0d0d0d;
-  }
-}
-
-.modal-close {
-  border: none;
-  background: none;
-  font-size: 16px;
-  color: #6b6b6b;
-  cursor: pointer;
-  padding: 2px 6px;
-
-  &:hover {
-    color: #0d0d0d;
-  }
-}
-
-.modal-body {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.stat-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.stat-section-title {
-  font-size: 12px;
-  font-weight: 650;
-  color: #6b6b6b;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.stat-label {
-  font-size: 13px;
-  color: #6b6b6b;
-}
-
-.stat-value {
-  font-size: 14px;
-  font-weight: 650;
-  color: #0d0d0d;
-  font-variant-numeric: tabular-nums;
-
-  &.exceeding-temp {
-    color: #b42318;
-  }
-
-  &.exceeding-humidity {
-    color: #1677ff;
-  }
-}
-
-.exceeding-list {
-  margin-top: 4px;
-  padding: 8px 10px;
-  background: rgba(180, 35, 24, 0.06);
-  border: 1px solid rgba(180, 35, 24, 0.2);
-
-  &.humidity {
-    background: rgba(22, 119, 255, 0.06);
-    border-color: rgba(22, 119, 255, 0.2);
-  }
-}
-
-.exceeding-title {
-  font-size: 11px;
-  font-weight: 650;
-  color: #b42318;
-  margin-bottom: 4px;
-
-  &.humidity {
-    color: #1677ff;
-  }
-}
-
-.exceeding-item {
-  font-size: 12px;
-  color: #0d0d0d;
-  font-variant-numeric: tabular-nums;
-  padding: 1px 0;
 }
 
 .floor-scroll {
