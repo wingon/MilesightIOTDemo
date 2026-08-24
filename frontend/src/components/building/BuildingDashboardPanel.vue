@@ -80,7 +80,37 @@ function onPick(floor: number) {
 
 <template>
   <aside class="dash">
+    <div class="head">
+      <div>
+        <h2>{{ t('buildingDash.title') }}</h2>
+        <p>{{ t('buildingDash.subtitle') }}</p>
+      </div>
+      <span class="demo live">LIVE · WINGONIOT</span>
+    </div>
     <div class="scroll">
+      <!-- Building health summary -->
+      <section class="block health">
+        <div class="health-top">
+          <div>
+            <span class="kicker">{{ t('buildingDash.connectedRatio') }}</span>
+            <div class="health-num">
+              <strong>{{ summary.connected }}</strong>
+              <span>/ {{ summary.registered }}</span>
+            </div>
+          </div>
+          <div class="health-pct">{{ onlinePct }}%</div>
+        </div>
+        <div class="bar">
+          <span class="bar-fill" :style="{ width: onlinePct + '%' }" />
+        </div>
+        <div class="health-meta">
+          <span>{{ t('buildingDash.registered') }} <b>{{ summary.registered }}</b></span>
+          <span>{{ t('buildingDash.failed') }} <b :class="{ bad: summary.failed > 0 }">{{ summary.failed }}</b> <i>({{ failRatePct }}%)</i></span>
+          <span>{{ t('buildingDash.needsMetric') }} <b :class="{ warn: summary.metricAlertFloors > 0 }">{{ summary.metricAlertFloors }}</b></span>
+          <span>{{ t('buildingDash.mqttAlertFloors') }} <b :class="{ bad: summary.mqttAlertFloors > 0 }">{{ summary.mqttAlertFloors }}</b></span>
+        </div>
+      </section>
+
       <!-- Per-floor metrics list -->
       <section class="block floors">
         <div class="floors-head">
@@ -722,5 +752,70 @@ function onPick(floor: number) {
   font-size: 11px;
   color: #6b6b6b;
   background: #fafaf8;
+}
+</style>
+
+<!-- Large-screen overrides (non-scoped, only active under html.ls-on) -->
+<style lang="less">
+html.ls-on .dash .section-label {
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+html.ls-on .dash .filter {
+  font-size: 14px;
+  padding: 3px 10px;
+}
+
+html.ls-on .dash .filter em {
+  font-size: 12px;
+  padding: 0 5px;
+}
+
+html.ls-on .dash .list-legend {
+  font-size: 13px;
+  padding: 6px 4px;
+}
+
+html.ls-on .dash .floor-row {
+  padding: 6px 4px;
+}
+
+html.ls-on .dash .floor-id {
+  font-size: 16px;
+}
+
+html.ls-on .dash .m {
+  font-size: 16px;
+}
+
+html.ls-on .dash .alert-floor {
+  font-size: 16px;
+}
+
+html.ls-on .dash .alert-reason {
+  font-size: 14px;
+}
+
+html.ls-on .dash .pill {
+  font-size: 13px;
+  padding: 3px 8px;
+}
+
+html.ls-on .dash .empty {
+  font-size: 14px;
+  padding: 10px 0;
+}
+
+html.ls-on .dash .floors-head {
+  gap: 8px;
+}
+
+html.ls-on .dash .health-meta {
+  font-size: 14px;
+}
+
+html.ls-on .dash .block {
+  gap: 6px;
 }
 </style>

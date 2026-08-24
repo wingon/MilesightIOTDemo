@@ -679,3 +679,59 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   }
 }
 </style>
+
+<!-- Large-screen overrides (non-scoped, only active under html.ls-on) -->
+<style lang="less">
+html.ls-on .device-panel .nav-title {
+  font-size: 14px;
+}
+
+html.ls-on .device-panel .nav-empty {
+  font-size: 14px;
+  padding: 8px 6px;
+}
+
+html.ls-on .device-panel .nav-type {
+  font-size: 16px;
+}
+
+html.ls-on .device-panel .nav-sub {
+  font-size: 13px;
+}
+
+html.ls-on .device-panel .device-type {
+  font-size: 18px;
+}
+
+html.ls-on .device-panel .device-id {
+  font-size: 13px;
+}
+
+html.ls-on .device-panel .device-room {
+  font-size: 13px;
+}
+
+html.ls-on .device-panel .m-label {
+  font-size: 12px;
+}
+
+html.ls-on .device-panel .m-value {
+  font-size: 18px;
+}
+
+html.ls-on .device-panel .env-updated {
+  font-size: 12px;
+}
+
+html.ls-on .device-panel .assign-hint {
+  font-size: 12px;
+}
+
+html.ls-on .device-panel .demo-badge {
+  font-size: 12px;
+}
+
+html.ls-on .device-panel .live-badge {
+  font-size: 12px;
+}
+</style>

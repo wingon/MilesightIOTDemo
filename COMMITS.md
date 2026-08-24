@@ -87,3 +87,15 @@ feat: 精簡樓宇儀表板，新增 Ubuntu 部署腳本
 - BuildingDashboardPanel 移除面板標頭（標題/副標/即時徽章）與健康概況區塊及底部提示，配合大屏卡片版面精簡
 - 新增 Ubuntu 部署管理腳本 manage.sh：管理 subscriber / api_server 的 start / stop / restart / status（含 PID、日誌、殘留進程清理）
 - 新增前端管理腳本 manage_frontend.sh：管理 vite 前端（npm run dev）的啟動/停止/重啟/狀態，自動定位 npm（含 nvm 路徑）
+
+## 2026-08-24 09:31
+feat: 大屏模式字級調校與儀表板復原
+
+- BuildingDashboardPanel 復原面板標頭（標題/副標/LIVE 徽章）與健康概況區塊，並新增非 scoped 的 html.ls-on 字級覆寫
+- DeviceDetailPanel 新增 html.ls-on 字級覆寫（裝置列表/數值/徽章等放大）
+- largeScreen.less 大屏版面微調：標題/副標/KPI/表格字級加大，移除卡片 hover 位移，縮緊間距與內距
+- 大屏模式隱藏 .dash .head，樓層清單區塊改為獨立捲動填滿剩餘高度
+- Building3D 新增 點 3 秒內連擊 3 次 進入編輯模式（自動清零計時器），編輯模式下格子可點擊開啟編輯框
+- pane-label 點擊事件觸發編輯提醒計數，超過 3 次後觸發 toggleEditMode() 並短暫高亮邊框（.pane-label.flash，邊框變金色 0.5 秒）
+- BuildingViewerView 增加 onBeforeUnmount 清理定時器、EDIT_HINT_REQUIRED=3 邏輯、editHintCount/flash 狀態，並在 pane-label 加入 .flash 類別的 CSS 定義
+- i18n 新增 13 組編輯相關文案：editHintTag、editModeOnTag、editModeOn、editModeOff、editDone、saveChangesTitle/content/ok/cancel/savedSuccess、changesDiscarded、discardFailed（en.ts 與 zh-TW.ts 同步）

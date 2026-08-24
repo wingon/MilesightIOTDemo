@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { message, Modal } from 'ant-design-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import {
@@ -29,7 +30,14 @@ import {
   type GridType,
 } from '@/utils/floorGrid'
 import { brand } from '@/theme/colorConfig'
-import { updateCellRotation, updateColCellsRotation, cellEdit, undoEdit, resetGridExtras } from '@/api/building'
+import {
+  listBuildingCellShapes,
+  updateCellRotation,
+  updateColCellsRotation,
+  cellEdit,
+  undoEdit,
+  resetGridExtras,
+} from '@/api/building'
 
 const props = defineProps<{
   selectedFloor: number | null
@@ -73,6 +81,125 @@ const selectedCell = ref<{
   floor3d: number
   rotation: string | null
 } | null>(null)
+
+/**
+ * 編輯模式：普通模式點擊樓層 = 選中／進入樓層；編輯模式點擊格子 = 彈出編輯面板。
+ * 開啟方式（由父組件 BuildingViewerView 觸發）：3 秒內在左上角提示文字框連續點擊 3 次。
+ */
+const editUnlocked = ref(false)
+/** 進入編輯模式時抓取的格子快照，用於「取消保存」時回滾本次修改 */
+const snapshotShapes = ref<CellShapeConfig[]>([])
+/** 輕量反饋：進入編輯模式時頂部短暫提示（1.5 秒後自動消失） */
+const editModeToast = ref(false)
+let editModeToastTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 切換編輯模式（由父組件調用）：開啟時抓取格子快照，用於取消保存時回滾 */
+async function toggleEditMode() {
+  if (!editUnlocked.value) {
+    editUnlocked.value = true
+    selectedCell.value = null
+    // 記錄修改前快照（整個建築），供「取消」回滾
+    if (props.buildingId) {
+      try {
+        const { data } = await listBuildingCellShapes(props.buildingId)
+        snapshotShapes.value = data ?? []
+      } catch {
+        snapshotShapes.value = []
+      }
+    } else {
+      snapshotShapes.value = []
+    }
+    // 顯示短暫提示
+    editModeToast.value = true
+    if (editModeToastTimer) clearTimeout(editModeToastTimer)
+    editModeToastTimer = setTimeout(() => { editModeToast.value = false }, 1500)
+    return
+  }
+  editUnlocked.value = false
+  snapshotShapes.value = []
+  selectedCell.value = null
+}
+
+/** 對外暴露的方法，供父組件 BuildingViewerView 於提示文字框連點 3 次時調用 */
+defineExpose({ toggleEditMode })
+
+/** 完成編輯：彈出確認框，詢問是否保存本次修改 */
+function onCompleteEdit() {
+  Modal.confirm({
+    title: t('building.saveChangesTitle'),
+    content: t('building.saveChangesContent'),
+    okText: t('building.saveChangesOk'),
+    cancelText: t('building.saveChangesCancel'),
+    onOk: () => {
+      // 保存：編輯操作已在編輯過程中即時生效，關閉編輯框並提示成功
+      selectedCell.value = null
+      message.success(t('building.savedSuccess'))
+    },
+    onCancel: () => {
+      void discardChanges()
+    },
+  })
+}
+
+/** 放棄本次修改：對比快照與當前 DB 狀態，逆向恢復（還原刪除／移除新增／恢復旋轉） */
+async function discardChanges() {
+  const buildingId = props.buildingId
+  selectedCell.value = null
+  if (!buildingId || !snapshotShapes.value.length) {
+    message.warning(t('building.changesDiscarded'))
+    return
+  }
+  try {
+    const { data: current } = await listBuildingCellShapes(buildingId)
+    const cur = current ?? []
+    const keyOf = (s: CellShapeConfig) => `${s.floor}-${s.row}-${s.col}`
+    const snapMap = new Map(snapshotShapes.value.map((s) => [keyOf(s), s]))
+    const curMap = new Map(cur.map((s) => [keyOf(s), s]))
+
+    // 1) 快照存在而當前缺失（本次被刪除）→ 恢復
+    for (const s of snapMap.values()) {
+      if (!curMap.has(keyOf(s)) && s.floor_id != null) {
+        await cellEdit({
+          building_id: buildingId,
+          row_no: s.row,
+          col_no: s.col,
+          action: 'add',
+          scope: 'single',
+          floor_id: s.floor_id,
+        })
+      }
+    }
+    // 2) 當前存在而快照缺失（本次新增）→ 刪除
+    for (const c of curMap.values()) {
+      if (!snapMap.has(keyOf(c)) && c.floor_id != null) {
+        await cellEdit({
+          building_id: buildingId,
+          row_no: c.row,
+          col_no: c.col,
+          action: 'delete',
+          scope: 'single',
+          floor_id: c.floor_id,
+        })
+      }
+    }
+    // 3) 旋轉被修改的格子 → 恢復原旋轉
+    for (const s of snapMap.values()) {
+      const c = curMap.get(keyOf(s))
+      if (c && c.floor_id != null && (c.rotation ?? null) !== (s.rotation ?? null)) {
+        await updateCellRotation({
+          floor_id: c.floor_id,
+          row_no: s.row,
+          col_no: s.col,
+          rotation_xyz: s.rotation ?? null,
+        })
+      }
+    }
+    message.success(t('building.changesDiscarded'))
+    emit('refreshShapes')
+  } catch {
+    message.error(t('building.discardFailed'))
+  }
+}
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -348,20 +475,27 @@ function onPointerDown(ev: PointerEvent) {
   if (hits.length) {
     const mesh = hits[0].object as THREE.Mesh
     const ud = mesh.userData
-    // Find the matching cellShape to get floor_id
-    const shape = props.cellShapes?.find(
-      (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
-    )
-    if (shape?.floor_id != null) {
-      selectedCell.value = {
-        floor_id: shape.floor_id,
-        row: ud.row,
-        col: ud.col,
-        floor3d: ud.floor,
-        rotation: shape.rotation ?? null,
+    // 編輯模式：點擊格子 → 彈出該格子的編輯面板
+    if (editUnlocked.value) {
+      const shape = props.cellShapes?.find(
+        (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
+      )
+      if (shape?.floor_id != null) {
+        selectedCell.value = {
+          floor_id: shape.floor_id,
+          row: ud.row,
+          col: ud.col,
+          floor3d: ud.floor,
+          rotation: shape.rotation ?? null,
+        }
       }
+      return
     }
-  } else {
+    // 普通模式：點擊樓層 → 選中／進入該樓層（恢復最初的交互）
+    const floor = ud.floor as number
+    emit('selectFloor', floor)
+  } else if (editUnlocked.value) {
+    // 編輯模式下點擊空白區域：關閉編輯面板
     selectedCell.value = null
   }
 }
@@ -612,6 +746,7 @@ const legendGradientStyle = computed(() => {
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
+  if (editModeToastTimer) clearTimeout(editModeToastTimer)
   window.removeEventListener('resize', onResize)
   renderer?.domElement.removeEventListener('pointerdown', onPointerDown)
   renderer?.domElement.removeEventListener('pointermove', onPointerMove)
@@ -699,6 +834,9 @@ onBeforeUnmount(() => {
       <div class="edit-actions">
         <button class="edit-btn edit-btn-reset" @click="handleResetGrid">还原网格</button>
       </div>
+      <div class="edit-actions">
+        <button class="edit-btn edit-btn-done" @click="onCompleteEdit">{{ t('building.editDone') }}</button>
+      </div>
       <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
     <div class="auto-rotate">
@@ -722,6 +860,12 @@ onBeforeUnmount(() => {
       />
       <span class="ar-value">{{ rotateSpeed.toFixed(1) }}×</span>
     </div>
+    <!-- 編輯模式短暫提示（進入編輯模式時出現，1.5 秒後自動消失） -->
+    <transition name="fade">
+      <div v-if="editModeToast" class="edit-mode-toast">
+        {{ t('building.editModeOn') }} — 点击格子即可编辑
+      </div>
+    </transition>
     <div class="env-legend">
       <div class="legend-head">
         <span class="legend-title">{{ legendLabel }}</span>
@@ -1032,6 +1176,18 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
+.edit-btn-done {
+  background: rgba(196, 165, 116, 0.25);
+  border-color: rgba(196, 165, 116, 0.55);
+  color: #f5ead7;
+}
+
+.edit-btn-done:hover {
+  background: rgba(196, 165, 116, 0.5);
+  border-color: #c4a574;
+  color: #fff;
+}
+
 @keyframes rotate-panel-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -1204,6 +1360,36 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: #d4b88a;
+}
+
+/* 編輯模式短暫提示 */
+.edit-mode-toast {
+  position: absolute;
+  z-index: 8;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 18px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.78);
+  border: 1px solid rgba(196, 165, 116, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  color: #f5ead7;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -44,25 +44,24 @@ html.ls-on .dash {
 html.ls-on .pane-3d:hover,
 html.ls-on .dash:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-  transform: translateY(-1px);
 }
 
 /* ── Viewer container: add padding for card spacing ── */
 html.ls-on .building-viewer {
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
 }
 
 /* ── Title card ── */
 html.ls-on .page-intro {
-  padding: 16px 24px;
+  padding: 14px 24px;
   align-items: center;
   background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
   border-bottom: 2px solid #c4a574;
 }
 
 html.ls-on .page-intro h1 {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   color: #0d0d0d;
   letter-spacing: 0.02em;
@@ -70,14 +69,14 @@ html.ls-on .page-intro h1 {
 }
 
 html.ls-on .page-intro p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: #6b6b6b;
-  font-size: 12px;
+  font-size: 15px;
 }
 
 /* ── Workspace: gap between left and right cards ── */
 html.ls-on .workspace {
-  gap: 10px;
+  gap: 8px;
 }
 
 /* ── 3D card ── */
@@ -105,14 +104,14 @@ html.ls-on .stat-card:hover {
 
 /* ── KPI number emphasis ── */
 html.ls-on .ant-statistic-content-value {
-  font-size: 28px !important;
+  font-size: 30px !important;
   font-weight: 700;
   color: #c4a574;
   letter-spacing: -0.02em;
 }
 
 html.ls-on .ant-statistic-content-suffix {
-  font-size: 14px;
+  font-size: 15px;
   color: #6b6b6b;
 }
 
@@ -126,12 +125,12 @@ html.ls-on .ant-card {
 html.ls-on .ant-card-head {
   background: linear-gradient(180deg, #faf8f5 0%, #fff 100%);
   border-bottom: 1px solid #e6e2da;
-  padding: 12px 16px;
+  padding: 10px 16px;
   min-height: auto;
 }
 
 html.ls-on .ant-card-head-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: #0d0d0d;
   padding: 0;
@@ -139,7 +138,7 @@ html.ls-on .ant-card-head-title {
 
 /* ── Chart subtitle styling ── */
 html.ls-on .chart-subtitle {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: #6b6b6b;
   text-transform: uppercase;
@@ -152,8 +151,8 @@ html.ls-on .chart-subtitle {
 html.ls-on .kpi-row {
   background: #faf8f5;
   border-radius: 8px;
-  padding: 12px 8px;
-  margin-bottom: 12px;
+  padding: 10px 10px;
+  margin-bottom: 10px;
   border: 1px solid #f0ece5;
 }
 
@@ -162,12 +161,12 @@ html.ls-on .page-hero {
   background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
   border-radius: 10px;
   padding: 16px 20px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border: 1px solid #e6e2da;
 }
 
 html.ls-on .hero-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   color: #0d0d0d;
 }
@@ -202,8 +201,12 @@ html.ls-on .foot {
   display: none;
 }
 
-/* Hide Building health summary block (Connected/Registered, progress bar, stats).
+/* Hide Building health header + summary block (Connected/Registered, progress bar, stats).
    NOT deleted — can be restored by removing this rule. */
+html.ls-on .dash .head {
+  display: none;
+}
+
 html.ls-on .block.health {
   display: none;
 }
@@ -238,19 +241,19 @@ html.ls-on .stat-card:nth-child(3) {
 /* ── Dashboard page styles ── */
 html.ls-on .page-hero {
   padding: 12px 0 16px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border-bottom: none;
   background: transparent;
 }
 
 html.ls-on .hero-title {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
   color: #0d0d0d;
 }
 
 html.ls-on .hero-sub {
-  font-size: 12px;
+  font-size: 14px;
   color: #6b6b6b;
 }
 
@@ -267,7 +270,6 @@ html.ls-on .stat-card {
 }
 
 html.ls-on .stat-card:hover {
-  transform: translateY(-2px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
@@ -279,22 +281,22 @@ html.ls-on .stat-card .ant-card-head {
 }
 
 html.ls-on .stat-card .ant-card-head-title {
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
   color: #0d0d0d;
   padding: 0;
 }
 
 html.ls-on .stat-card .ant-statistic-content-value {
-  font-size: 26px !important;
+  font-size: 28px !important;
   font-weight: 700;
   color: #c4a574;
 }
 
 /* ── Building viewer styles ── */
 html.ls-on .building-viewer {
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
 }
 
 html.ls-on .building-viewer .page-intro {
@@ -308,7 +310,7 @@ html.ls-on .building-viewer .page-intro {
 }
 
 html.ls-on .building-viewer .page-intro h1 {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
   color: #0d0d0d;
   letter-spacing: 0.02em;
@@ -316,9 +318,9 @@ html.ls-on .building-viewer .page-intro h1 {
 }
 
 html.ls-on .building-viewer .page-intro p {
-  font-size: 12px;
+  font-size: 15px;
   color: #6b6b6b;
-  margin: 4px 0 0;
+  margin: 2px 0 0;
 }
 
 html.ls-on .building-viewer .intro-logo {
@@ -343,13 +345,12 @@ html.ls-on .building-viewer .pane-3d {
 
 html.ls-on .building-viewer .pane-3d:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
-  transform: translateY(-1px);
 }
 
 html.ls-on .building-viewer .right {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 html.ls-on .building-viewer .auto-rotate {
@@ -361,6 +362,10 @@ html.ls-on .building-viewer .legend-note {
 }
 
 html.ls-on .building-viewer .foot {
+  display: none;
+}
+
+html.ls-on .building-viewer .dash .head {
   display: none;
 }
 
@@ -383,18 +388,18 @@ html.ls-on .dash .head {
 }
 
 html.ls-on .dash .head h2 {
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 700;
   color: #0d0d0d;
 }
 
 html.ls-on .dash .head p {
-  font-size: 11px;
+  font-size: 14px;
   color: #6b6b6b;
 }
 
 html.ls-on .dash .demo {
-  font-size: 9px;
+  font-size: 12px;
   padding: 3px 6px;
   border-radius: 4px;
 }
@@ -412,18 +417,18 @@ html.ls-on .dash .health {
 }
 
 html.ls-on .dash .health-num strong {
-  font-size: 26px;
+  font-size: 30px;
   color: #c4a574;
 }
 
 html.ls-on .dash .health-pct {
-  font-size: 20px;
+  font-size: 22px;
   color: #3d7a5a;
 }
 
 html.ls-on .dash .bar {
   border-radius: 3px;
-  height: 5px;
+  height: 6px;
   background: #e6e2da;
 }
 
@@ -436,7 +441,7 @@ html.ls-on .dash .floor-row {
   border-radius: 6px;
   transition: background 0.15s ease, border-color 0.15s ease;
   border: 1px solid transparent;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 html.ls-on .dash .floor-row:hover {
@@ -450,13 +455,13 @@ html.ls-on .dash .floor-row.selected {
 }
 
 html.ls-on .dash .floor-id {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: #0d0d0d;
 }
 
 html.ls-on .dash .m {
-  font-size: 12px;
+  font-size: 16px;
 }
 
 html.ls-on .dash .m.online {
@@ -495,9 +500,9 @@ html.ls-on .dash .alert-card.mqtt:hover {
 
 html.ls-on .dash .pill {
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
-  padding: 2px 6px;
+  padding: 3px 8px;
 }
 
 html.ls-on .dash .filter {
@@ -515,6 +520,20 @@ html.ls-on .dash .foot {
   display: none;
 }
 
+/* Floor list: fill remaining vertical space, scroll independently */
+html.ls-on .dash .block.floors {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+html.ls-on .dash .floor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* ── Device detail panel styles ── */
 html.ls-on .device-panel {
   border-radius: 12px;
@@ -530,19 +549,19 @@ html.ls-on .device-panel .panel-head {
 }
 
 html.ls-on .device-panel .panel-head h2 {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
   color: #0d0d0d;
 }
 
 html.ls-on .device-panel .panel-head p {
-  font-size: 12px;
+  font-size: 14px;
   color: #6b6b6b;
 }
 
 html.ls-on .device-panel .demo-badge,
 html.ls-on .device-panel .live-badge {
-  font-size: 10px;
+  font-size: 12px;
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -570,7 +589,7 @@ html.ls-on .device-panel .nav-item.active {
 }
 
 html.ls-on .device-panel .nav-type {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -593,18 +612,18 @@ html.ls-on .device-panel .device-card.active {
 }
 
 html.ls-on .device-panel .device-type {
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
   color: #0d0d0d;
 }
 
 html.ls-on .device-panel .device-id {
-  font-size: 10px;
+  font-size: 13px;
   color: #6b6b6b;
 }
 
 html.ls-on .device-panel .metrics {
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
@@ -616,14 +635,14 @@ html.ls-on .device-panel .metric {
 }
 
 html.ls-on .device-panel .m-label {
-  font-size: 10px;
+  font-size: 12px;
   color: #6b6b6b;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 html.ls-on .device-panel .m-value {
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
   color: #c4a574;
 }

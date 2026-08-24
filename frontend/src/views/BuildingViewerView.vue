@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import Building3D from '@/components/building/Building3D.vue'
@@ -19,6 +19,45 @@ const store = useBuildingStore()
 const selectedFloor = ref<number | null>(null)
 /** 3D 樓棟當前著色指標（溫度/濕度） */
 const metric = ref<EnvMetric>('temperature')
+/** 編輯模式開關（由左上角提示文字框連點 3 次觸發，無任何介面提示） */
+const building3dRef = ref<InstanceType<typeof Building3D>>()
+
+/**
+ * 左上角提示文字框「連點 3 次」計數（3 秒內累計，超時重置）。
+ * 觸發後切換 Building3D 的編輯模式（進入編輯模式後點擊格子即彈出編輯框）。
+ */
+const EDIT_HINT_REQUIRED = 3
+const EDIT_HINT_WINDOW_MS = 3000
+const editHintCount = ref(0)
+let lastEditHintAt = 0
+let editHintTimer: ReturnType<typeof setTimeout> | undefined
+/** 輕量反饋：進入編輯模式時左上角文字短暫高亮（0.5 秒後消失） */
+const editHintFlash = ref(false)
+let flashTimer: ReturnType<typeof setTimeout> | undefined
+
+function onEditHintClick() {
+  const now = Date.now()
+  if (now - lastEditHintAt > EDIT_HINT_WINDOW_MS) {
+    editHintCount.value = 0
+  }
+  lastEditHintAt = now
+  editHintCount.value += 1
+  if (editHintTimer) clearTimeout(editHintTimer)
+  editHintTimer = setTimeout(() => {
+    if (Date.now() - lastEditHintAt >= EDIT_HINT_WINDOW_MS) {
+      editHintCount.value = 0
+    }
+  }, EDIT_HINT_WINDOW_MS)
+
+  if (editHintCount.value >= EDIT_HINT_REQUIRED) {
+    editHintCount.value = 0
+    void building3dRef.value?.toggleEditMode()
+    // 極簡反饋：文字短暫高亮一次
+    editHintFlash.value = true
+    if (flashTimer) clearTimeout(flashTimer)
+    flashTimer = setTimeout(() => { editHintFlash.value = false }, 500)
+  }
+}
 
 /**
  * Cell shape settings list
@@ -54,6 +93,11 @@ onMounted(() => {
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {
     onSelectFloor(q)
   }
+})
+
+onBeforeUnmount(() => {
+  if (editHintTimer) clearTimeout(editHintTimer)
+  if (flashTimer) clearTimeout(flashTimer)
 })
 
 function onSelectFloor(floor: number) {
@@ -131,8 +175,9 @@ const panelEnvDevices = computed(() => {
     <div class="workspace">
       <div class="left">
         <div class="pane-3d">
-          <div class="pane-label">{{ t('building.modelHint') }}</div>
+          <div class="pane-label" :class="{ flash: editHintFlash }" @click="onEditHintClick">{{ t('building.modelHint') }}</div>
           <Building3D
+            ref="building3dRef"
             :selected-floor="selectedFloor"
             :floor-env="store.floorEnv"
             :metric="metric"
@@ -253,7 +298,11 @@ const panelEnvDevices = computed(() => {
   padding: 4px 10px;
   font-size: 12px;
   color: #6b6b6b;
-  pointer-events: none;
+  transition: border-color 0.15s;
+}
+
+.pane-label.flash {
+  border-color: #c4a574;
 }
 
 @media (max-width: 1100px) {
