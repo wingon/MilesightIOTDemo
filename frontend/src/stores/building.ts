@@ -1,6 +1,12 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getFloorEnvironmentSummary, listEnvironmentDevices, type EnvironmentDevice } from '@/api/environment'
+import {
+  getFloorEnvironmentSummary,
+  listEnvironmentDevices,
+  bindDeviceToCell as apiBindDeviceToCell,
+  unbindDeviceFromCell as apiUnbindDeviceFromCell,
+  type EnvironmentDevice,
+} from '@/api/environment'
 
 /** 阈值常量：温度 >28℃ 或湿度 >75% 视为超标 */
 export const TEMP_THRESHOLD = 28
@@ -105,6 +111,47 @@ export const useBuildingStore = defineStore('building', () => {
     }
   }
 
+  /** 强制重新拉取 WingOnIOT 设备列表（绑定/解绑后刷新） */
+  async function refreshEnvDevices() {
+    try {
+      const { data } = await listEnvironmentDevices()
+      envDevices.value = data
+      envDevicesFetched = true
+    } catch (err) {
+      console.warn('[building] refreshEnvDevices failed:', err)
+    }
+  }
+
+  /** 绑定设备到格子（level3d 为 3D 层号）；成功后刷新设备列表 */
+  async function bindDeviceToCell(sn: string, level3d: number, row: number, col: number): Promise<boolean> {
+    let fid = floorIdByLevel(level3d)
+    if (fid == null) {
+      await fetchBuildingStructure()
+      fid = floorIdByLevel(level3d)
+    }
+    if (fid == null) return false
+    try {
+      await apiBindDeviceToCell(sn, { floor_id: fid, row_no: row, col_no: col })
+      await refreshEnvDevices()
+      return true
+    } catch (err) {
+      console.warn('[building] bindDeviceToCell failed:', err)
+      return false
+    }
+  }
+
+  /** 解绑设备的所有格子绑定；成功后刷新设备列表 */
+  async function unbindDeviceFromCell(sn: string): Promise<boolean> {
+    try {
+      await apiUnbindDeviceFromCell(sn)
+      await refreshEnvDevices()
+      return true
+    } catch (err) {
+      console.warn('[building] unbindDeviceFromCell failed:', err)
+      return false
+    }
+  }
+
   /** Real environment devices for a given 3D level */
   function devicesForFloor(level: number): EnvironmentDevice[] {
     return envDevices.value.filter((d) => d.level === level)
@@ -146,9 +193,24 @@ export const useBuildingStore = defineStore('building', () => {
     try {
       const { data } = await listFloorRooms(fid)
       floorRooms[fid] = data ?? []
+      syncFloorLayoutFromDb(level3d)
     } catch (err) {
       console.warn('[building] fetchFloorRooms failed:', err)
     }
+  }
+
+  /** Sync floorLayouts from DB room-cell data so that the in-memory state
+   *  reflects the real DB layout and assignRoomCell edits are visible. */
+  function syncFloorLayoutFromDb(level3d: number) {
+    const fid = floorIdByLevel(level3d)
+    if (fid == null) return
+    const rooms = floorRooms[fid] ?? []
+    const map: Record<string, Cell[]> = {}
+    for (const r of rooms) {
+      map[r.room_id] = r.cells.map((c) => ({ row: c.row, col: c.col }))
+    }
+    ensureFloor(level3d)
+    floorLayouts[level3d] = map
   }
 
   /** Rooms of a 3D level (empty when the DB has no data for this floor) */
@@ -575,6 +637,9 @@ export const useBuildingStore = defineStore('building', () => {
     fetchFloorEnv,
     envDevices,
     fetchEnvDevices,
+    refreshEnvDevices,
+    bindDeviceToCell,
+    unbindDeviceFromCell,
     devicesForFloor,
     floorDeviceStats,
     buildings,

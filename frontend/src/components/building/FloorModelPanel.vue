@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Floor3D from '@/components/building/Floor3D.vue'
+import Floor3D, { type DeviceMarker } from '@/components/building/Floor3D.vue'
 import { floorName, type Cell, type DeviceType, type RoomMeta } from '@/utils/buildingDemo'
 
 const props = defineProps<{
@@ -20,6 +20,12 @@ const props = defineProps<{
   rooms?: Array<{ room_id: string; room_number: string }>
   /** roomId -> metadata (index + color) resolved from DB rooms */
   roomMeta?: Record<string, RoomMeta>
+  /** 设备 3D 标记（已绑定格子的设备） */
+  devices?: DeviceMarker[]
+  /** 当前待绑定格子的设备 SN（非空时点击格子触发 bindCell） */
+  bindSn?: string | null
+  /** 大厅/开放区域设备数 */
+  lobbyCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +39,7 @@ const emit = defineEmits<{
   moveWall: [payload: { index: number; row: number; col: number }]
   removeWall: [index: number]
   moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
+  bindCell: [payload: { row: number; col: number }]
 }>()
 
 const { t } = useI18n()
@@ -144,6 +151,9 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           :edit-mode="editMode"
           :custom-walls="customWalls"
           :room-meta="roomMeta"
+          :devices="devices"
+          :device-count-map="deviceCountMap"
+          :bind-sn="bindSn"
           @select-room="(id) => emit('selectRoom', id)"
           @toggle-cell="(p) => emit('toggleCell', p)"
           @drop-cell="(p) => emit('dropCell', p)"
@@ -152,6 +162,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           @move-wall="(p) => emit('moveWall', p)"
           @remove-wall="(i) => emit('removeWall', i)"
           @move-cell="(p) => emit('moveCell', p)"
+          @bind-cell="(p) => emit('bindCell', p)"
         />
       </div>
 
@@ -172,7 +183,18 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           <span class="count" :title="t('building.cellCount')">{{ cellCount(room.room_id) }}</span>
           <span class="count dim">{{ deviceCount(room.room_id) }}</span>
         </button>
-        <p v-if="editMode && !selectedRoom" class="legend-hint">{{ t('building.editSelectRoom') }}</p>
+        <button
+          v-if="lobbyCount != null && lobbyCount > 0"
+          type="button"
+          class="legend-item"
+          @click="onRoomClick(null)"
+        >
+          <i class="swatch" :style="{ background: '#9A9A9A' }" />
+          <span>{{ t('building.lobby') }}</span>
+          <span class="count dim">{{ lobbyCount }}</span>
+        </button>
+        <p v-if="bindSn" class="legend-hint">{{ t('building.bindHint') }}</p>
+        <p v-else-if="editMode && !selectedRoom" class="legend-hint">{{ t('building.editSelectRoom') }}</p>
 
         <!-- Wall drag items (shown in edit mode only) -->
         <div v-if="editMode" class="wall-section">

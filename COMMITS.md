@@ -115,3 +115,19 @@ refactor: 樓層點擊改直跳樓層視圖，超標高亮移入裝置面板
 - BuildingViewerView 新增 onDashboardEnterFloor：點擊儀表板樓層呼叫 store.ensureFloor 後 router 跳轉 floor-viewer
 - DeviceDetailPanel 匯入 TEMP/HUMIDITY 閾值，新增 isTempAbnormal/isHumidityAbnormal/isEnvAbnormal；envBlocks 將異常設備排最前
 - 裝置溫/濕度數值超標時加 exceeding-temp / exceeding-humidity 紅/藍高亮（列表樓層仍保留 alert-temp-max / alert-humidity-max 底色）
+## 2026-08-25 12:07
+feat: 5F 平面重排與設備格子綁定功能
+
+### 5F 樓層平面調整
+- buildingDemo shouldExcludeCell 外牆輪廓改為左側凹位 (8,1)(7,1)(6,1) 與右側凹位 (8,12)(8,11)(7,12)(7,11)(6,12)(6,11)，排除格由 7 增為 9
+- migrate_building_structure.sql 種子格子同步排除 9 格（每層 87 格）；新增 migrate_5f_remove_indent_cells.sql（5F 停用 (6,1)/(6,11) 並移出 room_cell）與 migrate_5f_room_layout.sql（依平面圖重排 5F 11 間房 room_cell，共 87 格）
+
+### 設備↔格子綁定（前後端 + 資料表）
+- 新增 device_cell 資料表與 migrate_device_cell.sql / migrate_device_cell.py（冪等建立）
+- db.py list_environment_devices 回傳 cell（綁定格子座標）與 room_id；新增 find_cell_by_row_col / device_exists / bind_device_cell / unbind_device_cell
+- environment.py 新增 POST/DELETE /api/v1/environment/devices/{sn}/cell
+- api/environment.ts 新增 DeviceCell、cell/room_id 欄位與 bind/unbind 呼叫；stores 新增 refreshEnvDevices / bindDeviceToCell / unbindDeviceFromCell / syncFloorLayoutFromDb
+- Floor3D 新增 DeviceMarker 3D 標記（正常綠/異常紅），bindSn 時點擊格子 emit bindCell（含大廳格子）、游標變 cell 並顯示提示
+- DeviceDetailPanel 新增綁定/解綁按鈕與綁定標籤、大廳/未綁定計數；FloorModelPanel 傳入 devices/bindSn/lobbyCount 並加「大廳」圖例與綁定提示
+- FloorViewerView 設備數依格子歸屬房間統計（不再全塞 1 號房），區分大廳/未綁定設備；新增 pendingBindSn 綁定流程與 editDirty 離開編輯模式保存確認（Modal）
+- i18n 新增綁定相關 12 組文案（bindStart/bindHint/bindClickCell/unbindCell/deviceBound/deviceBindFailed/deviceUnboundMsg/deviceUnbindFailed/cell/lobby 等，en.ts 與 zh-TW.ts 同步）

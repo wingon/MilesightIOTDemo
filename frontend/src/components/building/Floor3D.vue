@@ -34,6 +34,15 @@ import {
   type WallSegment,
 } from '@/utils/floorGridWall'
 
+/** 设备 3D 标记（已绑定格子的设备） */
+export interface DeviceMarker {
+  sn: string
+  name: string
+  row: number
+  col: number
+  abnormal: boolean
+}
+
 const props = defineProps<{
   level: number
   selectedRoom: string | null
@@ -46,6 +55,12 @@ const props = defineProps<{
   gridData?: FloorGridData
   /** roomId -> metadata (index + color) resolved from DB rooms */
   roomMeta?: Record<string, RoomMeta>
+  /** 设备标记（已绑定格子；按 cell 坐标渲染，含大厅格子） */
+  devices?: DeviceMarker[]
+  /** 当前待绑定格子的设备 SN（非空时点击格子触发 bindCell） */
+  bindSn?: string | null
+  /** DB 实际接入设备数（roomId -> count；提供时悬停提示以此为准） */
+  deviceCountMap?: Record<string, number>
 }>()
 
 const emit = defineEmits<{
@@ -57,6 +72,7 @@ const emit = defineEmits<{
   moveWall: [payload: { index: number; row: number; col: number }]
   removeWall: [index: number]
   moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
+  bindCell: [payload: { row: number; col: number }]
 }>()
 
 const { t } = useI18n()
@@ -98,6 +114,10 @@ function edgesGeometryFor(geometry: THREE.BufferGeometry): THREE.EdgesGeometry {
 
 /** Ground disc geometry: module-level cache to avoid rebuild leaks */
 let groundGeo: THREE.CircleGeometry | null = null
+
+/** Device marker geometries: module-level cache to avoid rebuild leaks */
+let deviceStemGeo: THREE.CylinderGeometry | null = null
+let deviceHeadGeo: THREE.SphereGeometry | null = null
 
 function disposeObject(obj: THREE.Object3D) {
   obj.traverse((child) => {
@@ -186,6 +206,33 @@ function rebuildScene() {
         list.push(colorMesh)
         meshesByKey.set(key, list)
       }
+    }
+  }
+
+  // Draw device markers (devices bound to grid cells, incl. lobby cells)
+  if (props.devices?.length) {
+    deviceStemGeo ??= new THREE.CylinderGeometry(0.05, 0.05, 0.5, 8)
+    deviceHeadGeo ??= new THREE.SphereGeometry(0.14, 12, 10)
+    for (const dev of props.devices) {
+      const { x, z } = cellToWorld(dev.row, dev.col)
+      const color = dev.abnormal ? 0xb42318 : 0x2f8f46
+      const mat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: dev.abnormal ? 0.4 : 0.18,
+        roughness: 0.5,
+        metalness: 0.2,
+      })
+      const baseY = SLAB_H + CELL_H + 0.05
+      const stem = new THREE.Mesh(deviceStemGeo, mat)
+      stem.position.set(x, baseY + 0.25, z)
+      stem.userData.deviceSn = dev.sn
+      stem.userData.kind = 'device-marker'
+      const head = new THREE.Mesh(deviceHeadGeo, mat)
+      head.position.set(x, baseY + 0.6, z)
+      head.userData.deviceSn = dev.sn
+      head.userData.kind = 'device-marker'
+      floorGroup.add(stem, head)
     }
   }
 
@@ -297,7 +344,8 @@ function updateAppearance() {
 }
 
 function deviceCount(roomId: string) {
-  return (props.roomDevices[roomId] || []).length
+  // Pull real DB device count when available; fall back to demo room assignments.
+  return props.deviceCountMap?.[roomId] ?? (props.roomDevices[roomId] || []).length
 }
 
 function updatePointer(ev: PointerEvent) {
@@ -338,6 +386,19 @@ function onPointerMove(ev: PointerEvent) {
   if (hits.length) {
     const hit = hits[0].object
     const roomId = (hit.userData.roomId as string | null) || null
+    if (props.bindSn) {
+      toastVisible.value = true
+      placeToast(pos.clientX, pos.clientY, pos.rect)
+      host.value.style.cursor = 'cell'
+      if (roomId && hoveredRoom.value !== roomId) {
+        hoveredRoom.value = roomId
+        updateAppearance()
+      } else if (!roomId && hoveredRoom.value) {
+        hoveredRoom.value = null
+        updateAppearance()
+      }
+      return
+    }
     if (props.editMode) {
       toastVisible.value = true
       placeToast(pos.clientX, pos.clientY, pos.rect)
@@ -532,6 +593,14 @@ function onPointerUp(ev: PointerEvent) {
   const col = hit.userData.col as number
   const roomId = (hit.userData.roomId as string | null) || null
 
+  // Binding a device to a cell takes precedence (works in normal mode too)
+  if (props.bindSn) {
+    if (hit.userData.kind === 'slab' || hit.userData.kind === 'room-cell') {
+      emit('bindCell', { row, col })
+    }
+    return
+  }
+
   if (props.editMode) {
     // Click a custom wall → select/deselect
     if (hit.userData.isCustom && typeof hit.userData.wallIndex === 'number') {
@@ -593,6 +662,10 @@ function animate() {
 }
 
 const toastTitle = () => {
+  if (props.bindSn) {
+    const dev = props.devices?.find((d) => d.sn === props.bindSn)
+    return t('building.bindClickCell', { name: dev?.name ?? props.bindSn })
+  }
   if (props.editMode) {
     if (!props.selectedRoom) return t('building.editSelectRoom')
     const meta = props.roomMeta?.[props.selectedRoom]
@@ -680,6 +753,20 @@ watch(
 )
 
 watch(
+  () => props.devices,
+  () => rebuildScene(),
+  { deep: true },
+)
+
+watch(
+  () => props.bindSn,
+  () => {
+    if (props.bindSn && !props.editMode) return
+    updateAppearance()
+  },
+)
+
+watch(
   () => props.customWalls,
   () => {
     if (selectedWallIndex.value !== null && props.customWalls) {
@@ -710,6 +797,10 @@ onBeforeUnmount(() => {
   edgesCache.clear()
   groundGeo?.dispose()
   groundGeo = null
+  deviceStemGeo?.dispose()
+  deviceStemGeo = null
+  deviceHeadGeo?.dispose()
+  deviceHeadGeo = null
   renderer?.dispose()
   if (renderer?.domElement.parentElement) {
     renderer.domElement.parentElement.removeChild(renderer.domElement)

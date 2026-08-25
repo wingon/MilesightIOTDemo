@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.api.deps import get_db
 from app.db import Database
@@ -12,8 +13,36 @@ router = APIRouter(prefix="/api/v1", tags=["environment"])
 
 @router.get("/environment/devices")
 def list_environment_devices(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
-    """WingOnIOT 环境设备列表（Environment_Device）。"""
+    """WingOnIOT 环境设备列表（Environment_Device），附绑定格子与所属房间。"""
     return db.list_environment_devices()
+
+
+class BindDeviceCellRequest(BaseModel):
+    floor_id: int
+    row_no: int
+    col_no: int
+
+
+@router.post("/environment/devices/{sn}/cell")
+def bind_device_cell(
+    sn: str,
+    body: BindDeviceCellRequest,
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """绑定设备到具体格子（设备→格子；替换设备原有绑定）。"""
+    ok = db.bind_device_cell(sn, body.floor_id, body.row_no, body.col_no)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Device or cell not found")
+    return {"ok": True}
+
+
+@router.delete("/environment/devices/{sn}/cell")
+def unbind_device_cell(sn: str, db: Database = Depends(get_db)) -> dict[str, Any]:
+    """解绑设备的所有格子绑定。"""
+    ok = db.unbind_device_cell(sn)
+    if not ok:
+        raise HTTPException(status_code=404, detail="No binding to remove")
+    return {"ok": True}
 
 
 @router.get("/environment/monitoring")

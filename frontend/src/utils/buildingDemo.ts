@@ -252,25 +252,27 @@ export function isInterior(row: number, col: number) {
 
 /**
  * Whether a cell should be excluded (not rendered) for a given floor.
- * Aligned to the exterior outline per the G/F plan:
- * 1. Bottom-left chamfer (smaller): (8,1), (7,1)
- * 2. Bottom-right chamfer (larger): (8,12), (8,11), (7,12), (7,11), (6,12)
+ * Aligned to the exterior outline per the 5/F floor plan:
+ * 1. Left-side indent: (8,1), (7,1), (6,1)
+ * 2. Right-side indent: (8,12), (8,11), (7,12), (7,11), (6,12), (6,11)
  */
 export function shouldExcludeCell(_level: number, row: number, col: number): boolean {
-  // Bottom-left chamfer (small, corner cut only)
+  // Left-side indent
   if (
     (row === 8 && col === 1) ||
-    (row === 7 && col === 1)
+    (row === 7 && col === 1) ||
+    (row === 6 && col === 1)
   ) {
     return true
   }
-  // Bottom-right chamfer (larger, wider corner cut)
+  // Right-side indent
   if (
     (row === 8 && col === 12) ||
     (row === 8 && col === 11) ||
     (row === 7 && col === 12) ||
     (row === 7 && col === 11) ||
-    (row === 6 && col === 12)
+    (row === 6 && col === 12) ||
+    (row === 6 && col === 11)
   ) {
     return true
   }

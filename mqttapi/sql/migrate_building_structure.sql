@@ -70,8 +70,8 @@ CROSS JOIN (
 WHERE b.is_deleted = 0;
 
 -- ----------------------------------------------------------------------------
--- 4. 格子 building_cell（每層 8×12 網格，排除外牆切角 7 格 = 89 格/層）
---    切角排除：(8,1)(7,1)（左下）與 (8,12)(8,11)(7,12)(7,11)(6,12)（右下）
+-- 4. 格子 building_cell（每層 8×12 網格，排除外牆切角 9 格 = 87 格/層）
+--    切角排除：(8,1)(7,1)(6,1)（左側凹位）與 (8,12)(8,11)(7,12)(7,11)(6,12)(6,11)（右側凹位）
 -- ----------------------------------------------------------------------------
 DROP PROCEDURE IF EXISTS seed_building_cells;
 DELIMITER $$
@@ -118,10 +118,10 @@ BEGIN
                     UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8
                     UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12) c
         WHERE NOT (
-            (r.n = 8 AND c.n = 1) OR (r.n = 7 AND c.n = 1) OR
+            (r.n = 8 AND c.n = 1) OR (r.n = 7 AND c.n = 1) OR (r.n = 6 AND c.n = 1) OR
             (r.n = 8 AND c.n = 12) OR (r.n = 8 AND c.n = 11) OR
             (r.n = 7 AND c.n = 12) OR (r.n = 7 AND c.n = 11) OR
-            (r.n = 6 AND c.n = 12)
+            (r.n = 6 AND c.n = 12) OR (r.n = 6 AND c.n = 11)
         );
     END LOOP;
     CLOSE cur;

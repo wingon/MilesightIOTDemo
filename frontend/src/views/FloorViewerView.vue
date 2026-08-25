@@ -2,11 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import FloorModelPanel from '@/components/building/FloorModelPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
-import { useBuildingStore } from '@/stores/building'
+import { useBuildingStore, TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
 import { FLOOR_COUNT, buildRoomMeta, floorName, type Cell } from '@/utils/buildingDemo'
+import type { EnvironmentDevice } from '@/api/environment'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -15,7 +16,10 @@ const store = useBuildingStore()
 
 const selectedRoom = ref<string | null>(null)
 const editMode = ref(false)
+const editDirty = ref(false)
 const selectedWallIndex = ref<number | null>(null)
+/** 当前处于「绑定到格子」状态的设备 SN（在 3D 中点击格子完成绑定） */
+const pendingBindSn = ref<string | null>(null)
 
 const floor = computed(() => {
   const n = Number(route.params.floor)
@@ -40,6 +44,7 @@ watch(
     store.fetchBuildingStructure().then(() => store.fetchFloorRooms(n))
     selectedRoom.value = null
     editMode.value = false
+    editDirty.value = false
     selectedWallIndex.value = null
   },
   { immediate: true },
@@ -61,11 +66,7 @@ const roomMeta = computed(() => buildRoomMeta(dbRooms.value))
 
 const layout = computed(() => {
   if (!floorValid.value) return {}
-  const map: Record<string, Cell[]> = {}
-  for (const r of dbRooms.value) {
-    map[r.room_id] = r.cells.map((c) => ({ row: c.row, col: c.col }))
-  }
-  return map
+  return store.getFloorLayout(floor.value)
 })
 
 const customWalls = computed(() => {
@@ -84,16 +85,65 @@ const panelEnvDevices = computed(() => {
   return store.devicesForFloor(floor.value)
 })
 
-/** DB device count per room (DB has no room field, so all devices default to room_number=1) */
+/** 本层房间业务键集合（用于判断格子归属） */
+const deviceRoomIds = computed(() => new Set(dbRooms.value.map((r) => r.room_id)))
+
+/** 每台真实设备归属统计：按设备绑定格子反查所属房间（不再硬塞 1 号房间）。
+ *  优先使用 API 返回的 room_id，若为空则用当前 3D layout 的格子归属兜底解析。 */
 const deviceCountMap = computed(() => {
   const map: Record<string, number> = {}
   for (const r of dbRooms.value) map[r.room_id] = 0
-  if (panelEnvDevices.value.length) {
-    const first = dbRooms.value.find((r) => parseInt(r.room_number, 10) === 1)
-    if (first) map[first.room_id] = panelEnvDevices.value.length
+
+  // cell key -> roomId from the current layout (same source as the 3D room blocks)
+  const cellToRoom = new Map<string, string>()
+  for (const [rid, cells] of Object.entries(layout.value)) {
+    for (const c of cells) cellToRoom.set(`${c.row}-${c.col}`, rid)
+  }
+
+  for (const d of panelEnvDevices.value) {
+    if (!d.cell) continue
+    const key = `${d.cell.row_no}-${d.cell.col_no}`
+    const roomId =
+      d.room_id && deviceRoomIds.value.has(d.room_id)
+        ? d.room_id
+        : cellToRoom.get(key) ?? null
+    if (roomId && deviceRoomIds.value.has(roomId)) {
+      map[roomId] = (map[roomId] || 0) + 1
+    }
   }
   return map
 })
+
+/** 大厅/开放区域设备（已绑定到非房间格子） */
+const lobbyDevices = computed(() =>
+  panelEnvDevices.value.filter(
+    (d) => d.cell && (!d.room_id || !deviceRoomIds.value.has(d.room_id)),
+  ),
+)
+
+/** 未绑定格子的设备（尚无位置） */
+const unboundDevices = computed(() => panelEnvDevices.value.filter((d) => !d.cell))
+
+/** 设备 3D 标记（仅已绑定格子的设备；x/z 前端由 cellToWorld 计算） */
+const deviceMarkers = computed(() =>
+  panelEnvDevices.value
+    .filter((d) => d.cell)
+    .map((d) => ({
+      sn: d.sn,
+      name: d.deviceName || d.name || d.sn,
+      row: d.cell!.row_no,
+      col: d.cell!.col_no,
+      abnormal: isEnvAbnormal(d),
+    })),
+)
+
+/** 设备温度或湿度任一超标即异常 */
+function isEnvAbnormal(d: EnvironmentDevice): boolean {
+  return (
+    (d.temperatureMedian != null && d.temperatureMedian > TEMP_THRESHOLD) ||
+    (d.humidityMedian != null && d.humidityMedian > HUMIDITY_THRESHOLD)
+  )
+}
 
 const assignableOptions = computed(() => {
   if (!floorValid.value) return []
@@ -121,13 +171,38 @@ function onRemoveFromRoom(payload: { roomId: string; deviceId: string }) {
   store.removeDeviceFromRoom(floor.value, payload.roomId, payload.deviceId)
 }
 
+/** 切换设备的「待绑定格子」状态（再点一次取消） */
+function onSelectDeviceForBind(sn: string) {
+  pendingBindSn.value = pendingBindSn.value === sn ? null : sn
+}
+
+/** 3D 点击格子 → 将待绑定设备绑到该格子（含大厅格子） */
+async function onBindCell(payload: { row: number; col: number }) {
+  const sn = pendingBindSn.value
+  if (!sn) return
+  const ok = await store.bindDeviceToCell(sn, floor.value, payload.row, payload.col)
+  if (ok) message.success(t('building.deviceBound', { sn }))
+  else message.error(t('building.deviceBindFailed'))
+  pendingBindSn.value = null
+}
+
+/** 解绑设备的所有格子绑定 */
+async function onUnbindDevice(sn: string) {
+  const ok = await store.unbindDeviceFromCell(sn)
+  if (ok) message.success(t('building.deviceUnbound', { sn }))
+  else message.error(t('building.deviceUnbindFailed'))
+  pendingBindSn.value = null
+}
+
 function onToggleCell(payload: { row: number; col: number }) {
   if (!selectedRoom.value) return
   store.assignRoomCell(floor.value, selectedRoom.value, payload.row, payload.col)
+  editDirty.value = true
 }
 
 function onDropCell(payload: { row: number; col: number; roomId: string }) {
   store.assignRoomCell(floor.value, payload.roomId, payload.row, payload.col)
+  editDirty.value = true
 }
 
 function onDropWall(payload: { row: number; col: number; dir: 'v' | 'h' }) {
@@ -137,22 +212,22 @@ function onDropWall(payload: { row: number; col: number; dir: 'v' | 'h' }) {
   const x = (payload.col - halfCols - 0.5) * 1.15
   const z = (payload.row - halfRows - 0.5) * 1.15
   if (payload.dir === 'h') {
-    // Horizontal wall: placed along the bottom edge of the cell (X direction)
     store.addCustomWall(floor.value, {
       x1: x - half,
       z1: z + half,
       x2: x + half,
       z2: z + half,
     })
+    editDirty.value = true
     return
   }
-  // Vertical wall: placed along the right edge of the cell (Z direction)
   store.addCustomWall(floor.value, {
     x1: x + half,
     z1: z - half,
     x2: x + half,
     z2: z + half,
   })
+  editDirty.value = true
 }
 
 function onSelectWall(index: number | null) {
@@ -173,19 +248,45 @@ function onMoveWall(payload: { index: number; row: number; col: number }) {
     : { x1: x + half, z1: z - half, x2: x + half, z2: z + half }
   store.moveCustomWall(floor.value, payload.index, moved)
   selectedWallIndex.value = null
+  editDirty.value = true
 }
 
 function onRemoveWall(index: number) {
   store.removeCustomWall(floor.value, index)
   selectedWallIndex.value = null
+  editDirty.value = true
 }
 
 function onMoveCell(payload: { fromRow: number; fromCol: number; row: number; col: number }) {
   store.moveRoomCell(floor.value, payload.fromRow, payload.fromCol, payload.row, payload.col)
+  editDirty.value = true
 }
 
 function onResetLayout() {
   store.resetFloorLayout(floor.value)
+  editDirty.value = true
+}
+
+/** 请求退出编辑模式：有变更时弹出确认框 */
+function onRequestExitEdit() {
+  if (!editDirty.value) {
+    editMode.value = false
+    return
+  }
+  Modal.confirm({
+    title: t('building.saveChangesTitle'),
+    content: t('building.saveChangesContent'),
+    okText: t('building.saveChangesOk'),
+    cancelText: t('building.saveChangesCancel'),
+    onOk() {
+      editMode.value = false
+      editDirty.value = false
+      message.success(t('building.savedSuccess'))
+    },
+    onCancel() {
+      // 留在编辑模式
+    },
+  })
 }
 
 function backToBuilding() {
@@ -224,8 +325,11 @@ const roomLabel = computed(() => {
           :selected-wall-index="selectedWallIndex"
           :rooms="dbRooms"
           :room-meta="roomMeta"
+          :devices="deviceMarkers"
+          :bind-sn="pendingBindSn"
+          :lobby-count="lobbyDevices.length"
           @select-room="onSelectRoom"
-          @update:edit-mode="(v) => (editMode = v)"
+          @update:edit-mode="(v) => { if (v) { editMode = true; editDirty = false } else { onRequestExitEdit() } }"
           @toggle-cell="onToggleCell"
           @drop-cell="onDropCell"
           @drop-wall="onDropWall"
@@ -234,6 +338,7 @@ const roomLabel = computed(() => {
           @move-wall="onMoveWall"
           @remove-wall="onRemoveWall"
           @move-cell="onMoveCell"
+          @bind-cell="onBindCell"
         />
       </div>
       <div class="right">
@@ -245,9 +350,15 @@ const roomLabel = computed(() => {
           :env-devices="panelEnvDevices"
           :assignable-options="assignableOptions"
           :can-enter="false"
+          :bind-sn="pendingBindSn"
+          :lobby-count="lobbyDevices.length"
+          :unbound-count="unboundDevices.length"
+          :room-meta="roomMeta"
           manageable
           @assign-to-room="onAssignToRoom"
           @remove-from-room="onRemoveFromRoom"
+          @bind-device="onSelectDeviceForBind"
+          @unbind-device="onUnbindDevice"
         />
       </div>
     </div>

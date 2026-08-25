@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, DeleteOutlined, PushpinOutlined } from '@ant-design/icons-vue'
 import ChartPanel from '@/components/ChartPanel.vue'
 import type { EnvironmentDevice } from '@/api/environment'
 import { TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
@@ -13,6 +13,7 @@ import {
   floorName,
   latestSnapshot,
   type DeviceType,
+  type RoomMeta,
 } from '@/utils/buildingDemo'
 
 export interface DeviceInstance {
@@ -42,6 +43,14 @@ const props = defineProps<{
   assignableOptions?: AssignableOption[]
   /** WingOnIOT 真实环境设备（传入且非空时优先展示，替代 demo 设备与图表） */
   envDevices?: EnvironmentDevice[]
+  /** 当前待绑定格子的设备 SN */
+  bindSn?: string | null
+  /** 大厅/开放区域设备数 */
+  lobbyCount?: number
+  /** 未绑定设备数 */
+  unboundCount?: number
+  /** roomId -> metadata (index) so bind labels can show the room name */
+  roomMeta?: Record<string, RoomMeta>
 }>()
 
 const emit = defineEmits<{
@@ -49,6 +58,8 @@ const emit = defineEmits<{
   backOverview: []
   assignToRoom: [deviceId: string]
   removeFromRoom: [payload: { roomId: string; deviceId: string }]
+  bindDevice: [sn: string]
+  unbindDevice: [sn: string]
 }>()
 
 const { t, locale } = useI18n()
@@ -136,6 +147,25 @@ const envBlocks = computed(() => {
   const list = props.envDevices || []
   return [...list].sort((a, b) => Number(isEnvAbnormal(b)) - Number(isEnvAbnormal(a)))
 })
+
+/** roomId -> display name (e.g. 房間 1); unknown/metadata missing -> '' */
+function roomLabel(roomId: string): string {
+  const meta = props.roomMeta?.[roomId]
+  if (meta?.index) return t('building.roomN', { n: meta.index })
+  return ''
+}
+
+/** 设备绑定位置标签：未绑定 / 房间格子 / 大厅格子 */
+function bindLabel(d: EnvironmentDevice): string {
+  if (!d.cell) return t('building.deviceUnbound')
+  const pos = `${d.cell.row_no},${d.cell.col_no}`
+  const label = d.room_id ? roomLabel(d.room_id) : ''
+  if (d.room_id) {
+    const roomPart = label ? `${label} ` : ''
+    return `${roomPart}${t('building.cell')} (${pos})`
+  }
+  return `${t('building.lobby')} (${pos})`
+}
 
 /** 真实设备模式：envDevices 已传入即强制启用；无设备时显示空状态，不回退 demo */
 const envMode = computed(() => props.envDevices !== undefined)
@@ -256,6 +286,10 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
     <div v-else class="split">
       <div class="nav">
         <div class="nav-title">{{ t('building.deviceList') }}</div>
+        <div v-if="envMode" class="bind-summary">
+          <span v-if="lobbyCount">{{ t('building.lobby') }}: {{ lobbyCount }}</span>
+          <span v-if="unboundCount">{{ t('building.deviceUnbound') }}: {{ unboundCount }}</span>
+        </div>
 
         <template v-if="envMode">
           <div v-if="!envBlocks.length" class="nav-empty">
@@ -275,7 +309,32 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
               <div class="nav-type">{{ dev.deviceName || dev.name || dev.sn }}</div>
               <div class="nav-sub">{{ dev.sn }}</div>
               <div class="nav-sub dim">{{ t('building.envLocation') }}: {{ dev.location || '-' }}</div>
+              <div
+                class="nav-sub bind-label"
+                :class="{ 'bind-active': bindSn === dev.sn, unbound: !dev.cell }"
+              >
+                {{ bindLabel(dev) }}
+              </div>
             </div>
+            <button
+              v-if="manageable && !dev.cell"
+              type="button"
+              class="nav-bind"
+              :class="{ active: bindSn === dev.sn }"
+              :title="bindSn === dev.sn ? t('building.bindCancel') : t('building.bindStart')"
+              @click.stop="emit('bindDevice', dev.sn)"
+            >
+              <PushpinOutlined />
+            </button>
+            <button
+              v-if="manageable && dev.cell"
+              type="button"
+              class="nav-remove"
+              :title="t('building.unbindCell')"
+              @click.stop="emit('unbindDevice', dev.sn)"
+            >
+              <DeleteOutlined />
+            </button>
           </div>
         </template>
 
@@ -342,6 +401,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
                 <div class="device-room">
                   {{ t('building.envLocation') }}: {{ dev.location || '-' }} ·
                   {{ t('building.envModel') }}: {{ dev.model || '-' }}
+                  <span class="cell-tag" :class="{ unbound: !dev.cell }">{{ bindLabel(dev) }}</span>
                 </div>
               </div>
               <a-tag>{{ dev.floor || '-' }}</a-tag>
@@ -595,6 +655,60 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   flex-shrink: 0;
 
   &:hover {
+    color: #b42318;
+  }
+}
+
+.nav-bind {
+  border: 1px solid #cfc9be;
+  background: #fff;
+  color: #6b6b6b;
+  cursor: pointer;
+  padding: 4px 6px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  line-height: 1;
+
+  &:hover {
+    color: #2f8f46;
+    border-color: #2f8f46;
+  }
+
+  &.active {
+    color: #fff;
+    background: #2f8f46;
+    border-color: #2f8f46;
+  }
+}
+
+.bind-label {
+  color: #6b6b6b;
+
+  &.bind-active {
+    color: #2f8f46;
+    font-weight: 650;
+  }
+
+  &.unbound {
+    color: #b42318;
+  }
+}
+
+.bind-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 6px 8px;
+  font-size: 11px;
+  color: #a88955;
+}
+
+.cell-tag {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #2f8f46;
+
+  &.unbound {
     color: #b42318;
   }
 }

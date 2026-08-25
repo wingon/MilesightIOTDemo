@@ -1,5 +1,14 @@
 import api from './http'
 
+/** 设备绑定的格子（building_cell）坐标，x/z 为前端 3D 平面世界坐标 */
+export interface DeviceCell {
+  cell_id: number
+  row_no: number
+  col_no: number
+  x: number
+  z: number
+}
+
 export interface EnvironmentDevice {
   sn: string
   name: string | null
@@ -14,6 +23,10 @@ export interface EnvironmentDevice {
   toDateTime: string | null
   temperatureMedian: number | null
   humidityMedian: number | null
+  /** 绑定的格子（null = 未绑定，含大厅设备） */
+  cell: DeviceCell | null
+  /** 格子所属房间业务键 room_id（null = 大厅/走廊格子） */
+  room_id: string | null
 }
 
 export interface EnvironmentReading {
@@ -57,4 +70,17 @@ export function listEnvironmentReadings(params?: {
 
 export function getFloorEnvironmentSummary() {
   return api.get<FloorEnvironmentSummary[]>('/api/v1/environment/floor-summary')
+}
+
+/** 绑定设备到具体格子（设备→格子；替换设备原有绑定） */
+export function bindDeviceToCell(
+  sn: string,
+  params: { floor_id: number; row_no: number; col_no: number },
+) {
+  return api.post<{ ok: boolean }>(`/api/v1/environment/devices/${sn}/cell`, params)
+}
+
+/** 解绑设备的所有格子绑定 */
+export function unbindDeviceFromCell(sn: string) {
+  return api.delete<{ ok: boolean }>(`/api/v1/environment/devices/${sn}/cell`)
 }

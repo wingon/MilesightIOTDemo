@@ -560,10 +560,14 @@ class Database:
 
         - 无监测记录的设备 latest 字段为 null（LEFT JOIN）
         - level 由 floor 解析（B2/F→1、B1/F→2、G/F→3、4/F→7 …）
+        - cell：设备绑定的格子（device_cell→building_cell）；null = 未绑定（含大厅设备）
+        - room_id：格子所属房间（room_cell 反查，room_id 业务键）；null = 大厅/走廊格子
         """
         sql = """
             SELECT d.sn, d.name, d.deviceName, d.model, d.floor, d.location, d.macAddress,
-                   l.toDateTime, l.temperatureMedian, l.humidityMedian
+                   l.toDateTime, l.temperatureMedian, l.humidityMedian,
+                   c.id AS cell_id, c.row_no, c.col_no, c.x AS cell_x, c.y AS cell_z,
+                   rrc.room_id AS room_id
             FROM Environment_Device d
             LEFT JOIN (
                 SELECT m.sn, m.toDateTime, m.temperatureMedian, m.humidityMedian
@@ -576,6 +580,19 @@ class Database:
                 ) m
                 WHERE m.rn = 1
             ) l ON l.sn = d.sn
+            LEFT JOIN (
+                SELECT dc.sn, dc.cell_id, dc.floor_id,
+                       ROW_NUMBER() OVER (PARTITION BY dc.sn ORDER BY dc.id DESC) AS rn
+                FROM device_cell dc
+            ) dc ON dc.sn = d.sn AND dc.rn = 1
+            LEFT JOIN building_cell c
+                   ON c.id = dc.cell_id AND c.floor_id = dc.floor_id AND c.is_deleted = 0
+            LEFT JOIN (
+                SELECT rc.cell_id, rc.floor_id, MIN(r.room_id) AS room_id
+                FROM room_cell rc
+                JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+                GROUP BY rc.cell_id, rc.floor_id
+            ) rrc ON rrc.cell_id = c.id AND rrc.floor_id = c.floor_id
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
@@ -585,6 +602,22 @@ class Database:
         for row in rows:
             item = self._parse_json_fields(dict(row), ())
             item["level"] = self.floor_to_level(item.get("floor"))
+            cell_id = item.pop("cell_id", None)
+            if cell_id is not None:
+                item["cell"] = {
+                    "cell_id": int(cell_id),
+                    "row_no": int(item.pop("row_no") or 0),
+                    "col_no": int(item.pop("col_no") or 0),
+                    "x": float(item.pop("cell_x") or 0),
+                    "z": float(item.pop("cell_z") or 0),
+                }
+            else:
+                item.pop("row_no", None)
+                item.pop("col_no", None)
+                item.pop("cell_x", None)
+                item.pop("cell_z", None)
+                item["cell"] = None
+            item["room_id"] = item.pop("room_id", None)
             result.append(item)
         # 按 3D 层号排序（无层号排最后），同层按名称 —— 避免字符串排序把 B 层排乱
         result.sort(
@@ -596,6 +629,58 @@ class Database:
             )
         )
         return result
+
+    def find_cell_by_row_col(self, floor_id: int, row_no: int, col_no: int) -> dict[str, Any] | None:
+        """Find an active cell by floor + row/col (used by device-cell binding)."""
+        sql = """
+            SELECT id, floor_id, row_no, col_no
+            FROM building_cell
+            WHERE floor_id = %(floor_id)s
+              AND row_no = %(row_no)s
+              AND col_no = %(col_no)s
+              AND is_deleted = 0
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql,
+                    {"floor_id": floor_id, "row_no": row_no, "col_no": col_no},
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def device_exists(self, sn: str) -> bool:
+        """Whether the device SN exists in Environment_Device."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM Environment_Device WHERE sn = %s", (sn,))
+                return cur.fetchone() is not None
+
+    def bind_device_cell(self, sn: str, floor_id: int, row_no: int, col_no: int) -> bool:
+        """Bind a device to a grid cell, replacing any existing binding of the device.
+
+        Returns False when the device or the target cell does not exist.
+        """
+        if not self.device_exists(sn):
+            return False
+        cell = self.find_cell_by_row_col(floor_id, row_no, col_no)
+        if cell is None:
+            return False
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM device_cell WHERE sn = %s", (sn,))
+                cur.execute(
+                    "INSERT INTO device_cell (sn, cell_id, floor_id) VALUES (%s, %s, %s)",
+                    (sn, cell["id"], cell["floor_id"]),
+                )
+        return True
+
+    def unbind_device_cell(self, sn: str) -> bool:
+        """Remove all cell bindings of a device. Returns True when a binding was removed."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM device_cell WHERE sn = %s", (sn,))
+                return cur.rowcount > 0
 
     def list_environment_monitoring(
         self,
@@ -925,7 +1010,7 @@ class Database:
             room = by_ref.get(rel["room_ref_id"])
             if room is None:
                 continue
-                room["cells"].append({"row": int(rel["row_no"]), "col": int(rel["col_no"])})
+            room["cells"].append({"row": int(rel["row_no"]), "col": int(rel["col_no"])})
         return rooms
 
     def update_cell_rotation(
