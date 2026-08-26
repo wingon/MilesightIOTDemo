@@ -540,5 +540,10 @@ export default {
     colEnter: 'Enter',
     colExit: 'Exit',
     colUpdated: 'Updated at',
+    enter: 'Enter',
+    exit: 'Exit',
+    chartHourly: 'Hourly Traffic',
+    chartDaily: 'Daily Trend',
+    chartChannel: 'Channel Distribution',
   },
 }

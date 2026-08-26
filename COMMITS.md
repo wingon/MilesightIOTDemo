@@ -176,3 +176,69 @@ feat: 3D 編輯工具重構、布局保存到 DB 與資料治理
 - unboundDevices 排除 cell_lost 設備，新增 lostDevices 計算
 - pane-label 新增 user-select:none；.gitignore 新增 /.opencode/
 - i18n 新增 ~20 組文案（dragSourceHint/addCellBtn/saveChangesKeep/savingLayout/undoLimitReached/cellLost/clearLostCell 等，en.ts 與 zh-TW.ts 同步）
+
+
+## 2026-08-26 12:20
+feat: 人數計數功能擴充與圖表展示
+
+### 前端 API 與圖表
+- api/peopleCount.ts 新增 PeopleCountStatsRow 介面與三組統計 fetch 函數：hourly / daily / channel，分別對應 /api/v1/people-count/stats/hourly、daily、channel
+- frontend/src/utils/peopleCountCharts.ts（未追蹤）新增三組 ECharts 選項產生函數：buildHourlyBarOption / buildDailyTrendOption / buildChannelBarOption，支援進/出人數、日期趨勢、通道 Top 10 圖表
+- frontend/src/components/ChartPanel.vue 新增 PieChart 匯入
+- frontend/src/views/PeopleCountListView.vue 新增圖表展區（三卡片佈局），採用響應式 Grid：桌上型 3 卡 / 中型 2 卡 / 手機 1 卡，載入時平行抓取 hourly/daily/channel 三組統計資料並填入狀態
+- frontend/src/views/DevicesManageView.vue 移除 max-width: 960px
+
+### 環境色彩映射改進（envColor.ts）
+- 棄用固定 5 段溫度區間，改為支援任意值連續插值的 lerpColor 函數，並新增 TEMPERATURE_ANCHORS / TEMPERATURE_GRADIENT_STOPS 常數（0/10/20/30/35°C 五檔錨點，與 3D 色帶與右下角圖例完全一致）
+- 新增 temperatureColor 函數：根據值在錨點間線性插值，支援小數溫度點的精準顏色對應
+- 重構 fixedTemperatureColor 使用新的 temperatureColor，humidityColor 改用多控點插值（低/中/高湿度分別對應不同亮度/饱和度），視覺過渡更平滑
+
+### i18n 與頁面調整
+- frontend/src/i18n/locales/en.ts / zh-TW.ts：新增 peopleCount 相關文案（進/出、圖表標題等）
+
+### 後端
+- mqttapi/app/api/routes/people_count.py 新增三組統計端點：/people-count/stats/hourly、daily、channel
+- mqttapi/app/db.py 同步對應的 DB 查詢函數，支援依日期/小時/通道聚合進出人數
+
+### ChartPanel 微調
+- frontend/src/components/ChartPanel.vue 新增 PieChart 匯入（支援產生圓餅圖）
+
+### 小調整
+- frontend/src/components/ChartPanel.vue：移除 max-width: 960px（DevicesManageView）
+
+### 其他
+- frontend/src/utils/peopleCountCharts.ts（未追蹤）匯出 buildHourlyBarOption / buildDailyTrendOption / buildChannelBarOption 三組 ECharts 選項產生函數
+
+## 2026-08-26 12:20
+feat: 人數計數功能擴充與圖表展示
+
+### 前端 API 與圖表
+- api/peopleCount.ts 新增 PeopleCountStatsRow 介面與三組統計 fetch 函數：hourly / daily / channel
+- frontend/src/utils/peopleCountCharts.ts（未追蹤）新增三組 ECharts 選項產生函數：buildHourlyBarOption / buildDailyTrendOption / buildChannelBarOption
+- frontend/src/components/ChartPanel.vue 新增 PieChart 匯入
+- frontend/src/views/PeopleCountListView.vue 新增圖表展區（三卡片響應式佈局），載入時平行抓取 hourly/daily/channel 三組統計資料
+- frontend/src/views/DevicesManageView.vue 移除 max-width: 960px
+
+### 環境色彩映射改進（envColor.ts）
+- 棄用固定 5 段溫度區間，改為支援任意值連續插值的 lerpColor 函數，並新增 TEMPERATURE_ANCHORS / TEMPERATURE_GRADIENT_STOPS 常數
+- 新增 temperatureColor 函數：根據值在錨點間線性插值
+- 重構 fixedTemperatureColor 使用新的 temperatureColor，humidityColor 改用多控點插值，視覺過渡更平滑
+
+### 後端
+- mqttapi/app/api/routes/people_count.py 新增三組統計端點：hourly/daily/channel
+- mqttapi/app/db.py 同步對應的 DB 查詢函數
+
+### i18n 與頁面調整
+- i18n 新增 peopleCount 相關文案
+
+### ChartPanel 微調
+- ChartPanel 新增 PieChart 匯入
+
+### 小調整
+- DevicesManageView 移除 max-width: 960px
+
+### 其他
+- peopleCountCharts.ts（未追蹤）匯出三組 ECharts 選項產生函數
+
+
+

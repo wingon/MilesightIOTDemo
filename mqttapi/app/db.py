@@ -843,6 +843,135 @@ class Database:
                 rows = cur.fetchall() or []
         return [str(r["channel_name"]) for r in rows]
 
+    def people_count_hourly_stats(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按小时聚合进出人数（图表用）。"""
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if date_from is not None:
+            where.append("date >= %(date_from)s")
+            params["date_from"] = date_from
+        if date_to is not None:
+            where.append("date <= %(date_to)s")
+            params["date_to"] = date_to
+        if hour is not None:
+            where.append("hour = %(hour)s")
+            params["hour"] = hour
+        if ip_address:
+            where.append("ip_address = %(ip_address)s")
+            params["ip_address"] = ip_address
+        if channel_name:
+            where.append("channel_name = %(channel_name)s")
+            params["channel_name"] = channel_name
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT hour,
+                   SUM(enter_count) AS enter_count,
+                   SUM(exit_count) AS exit_count
+            FROM people_count_hourly
+            WHERE {clause}
+            GROUP BY hour
+            ORDER BY hour
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+    def people_count_daily_stats(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按日期聚合进出人数（图表用）。"""
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if date_from is not None:
+            where.append("date >= %(date_from)s")
+            params["date_from"] = date_from
+        if date_to is not None:
+            where.append("date <= %(date_to)s")
+            params["date_to"] = date_to
+        if hour is not None:
+            where.append("hour = %(hour)s")
+            params["hour"] = hour
+        if ip_address:
+            where.append("ip_address = %(ip_address)s")
+            params["ip_address"] = ip_address
+        if channel_name:
+            where.append("channel_name = %(channel_name)s")
+            params["channel_name"] = channel_name
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT date,
+                   SUM(enter_count) AS enter_count,
+                   SUM(exit_count) AS exit_count
+            FROM people_count_hourly
+            WHERE {clause}
+            GROUP BY date
+            ORDER BY date
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+    def people_count_channel_stats(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """按通道聚合进出人数（图表用）。"""
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if date_from is not None:
+            where.append("date >= %(date_from)s")
+            params["date_from"] = date_from
+        if date_to is not None:
+            where.append("date <= %(date_to)s")
+            params["date_to"] = date_to
+        if hour is not None:
+            where.append("hour = %(hour)s")
+            params["hour"] = hour
+        if ip_address:
+            where.append("ip_address = %(ip_address)s")
+            params["ip_address"] = ip_address
+        if channel_name:
+            where.append("channel_name = %(channel_name)s")
+            params["channel_name"] = channel_name
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT channel_name,
+                   SUM(enter_count) AS enter_count,
+                   SUM(exit_count) AS exit_count
+            FROM people_count_hourly
+            WHERE {clause}
+            GROUP BY channel_name
+            ORDER BY enter_count + exit_count DESC
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
     def floor_environment_summary(self) -> list[dict[str, Any]]:
         """按楼层聚合：每台设备取最新一条监测记录，楼层温度/湿度为该层设备中位值均值。"""
         sql = """

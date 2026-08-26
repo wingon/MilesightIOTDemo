@@ -53,3 +53,60 @@ def list_people_count_hourly(
 def list_people_count_channels(db: Database = Depends(get_db)) -> list[str]:
     """Distinct channel_name values used to build the filter dropdown."""
     return db.list_people_count_channels()
+
+
+@router.get("/people-count/stats/hourly")
+def people_count_hourly_stats(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    hour: int | None = Query(default=None, ge=0, le=23),
+    ip_address: str | None = Query(default=None),
+    channel_name: str | None = Query(default=None),
+    db: Database = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """按小时聚合进出人数（图表用）。"""
+    return db.people_count_hourly_stats(
+        date_from=date_from,
+        date_to=date_to,
+        hour=hour,
+        ip_address=ip_address,
+        channel_name=channel_name,
+    )
+
+
+@router.get("/people-count/stats/daily")
+def people_count_daily_stats(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    hour: int | None = Query(default=None, ge=0, le=23),
+    ip_address: str | None = Query(default=None),
+    channel_name: str | None = Query(default=None),
+    db: Database = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """按日期聚合进出人数（图表用）。"""
+    return db.people_count_daily_stats(
+        date_from=date_from,
+        date_to=date_to,
+        hour=hour,
+        ip_address=ip_address,
+        channel_name=channel_name,
+    )
+
+
+@router.get("/people-count/stats/channel")
+def people_count_channel_stats(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    hour: int | None = Query(default=None, ge=0, le=23),
+    ip_address: str | None = Query(default=None),
+    channel_name: str | None = Query(default=None),
+    db: Database = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """按通道聚合进出人数（图表用）。"""
+    return db.people_count_channel_stats(
+        date_from=date_from,
+        date_to=date_to,
+        hour=hour,
+        ip_address=ip_address,
+        channel_name=channel_name,
+    )

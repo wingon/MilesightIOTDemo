@@ -530,5 +530,10 @@ export default {
     colEnter: '進入',
     colExit: '離開',
     colUpdated: '更新時間',
+    enter: '進入',
+    exit: '離開',
+    chartHourly: '各時段進出人數',
+    chartDaily: '每日進出趨勢',
+    chartChannel: '各通道進出占比',
   },
 }

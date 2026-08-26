@@ -21,61 +21,126 @@ function hsl(h: number, s: number, l: number) {
   return `hsl(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t
+}
+
+/** 解析 hsl(...) 字符串 → [h(0-360), s(0-1), l(0-1)] */
+function parseHsl(hslStr: string): [number, number, number] {
+  const match = hslStr.match(/hsl\((\d+\.?\d*),\s*(\d+\.?\d*)%,\s*(\d+\.?\d*)%\)/)
+  if (!match) return [0, 0, 0]
+  return [parseFloat(match[1]), parseFloat(match[2]) / 100, parseFloat(match[3]) / 100]
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360
+  s = clamp01(s)
+  l = clamp01(l)
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  let r = 0, g = 0, b = 0
+  if (h < 60) { r = c; g = x }
+  else if (h < 120) { r = x; g = c }
+  else if (h < 180) { r = 0; g = c; b = x }
+  else if (h < 240) { r = 0; g = x; b = c }
+  else if (h < 300) { r = x; g = 0; b = c }
+  else { r = c; g = 0; b = x }
+  return [r + m, g + m, b + m]
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const d = max - min
+  const l = (max + min) / 2
+  if (d === 0) return [0, 0, l]
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h = 0
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else h = ((r - g) / d + 4) / 6
+  // 返回 0-1 范围的色相，与 hsl() 的入参约定一致
+  return [h, s, l]
+}
+
 /**
- * Fixed temperature scale: 0 → 10 → 20 → 30 → 35 (°C)
- * Bands map low → high to a cold → hot gradient (blue → cyan → yellow → red):
- *   0~10:   blue (cold)
- *   10~20:  cyan-green (cool)
- *   20~30:  yellow (warm)
- *   30~35:  red (hot)
+ * 在两个颜色间插值。为与 CSS linear-gradient（右下角图例）视觉完全一致，
+ * 统一在 sRGB 空间插值。
  */
-export const TEMPERATURE_BANDS: { from: number; to: number; color: string }[] = [
-  { from: 0, to: 10, color: hsl(0.60, 0.65, 0.45) },
-  { from: 10, to: 20, color: hsl(0.48, 0.60, 0.48) },
-  { from: 20, to: 30, color: hsl(0.28, 0.65, 0.50) },
-  { from: 30, to: 35, color: hsl(0.06, 0.78, 0.52) },
+function lerpColor(color1: string, color2: string, t: number): string {
+  const [h1, s1, l1] = parseHsl(color1)
+  const [h2, s2, l2] = parseHsl(color2)
+  const rgb1 = hslToRgb(h1, s1, l1)
+  const rgb2 = hslToRgb(h2, s2, l2)
+  const r = lerp(rgb1[0], rgb2[0], t)
+  const g = lerp(rgb1[1], rgb2[1], t)
+  const b = lerp(rgb1[2], rgb2[2], t)
+  const [h, s, l] = rgbToHsl(r, g, b)
+  return hsl(h, s, l)
+}
+
+/**
+ * 温度渐变锚点：温度值 → 图例颜色（与右下角温度图例完全一致）。
+ * 0→蓝  10→青  20→黄  30→橙  35→红
+ */
+export const TEMPERATURE_ANCHORS: { value: number; color: string }[] = [
+  { value: 0,  color: hsl(0.60, 0.65, 0.45) },
+  { value: 10, color: hsl(0.48, 0.60, 0.48) },
+  { value: 20, color: hsl(0.28, 0.65, 0.50) },
+  { value: 30, color: hsl(0.12, 0.78, 0.54) },
+  { value: 35, color: hsl(0.00, 0.78, 0.50) },
 ]
 
 /** Fixed temperature tick values */
-export const TEMPERATURE_TICKS = [0, 10, 20, 30, 35]
+export const TEMPERATURE_TICKS = TEMPERATURE_ANCHORS.map((a) => a.value)
 
 /** Fixed temperature band colors (for legend swatches / gradient stops) */
-export const TEMPERATURE_BAND_COLORS = TEMPERATURE_BANDS.map((b) => b.color)
+export const TEMPERATURE_BAND_COLORS = TEMPERATURE_ANCHORS.map((a) => a.color)
 
 /** Continuous gradient stops (one color per tick) for the temperature legend bar */
-export const TEMPERATURE_GRADIENT_STOPS = [
-  hsl(0.60, 0.65, 0.45), // 0
-  hsl(0.48, 0.60, 0.48), // 10
-  hsl(0.28, 0.65, 0.50), // 20
-  hsl(0.12, 0.78, 0.54), // 30
-  hsl(0.00, 0.78, 0.50), // 35
-]
+export const TEMPERATURE_GRADIENT_STOPS = TEMPERATURE_ANCHORS.map((a) => a.color)
 
-/** Temperature color scale: blue → cyan → yellow → red (fixed 5 bands) */
+/**
+ * 温度颜色映射：在图例渐变（TEMPERATURE_ANCHORS）上按温度值取色，连续插值。
+ * 3D 楼层的颜色与右下角图例完全一致。
+ */
 export function temperatureColor(value: number | null, _min: number, _max: number): string | null {
   if (value == null) return null
-  for (const band of TEMPERATURE_BANDS) {
-    if (value >= band.from && value < band.to) return band.color
+  const first = TEMPERATURE_ANCHORS[0]
+  const last = TEMPERATURE_ANCHORS[TEMPERATURE_ANCHORS.length - 1]
+  if (value <= first.value) return first.color
+  if (value >= last.value) return last.color
+  for (let i = 0; i < TEMPERATURE_ANCHORS.length - 1; i++) {
+    const curr = TEMPERATURE_ANCHORS[i]
+    const next = TEMPERATURE_ANCHORS[i + 1]
+    if (value >= curr.value && value < next.value) {
+      const t = clamp01((value - curr.value) / (next.value - curr.value))
+      return lerpColor(curr.color, next.color, t)
+    }
   }
-  if (value >= 35) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
-  return TEMPERATURE_BANDS[0].color
+  return first.color
 }
 
-/** Fixed temperature band color (for 3D floor coloring; falls back when no data) */
+/** Fixed temperature color (for 3D floor coloring; falls back when no data) */
 export function fixedTemperatureColor(value: number | null): string {
   if (value == null) return '#d9d5cc'
-  for (const band of TEMPERATURE_BANDS) {
-    if (value >= band.from && value < band.to) return band.color
-  }
-  if (value >= 35) return TEMPERATURE_BANDS[TEMPERATURE_BANDS.length - 1].color
-  return TEMPERATURE_BANDS[0].color
+  return temperatureColor(value, 0, 35) ?? '#d9d5cc'
 }
 
 /** Humidity color scale: light blue → dark blue (low → high) */
 export function humidityColor(value: number | null, min: number, max: number): string | null {
   if (value == null || !(max > min)) return null
   const t = clamp01((value - min) / (max - min))
-  return hsl(0.58, 0.5, 0.72 - t * 0.38)
+  
+  // 使用多个控制点实现更平滑的过渡
+  // 低湿度：浅蓝（高亮度，低饱和度）
+  // 中湿度：中蓝（中亮度，中饱和度）
+  // 高湿度：深蓝（低亮度，高饱和度）
+  const h = 210 / 360  // 蓝色色相（0-1 范围）
+  const s = lerp(0.35, 0.60, t)  // 饱和度随湿度增加（0-1）
+  const l = lerp(0.75, 0.38, t)  // 亮度随湿度降低（0-1）
+  return hsl(h, s, l)
 }
 
 export function envColorFor(

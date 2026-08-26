@@ -32,6 +32,15 @@ export interface PeopleCountHourlyQuery {
   offset?: number
 }
 
+/** Aggregated stats row */
+export interface PeopleCountStatsRow {
+  date?: string
+  hour?: number
+  channel_name?: string
+  enter_count: number
+  exit_count: number
+}
+
 /** Fetch a paginated, filterable list of people_count_hourly rows */
 export function listPeopleCountHourly(params: PeopleCountHourlyQuery) {
   return api.get<PeopleCountHourlyPage>('/api/v1/people-count/hourly', { params })
@@ -40,4 +49,19 @@ export function listPeopleCountHourly(params: PeopleCountHourlyQuery) {
 /** Fetch distinct channel_name values for the filter dropdown */
 export function listPeopleCountChannels() {
   return api.get<string[]>('/api/v1/people-count/channels')
+}
+
+/** Fetch hourly aggregated stats (chart) */
+export function getPeopleCountHourlyStats(params: PeopleCountHourlyQuery) {
+  return api.get<PeopleCountStatsRow[]>('/api/v1/people-count/stats/hourly', { params })
+}
+
+/** Fetch daily aggregated stats (chart) */
+export function getPeopleCountDailyStats(params: PeopleCountHourlyQuery) {
+  return api.get<PeopleCountStatsRow[]>('/api/v1/people-count/stats/daily', { params })
+}
+
+/** Fetch channel aggregated stats (chart) */
+export function getPeopleCountChannelStats(params: PeopleCountHourlyQuery) {
+  return api.get<PeopleCountStatsRow[]>('/api/v1/people-count/stats/channel', { params })
 }

@@ -169,7 +169,6 @@ function mqttTag(ok: boolean | null) {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 960px;
 }
 
 .page-intro {

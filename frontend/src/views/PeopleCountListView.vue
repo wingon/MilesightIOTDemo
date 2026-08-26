@@ -6,14 +6,29 @@ import dayjs, { type Dayjs } from 'dayjs'
 import {
   listPeopleCountHourly,
   listPeopleCountChannels,
+  getPeopleCountHourlyStats,
+  getPeopleCountDailyStats,
+  getPeopleCountChannelStats,
   type PeopleCountHourlyRow,
+  type PeopleCountStatsRow,
 } from '@/api/peopleCount'
+import ChartPanel from '@/components/ChartPanel.vue'
+import {
+  buildHourlyBarOption,
+  buildDailyTrendOption,
+  buildChannelBarOption,
+} from '@/utils/peopleCountCharts'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const loading = ref(false)
 const rows = ref<PeopleCountHourlyRow[]>([])
 const total = ref(0)
+
+// Chart data from aggregation APIs
+const hourlyStats = ref<PeopleCountStatsRow[]>([])
+const dailyStats = ref<PeopleCountStatsRow[]>([])
+const channelStats = ref<PeopleCountStatsRow[]>([])
 
 // Filter state (date_from / date_to are sent only when the range picker has a value)
 const dateRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
@@ -29,6 +44,30 @@ const pageSize = ref(20)
 const hourOptions = computed(() =>
   Array.from({ length: 24 }, (_, h) => ({ value: h, label: `${h}:00` })),
 )
+
+const hourlyBarOption = computed(() => {
+  void locale.value
+  return buildHourlyBarOption(hourlyStats.value, {
+    enter: t('peopleCount.enter'),
+    exit: t('peopleCount.exit'),
+  })
+})
+
+const dailyTrendOption = computed(() => {
+  void locale.value
+  return buildDailyTrendOption(dailyStats.value, {
+    enter: t('peopleCount.enter'),
+    exit: t('peopleCount.exit'),
+  })
+})
+
+const channelBarOption = computed(() => {
+  void locale.value
+  return buildChannelBarOption(channelStats.value, {
+    enter: t('peopleCount.enter'),
+    exit: t('peopleCount.exit'),
+  })
+})
 
 const columns = computed(() => [
   { title: t('peopleCount.colDate'), dataIndex: 'date', key: 'date', width: 120 },
@@ -53,12 +92,31 @@ function buildQuery() {
   }
 }
 
+function buildChartQuery() {
+  return {
+    date_from: dateRange.value?.[0]?.format('YYYY-MM-DD') || undefined,
+    date_to: dateRange.value?.[1]?.format('YYYY-MM-DD') || undefined,
+    hour: hour.value,
+    ip_address: ipAddress.value.trim() || undefined,
+    channel_name: channelName.value,
+  }
+}
+
 async function load() {
   loading.value = true
   try {
-    const { data } = await listPeopleCountHourly(buildQuery())
-    rows.value = data.items
-    total.value = data.total
+    const chartQuery = buildChartQuery()
+    const [pageRes, hourlyRes, dailyRes, channelRes] = await Promise.all([
+      listPeopleCountHourly(buildQuery()),
+      getPeopleCountHourlyStats(chartQuery),
+      getPeopleCountDailyStats(chartQuery),
+      getPeopleCountChannelStats(chartQuery),
+    ])
+    rows.value = pageRes.data.items
+    total.value = pageRes.data.total
+    hourlyStats.value = hourlyRes.data
+    dailyStats.value = dailyRes.data
+    channelStats.value = channelRes.data
   } catch (e: unknown) {
     const err = e instanceof Error ? e.message : String(e)
     message.error(`${t('peopleCount.loadFailed')} ${err}`)
@@ -153,6 +211,21 @@ onMounted(() => {
       </div>
     </div>
 
+    <div class="charts-row">
+      <div class="card chart-card">
+        <div class="chart-title">{{ t('peopleCount.chartHourly') }}</div>
+        <ChartPanel :option="hourlyBarOption" height="240px" />
+      </div>
+      <div class="card chart-card">
+        <div class="chart-title">{{ t('peopleCount.chartDaily') }}</div>
+        <ChartPanel :option="dailyTrendOption" height="240px" />
+      </div>
+      <div class="card chart-card">
+        <div class="chart-title">{{ t('peopleCount.chartChannel') }}</div>
+        <ChartPanel :option="channelBarOption" height="320px" />
+      </div>
+    </div>
+
     <div class="card table-card">
       <a-table
         :columns="columns"
@@ -188,7 +261,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 1100px;
 }
 
 .page-intro {
@@ -245,6 +317,35 @@ onMounted(() => {
 
 @media (max-width: 560px) {
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.chart-card {
+  min-width: 0;
+}
+
+.chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0d0d0d;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1100px) {
+  .charts-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .charts-row {
     grid-template-columns: 1fr;
   }
 }
