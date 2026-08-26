@@ -155,9 +155,11 @@ function roomLabel(roomId: string): string {
   return ''
 }
 
-/** 设备绑定位置标签：未绑定 / 房间格子 / 大厅格子 */
+/** 设备绑定位置标签：未绑定 / 格子已失效 / 房间格子 / 大厅格子 */
 function bindLabel(d: EnvironmentDevice): string {
-  if (!d.cell) return t('building.deviceUnbound')
+  if (!d.cell) {
+    return d.cell_lost ? t('building.cellLost') : t('building.deviceUnbound')
+  }
   const pos = `${d.cell.row_no},${d.cell.col_no}`
   const label = d.room_id ? roomLabel(d.room_id) : ''
   if (d.room_id) {
@@ -317,7 +319,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
               </div>
             </div>
             <button
-              v-if="manageable && !dev.cell"
+              v-if="manageable && !dev.cell && !dev.cell_lost"
               type="button"
               class="nav-bind"
               :class="{ active: bindSn === dev.sn }"
@@ -327,10 +329,10 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
               <PushpinOutlined />
             </button>
             <button
-              v-if="manageable && dev.cell"
+              v-if="manageable && (dev.cell || dev.cell_lost)"
               type="button"
               class="nav-remove"
-              :title="t('building.unbindCell')"
+              :title="dev.cell_lost ? t('building.clearLostCell') : t('building.unbindCell')"
               @click.stop="emit('unbindDevice', dev.sn)"
             >
               <DeleteOutlined />

@@ -25,6 +25,8 @@ export interface EnvironmentDevice {
   humidityMedian: number | null
   /** 绑定的格子（null = 未绑定，含大厅设备） */
   cell: DeviceCell | null
+  /** 绑定已失效：device_cell 留有绑定但目标格子已软删/不存在（cell 一定为 null） */
+  cell_lost?: boolean
   /** 格子所属房间业务键 room_id（null = 大厅/走廊格子） */
   room_id: string | null
 }

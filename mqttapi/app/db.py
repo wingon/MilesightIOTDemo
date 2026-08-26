@@ -25,8 +25,18 @@ UG65_JSON_COLUMNS = (
 )
 
 # In-memory undo stack shared across Database instances (module-level).
-# Holds the last cell_edit operation so it can be undone by a later request.
+# Holds the last cell_edit / reset_grid_extras operations so they can be undone
+# by later requests. Capacity is capped at UNDO_LIMIT (oldest entries are dropped).
 _UNDO_STACK: list[dict[str, Any]] = []
+# Maximum number of undoable operations kept in the stack (10-step undo).
+_UNDO_LIMIT = 10
+
+
+def _push_undo(ops: list[dict[str, Any]], affected: int) -> None:
+    """Append an undo record, dropping the oldest entry when over the limit."""
+    _UNDO_STACK.append({"ops": ops, "affected": affected})
+    if len(_UNDO_STACK) > _UNDO_LIMIT:
+        _UNDO_STACK.pop(0)
 
 
 class Database:
@@ -561,12 +571,15 @@ class Database:
         - 无监测记录的设备 latest 字段为 null（LEFT JOIN）
         - level 由 floor 解析（B2/F→1、B1/F→2、G/F→3、4/F→7 …）
         - cell：设备绑定的格子（device_cell→building_cell）；null = 未绑定（含大厅设备）
+        - cell_lost：设备在 device_cell 留有绑定但目标格子已软删/不存在（残留绑定）。
+          此时 cell 一定为 null（格子无效无法定位），cell_lost=True 可用于 UI 提示并触发清理。
         - room_id：格子所属房间（room_cell 反查，room_id 业务键）；null = 大厅/走廊格子
         """
         sql = """
             SELECT d.sn, d.name, d.deviceName, d.model, d.floor, d.location, d.macAddress,
                    l.toDateTime, l.temperatureMedian, l.humidityMedian,
-                   c.id AS cell_id, c.row_no, c.col_no, c.x AS cell_x, c.y AS cell_z,
+                   dc.cell_id AS cell_id, c.row_no, c.col_no, c.x AS cell_x, c.y AS cell_z,
+                   IF(dc.cell_id IS NOT NULL AND c.id IS NULL, 1, 0) AS cell_lost,
                    rrc.room_id AS room_id
             FROM Environment_Device d
             LEFT JOIN (
@@ -591,6 +604,7 @@ class Database:
                 SELECT rc.cell_id, rc.floor_id, MIN(r.room_id) AS room_id
                 FROM room_cell rc
                 JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+                WHERE rc.is_deleted = 0
                 GROUP BY rc.cell_id, rc.floor_id
             ) rrc ON rrc.cell_id = c.id AND rrc.floor_id = c.floor_id
         """
@@ -603,7 +617,8 @@ class Database:
             item = self._parse_json_fields(dict(row), ())
             item["level"] = self.floor_to_level(item.get("floor"))
             cell_id = item.pop("cell_id", None)
-            if cell_id is not None:
+            cell_lost = int(item.pop("cell_lost", 0) or 0) == 1
+            if cell_id is not None and not cell_lost:
                 item["cell"] = {
                     "cell_id": int(cell_id),
                     "row_no": int(item.pop("row_no") or 0),
@@ -617,6 +632,8 @@ class Database:
                 item.pop("cell_x", None)
                 item.pop("cell_z", None)
                 item["cell"] = None
+            # cell_lost: 设备在 device_cell 里留有绑定，但目标格子已软删/不存在（残留绑定）
+            item["cell_lost"] = cell_lost
             item["room_id"] = item.pop("room_id", None)
             result.append(item)
         # 按 3D 层号排序（无层号排最后），同层按名称 —— 避免字符串排序把 B 层排乱
@@ -656,16 +673,23 @@ class Database:
                 cur.execute("SELECT 1 FROM Environment_Device WHERE sn = %s", (sn,))
                 return cur.fetchone() is not None
 
-    def bind_device_cell(self, sn: str, floor_id: int, row_no: int, col_no: int) -> bool:
+    def bind_device_cell(self, sn: str, floor_id: int, row_no: int, col_no: int) -> str:
         """Bind a device to a grid cell, replacing any existing binding of the device.
 
-        Returns False when the device or the target cell does not exist.
+        Returns one of:
+          "ok"               - bound successfully (old binding, if any, replaced)
+          "device_not_found" - the SN does not exist in Environment_Device
+          "cell_not_found"   - no active cell at (floor_id, row_no, col_no)
+          "floor_mismatch"   - the device's floor differs from the cell's floor (both resolvable)
         """
         if not self.device_exists(sn):
-            return False
+            return "device_not_found"
         cell = self.find_cell_by_row_col(floor_id, row_no, col_no)
         if cell is None:
-            return False
+            return "cell_not_found"
+        # 楼层一致性校验：设备所在楼层与目标格子所在楼层必须一致（仅两侧均可解析时强制）
+        if self._device_floor_matches_cell(sn, floor_id) is False:
+            return "floor_mismatch"
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM device_cell WHERE sn = %s", (sn,))
@@ -673,7 +697,33 @@ class Database:
                     "INSERT INTO device_cell (sn, cell_id, floor_id) VALUES (%s, %s, %s)",
                     (sn, cell["id"], cell["floor_id"]),
                 )
-        return True
+        return "ok"
+
+    def _device_floor_matches_cell(self, sn: str, cell_floor_id: int) -> bool:
+        """Whether the device's floor (WingOn floor string) matches the cell's floor.
+
+        Both sides are mapped to the same 3D-layer number (floor_to_level /
+        floor_level_to_3d). Returns True when either side cannot be resolved
+        (no information to compare) so the bind is allowed.
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT floor FROM Environment_Device WHERE sn = %s", (sn,))
+                row = cur.fetchone()
+                device_floor = (row or {}).get("floor") if row else None
+                cur.execute(
+                    "SELECT level FROM floor WHERE id = %s AND is_deleted = 0",
+                    (cell_floor_id,),
+                )
+                frow = cur.fetchone()
+                floor_level = (
+                    int(frow["level"]) if frow and frow.get("level") is not None else None
+                )
+        device_level = self.floor_to_level(device_floor)
+        grid_level = self.floor_level_to_3d(floor_level) if floor_level is not None else None
+        if device_level is None or grid_level is None:
+            return True
+        return device_level == grid_level
 
     def unbind_device_cell(self, sn: str) -> bool:
         """Remove all cell bindings of a device. Returns True when a binding was removed."""
@@ -992,7 +1042,7 @@ class Database:
             JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
             JOIN building_cell c ON c.id = rc.cell_id AND c.is_deleted = 0
             JOIN floor f ON f.id = rc.floor_id AND f.is_deleted = 0
-            WHERE rc.floor_id = %(floor_id)s
+            WHERE rc.floor_id = %(floor_id)s AND rc.is_deleted = 0
             ORDER BY rc.room_ref_id ASC, c.row_no ASC, c.col_no ASC
         """
         with self.wingon_connection() as conn:
@@ -1013,10 +1063,126 @@ class Database:
             room["cells"].append({"row": int(rel["row_no"]), "col": int(rel["col_no"])})
         return rooms
 
+    def delete_room(self, room_id: str) -> bool:
+        """物理删除房间：room_cell 由外键级联清空，其上设备归属自动变回大厅。
+
+        房间 = 格子集合，可重建，因此不做软删（不留伪删除脏数据）。
+        不可恢复，删除前请确认。返回是否命中房间。
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM room WHERE room_id = %s",
+                    (room_id,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
+                cur.execute("DELETE FROM room WHERE id = %s", (int(row["id"]),))
+        return True
+
+    def assign_room_cell(self, room_id: str, floor_id: int, row_no: int, col_no: int) -> str:
+        """原子切换房间↔格子占用（R3 修复的后端支撑）。
+
+        - 目标格子已被该房间占用 → 移除该绑定，返回 'removed'
+        - 目标格子被其他房间占用 → 先物理释放再占给当前房间，返回 'added'
+        - 目标格子空闲 → 占用，返回 'added'
+        - 房间/格子无效（不存在或已软删）→ 返回 'invalid'
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM room WHERE room_id = %s AND is_deleted = 0",
+                    (room_id,),
+                )
+                room = cur.fetchone()
+                if room is None:
+                    return "invalid"
+                rid = int(room["id"])
+                cur.execute(
+                    """SELECT id FROM building_cell
+                       WHERE floor_id = %s AND row_no = %s AND col_no = %s AND is_deleted = 0""",
+                    (floor_id, row_no, col_no),
+                )
+                cell = cur.fetchone()
+                if cell is None:
+                    return "invalid"
+                cid = int(cell["id"])
+                cur.execute(
+                    """SELECT id FROM room_cell
+                       WHERE room_ref_id = %s AND floor_id = %s AND cell_id = %s AND is_deleted = 0""",
+                    (rid, floor_id, cid),
+                )
+                existing = cur.fetchone()
+                if existing is not None:
+                    cur.execute("DELETE FROM room_cell WHERE id = %s", (int(existing["id"]),))
+                    return "removed"
+                # 释放其他有效房间对该格子的占用（物理删，避免一格多房）
+                cur.execute(
+                    """DELETE FROM room_cell
+                       WHERE floor_id = %s AND cell_id = %s AND room_ref_id <> %s AND is_deleted = 0""",
+                    (floor_id, cid, rid),
+                )
+                cur.execute(
+                    "INSERT INTO room_cell (room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s)",
+                    (rid, floor_id, cid),
+                )
+        return "added"
+
+    def save_floor_layout(self, floor_id: int, layout: dict[str, list[tuple[int, int]]]) -> int:
+        """批量保存楼层房间↔格子布局（原子替换）。
+
+        layout: { room_id: [(row_no, col_no), ...], ... }
+        1. 物理删除该楼层所有 room_cell 记录
+        2. 批量插入新的 room_cell 记录
+        3. 返回插入的记录数
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                # 获取该楼层所有有效房间的 id 映射
+                cur.execute(
+                    "SELECT id, room_id FROM room WHERE floor_id = %s AND is_deleted = 0",
+                    (floor_id,),
+                )
+                room_map = {r["room_id"]: int(r["id"]) for r in cur.fetchall()}
+
+                # 获取该楼层所有有效格子的 id 映射
+                cur.execute(
+                    "SELECT id, row_no, col_no FROM building_cell WHERE floor_id = %s AND is_deleted = 0",
+                    (floor_id,),
+                )
+                cell_map = {(int(c["row_no"]), int(c["col_no"])): int(c["id"]) for c in cur.fetchall()}
+
+                # 物理删除该楼层所有 room_cell 记录
+                cur.execute("DELETE FROM room_cell WHERE floor_id = %s", (floor_id,))
+                deleted = cur.rowcount
+
+                # 批量插入新的 room_cell 记录
+                inserted = 0
+                for room_id, cells in layout.items():
+                    rid = room_map.get(room_id)
+                    if rid is None:
+                        continue
+                    for row_no, col_no in cells:
+                        cid = cell_map.get((row_no, col_no))
+                        if cid is None:
+                            continue
+                        cur.execute(
+                            "INSERT INTO room_cell (room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s)",
+                            (rid, floor_id, cid),
+                        )
+                        inserted += 1
+
+                return inserted
+
     def update_cell_rotation(
         self, floor_id: int, row_no: int, col_no: int, rotation_xyz: str | None
     ) -> bool:
-        """Update rotation_xyz for a single cell. Returns True if a row was updated."""
+        """Update rotation_xyz for a single cell. Returns True if a row was updated.
+
+        The previous rotation is recorded on the undo stack so a rotation change
+        can be reverted by undo_last_edit (action == "rotation").
+        """
         sql = """
             UPDATE building_cell
             SET rotation_xyz = %(rotation)s
@@ -1027,13 +1193,31 @@ class Database:
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
+                # Snapshot the current rotation before overwriting it
+                cur.execute(
+                    """SELECT id, rotation_xyz FROM building_cell
+                       WHERE floor_id = %(floor_id)s
+                         AND row_no = %(row_no)s
+                         AND col_no = %(col_no)s
+                         AND is_deleted = 0""",
+                    {"floor_id": floor_id, "row_no": row_no, "col_no": col_no},
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return False
                 cur.execute(sql, {
                     "rotation": rotation_xyz,
                     "floor_id": floor_id,
                     "row_no": row_no,
                     "col_no": col_no,
                 })
-                return cur.rowcount > 0
+                if cur.rowcount <= 0:
+                    return False
+                _push_undo(
+                    [{"action": "rotation", "id": int(row["id"]), "old_rotation": row.get("rotation_xyz")}],
+                    1,
+                )
+                return True
 
     def update_all_cells_rotation(
         self, building_id: int, rotation_xyz: str | None
@@ -1061,12 +1245,16 @@ class Database:
         action: str,
         scope: str,
         floor_id: int | None = None,
+        shape: str | None = None,
     ) -> dict[str, Any]:
         """Add or delete cells (single / row / col).
 
-        - add: ensure Rect cells exist (update shape if non-Rect, un-delete if soft-deleted, insert if absent)
+        - add: ensure cells exist with the given shape (default 'Rect'; update shape if
+          non-matching, un-delete if soft-deleted, insert if absent)
         - delete: soft-delete matching cells (is_deleted=1)
         """
+        # Normalise the requested shape (only the three renderable grid shapes are allowed)
+        add_shape = shape if shape in ("Rect", "Cylinder", "Triangle") else "Rect"
         affected = 0
         undo_ops: list[dict[str, Any]] = []
 
@@ -1095,6 +1283,7 @@ class Database:
                     # Snapshot before delete
                     snap_sql = f"SELECT id, floor_id, row_no, col_no, shape, rotation_xyz, color, render_height, is_active FROM building_cell WHERE {' AND '.join(where)}"
                     cur.execute(snap_sql, params)
+                    cell_ids: list[int] = []
                     for s in cur.fetchall() or []:
                         undo_ops.append({
                             "action": "restore",
@@ -1105,11 +1294,45 @@ class Database:
                             "render_height": s.get("render_height"),
                             "is_active": int(s.get("is_active", 1)),
                         })
+                        cell_ids.append(int(s["id"]))
+                    # 联动清理关联绑定（R1/R2）：room_cell 软删、device_cell 物理删，并记录 undo 以便恢复
+                    if cell_ids:
+                        placeholders = ",".join(["%s"] * len(cell_ids))
+                        cur.execute(
+                            f"SELECT id, room_ref_id, floor_id, cell_id FROM room_cell WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
+                            cell_ids,
+                        )
+                        for rc in cur.fetchall() or []:
+                            undo_ops.append({
+                                "action": "restore_room_cell",
+                                "id": int(rc["id"]),
+                                "room_ref_id": int(rc["room_ref_id"]),
+                                "floor_id": int(rc["floor_id"]),
+                                "cell_id": int(rc["cell_id"]),
+                            })
+                        cur.execute(
+                            f"UPDATE room_cell SET is_deleted = 1 WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
+                            cell_ids,
+                        )
+                        cur.execute(
+                            f"SELECT sn, cell_id, floor_id FROM device_cell WHERE cell_id IN ({placeholders})",
+                            cell_ids,
+                        )
+                        for dc in cur.fetchall() or []:
+                            undo_ops.append({
+                                "action": "restore_device_cell",
+                                "sn": dc["sn"],
+                                "cell_id": int(dc["cell_id"]),
+                                "floor_id": int(dc["floor_id"]),
+                            })
+                        cur.execute(
+                            f"DELETE FROM device_cell WHERE cell_id IN ({placeholders})",
+                            cell_ids,
+                        )
                     cur.execute(f"UPDATE building_cell SET is_deleted = 1 WHERE {' AND '.join(where)}", params)
                     affected = cur.rowcount
 
-            _UNDO_STACK.clear()
-            _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+            _push_undo(undo_ops, affected)
             return {"ok": True, "affected": affected}
 
         # action == "add"
@@ -1176,7 +1399,7 @@ class Database:
                         if existing:
                             old_shape = existing.get("shape")
                             old_active = int(existing.get("is_active", 1) or 1)
-                            if (old_shape and old_shape != "Rect") or old_active == 0:
+                            if (old_shape and old_shape != add_shape) or old_active == 0:
                                 undo_ops.append({
                                     "action": "update_shape",
                                     "id": int(existing["id"]),
@@ -1184,8 +1407,8 @@ class Database:
                                     "old_active": old_active,
                                 })
                                 cur.execute(
-                                    "UPDATE building_cell SET shape = 'Rect', is_active = 1 WHERE id = %(id)s",
-                                    {"id": int(existing["id"])},
+                                    "UPDATE building_cell SET shape = %(shape)s, is_active = 1 WHERE id = %(id)s",
+                                    {"id": int(existing["id"]), "shape": add_shape},
                                 )
                                 affected += 1
                             continue
@@ -1197,7 +1420,12 @@ class Database:
                         deleted_row = cur.fetchone()
                         if deleted_row:
                             undo_ops.append({"action": "re_delete", "id": int(deleted_row["id"])})
-                            cur.execute("UPDATE building_cell SET is_deleted = 0 WHERE id = %(id)s", {"id": int(deleted_row["id"])})
+                            cur.execute(
+                                """UPDATE building_cell
+                                   SET is_deleted = 0, shape = %(shape)s, is_active = 1
+                                   WHERE id = %(id)s""",
+                                {"id": int(deleted_row["id"]), "shape": add_shape},
+                            )
                             affected += 1
                         else:
                             x_val = round((c - 6.5) * 1.15, 3)
@@ -1210,15 +1438,14 @@ class Database:
                                    VALUES (%(bid)s, %(fid)s, %(row)s, %(col)s,
                                            %(x)s, %(y)s, %(z)s,
                                            1.150, 1.150, 0.000, NULL,
-                                           1, 'Rect', NULL, NULL, 0)""",
+                                           1, %(shape)s, NULL, NULL, 0)""",
                                 {"bid": building_id, "fid": fid, "row": r, "col": c,
-                                 "x": x_val, "y": y_val, "z": z_val},
+                                 "x": x_val, "y": y_val, "z": z_val, "shape": add_shape},
                             )
                             undo_ops.append({"action": "delete_new", "id": cur.lastrowid})
                             affected += 1
 
-        _UNDO_STACK.clear()
-        _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+        _push_undo(undo_ops, affected)
         return {"ok": True, "affected": affected}
 
     def undo_last_edit(self) -> dict[str, Any]:
@@ -1256,6 +1483,40 @@ class Database:
                             {"id": op["id"], "shape": op["old_shape"], "active": op.get("old_active", 1)},
                         )
                         affected += cur.rowcount
+                    elif op["action"] == "rotation":
+                        cur.execute(
+                            "UPDATE building_cell SET rotation_xyz = %(rotation)s WHERE id = %(id)s",
+                            {"id": op["id"], "rotation": op.get("old_rotation")},
+                        )
+                        affected += cur.rowcount
+                    elif op["action"] == "restore_room_cell":
+                        # 恢复被联动软删的房间↔格子绑定；若该格已被重新分配给同房间则跳过
+                        cur.execute(
+                            """SELECT id FROM room_cell
+                               WHERE room_ref_id = %(room_ref_id)s AND floor_id = %(floor_id)s
+                                 AND cell_id = %(cell_id)s AND is_deleted = 0""",
+                            {"room_ref_id": op["room_ref_id"],
+                             "floor_id": op["floor_id"],
+                             "cell_id": op["cell_id"]},
+                        )
+                        if cur.fetchone() is None:
+                            cur.execute(
+                                "UPDATE room_cell SET is_deleted = 0 WHERE id = %(id)s",
+                                {"id": op["id"]},
+                            )
+                            affected += cur.rowcount
+                    elif op["action"] == "restore_device_cell":
+                        # 恢复被联动物理删除的设备↔格子绑定；若设备已重新绑定则跳过
+                        cur.execute(
+                            "SELECT id FROM device_cell WHERE sn = %s",
+                            (op["sn"],),
+                        )
+                        if cur.fetchone() is None:
+                            cur.execute(
+                                "INSERT INTO device_cell (sn, cell_id, floor_id) VALUES (%s, %s, %s)",
+                                (op["sn"], op["cell_id"], op["floor_id"]),
+                            )
+                            affected += 1
 
         return {"ok": True, "affected": affected}
 
@@ -1288,8 +1549,7 @@ class Database:
                 )
                 affected = cur.rowcount
 
-        _UNDO_STACK.clear()
-        _UNDO_STACK.append({"ops": undo_ops, "affected": affected})
+        _push_undo(undo_ops, affected)
         return {"ok": True, "affected": affected}
 
     def update_col_cells_rotation(

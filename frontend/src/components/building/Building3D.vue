@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { message, Modal } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import {
   CELL_SIZE,
   FLOOR_COUNT,
+  GRID_COLS,
+  GRID_ROWS,
   INTERIOR_CELLS,
   cellToWorld,
   floorName,
@@ -32,11 +34,10 @@ import {
 import { brand } from '@/theme/colorConfig'
 import {
   listBuildingCellShapes,
+  listBuildingFloors,
   updateCellRotation,
-  updateColCellsRotation,
   cellEdit,
   undoEdit,
-  resetGridExtras,
 } from '@/api/building'
 
 const props = defineProps<{
@@ -49,6 +50,8 @@ const props = defineProps<{
   cellShapes?: CellShapeConfig[]
   /** Building ID (for batch rotation) */
   buildingId?: number
+  /** Loading state - when true, shows loading indicator instead of 3D */
+  loading?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -73,32 +76,103 @@ const rotateSpeed = ref(1)
 /** 大屏模式：每圈旋转时间（秒），硬编码配置 */
 const LS_ROTATION_PERIOD = 45
 
-/** Currently selected cell for rotation editing */
-const selectedCell = ref<{
-  floor_id: number
-  row: number
-  col: number
-  floor3d: number
-  rotation: string | null
-} | null>(null)
+/**
+ * 編輯工具面板位置（可拖動）。
+ * 進入編輯模式時顯示在右上角，之後完全由用戶拖動決定。
+ */
+const panelPos = ref({ x: 0, y: 0 })
+/** 工具面板固定寬度 */
+const PANEL_W = 248
+/** 面板位置只在首次打開時初始化一次（右上角），之後完全由用戶拖動決定 */
+let panelInitialized = false
+/** 拖拽中的狀態 */
+let dragState: { startX: number; startY: number; originX: number; originY: number } | null = null
+
+/** 初始化面板默認位置（右上角，避開建築中心），僅首次生效 */
+function ensurePanelPosition() {
+  if (panelInitialized || !host.value) return
+  const w = host.value.clientWidth
+  panelPos.value = { x: Math.max(12, w - PANEL_W - 16), y: 12 }
+  panelInitialized = true
+}
+
+function startDragPanel(ev: PointerEvent) {
+  if (!host.value) return
+  ev.preventDefault()
+  dragState = {
+    startX: ev.clientX,
+    startY: ev.clientY,
+    originX: panelPos.value.x,
+    originY: panelPos.value.y,
+  }
+  document.addEventListener('pointermove', onDragPanelMove)
+  document.addEventListener('pointerup', endDragPanel)
+}
+
+function onDragPanelMove(ev: PointerEvent) {
+  if (!dragState || !host.value) return
+  const rect = host.value.getBoundingClientRect()
+  const maxX = Math.max(8, rect.width - PANEL_W - 8)
+  const x = Math.min(Math.max(dragState.originX + (ev.clientX - dragState.startX), 8), maxX)
+  // 只限制到頂部可達，底部允許面板超出視口（保證標題欄始終可見）
+  const maxY = Math.max(8, rect.height - 48)
+  const y = Math.min(Math.max(dragState.originY + (ev.clientY - dragState.startY), 8), maxY)
+  panelPos.value = { x, y }
+}
+
+function endDragPanel() {
+  dragState = null
+  document.removeEventListener('pointermove', onDragPanelMove)
+  document.removeEventListener('pointerup', endDragPanel)
+}
 
 /**
  * 編輯模式：普通模式點擊樓層 = 選中／進入樓層；編輯模式點擊格子 = 彈出編輯面板。
  * 開啟方式（由父組件 BuildingViewerView 觸發）：3 秒內在左上角提示文字框連續點擊 3 次。
  */
 const editUnlocked = ref(false)
-/** 進入編輯模式時抓取的格子快照，用於「取消保存」時回滾本次修改 */
+/** 本次編輯會話是否產生過改動（決定退出時是否彈確認框） */
+const editDirty = ref(false)
+/** 「退出編輯會話」確認框（保存 / 放棄 / 繼續編輯） */
+const confirmOpen = ref(false)
+/** 撤回上限（後端 _UNDO_STACK 容量一致） */
+const UNDO_LIMIT = 10
+/** 本次會話中「可撤回操作」計數（增/刪/旋轉成功 +1，撤回成功 -1，封頂 UNDO_LIMIT） */
+const undoableOps = ref(0)
+/** 進入編輯模式時抓取的格子快照，用於「放棄修改」時回滾本次全部改動 */
 const snapshotShapes = ref<CellShapeConfig[]>([])
 /** 輕量反饋：進入編輯模式時頂部短暫提示（1.5 秒後自動消失） */
 const editModeToast = ref(false)
 let editModeToastTimer: ReturnType<typeof setTimeout> | undefined
+/**
+ * 編輯工具模式（四按鈕面板）：none=未激活 / add=添加模式 / delete=刪除模式。
+ * 添加與刪除互斥：激活一個會取消另一個。
+ */
+const editToolMode = ref<'none' | 'add' | 'delete'>('none')
 
-/** 切換編輯模式（由父組件調用）：開啟時抓取格子快照，用於取消保存時回滾 */
+/** 切換編輯工具模式（添加 / 刪除互斥切換，再點一次退出） */
+function toggleToolMode(mode: 'add' | 'delete') {
+  if (editToolMode.value === mode) {
+    editToolMode.value = 'none'
+    if (mode === 'add') hideDragTemplates()
+    return
+  }
+  editToolMode.value = mode
+  if (mode === 'add') {
+    spawnDragTemplates()
+  } else {
+    hideDragTemplates()
+  }
+}
+
+/** 切換編輯模式（由父組件調用）：開啟時抓取格子快照，用於放棄修改時回滾 */
 async function toggleEditMode() {
   if (!editUnlocked.value) {
     editUnlocked.value = true
-    selectedCell.value = null
-    // 記錄修改前快照（整個建築），供「取消」回滾
+    editDirty.value = false
+    undoableOps.value = 0
+    panelInitialized = false
+    // 記錄修改前快照（整個建築），供「放棄修改」回滾
     if (props.buildingId) {
       try {
         const { data } = await listBuildingCellShapes(props.buildingId)
@@ -113,40 +187,93 @@ async function toggleEditMode() {
     editModeToast.value = true
     if (editModeToastTimer) clearTimeout(editModeToastTimer)
     editModeToastTimer = setTimeout(() => { editModeToast.value = false }, 1500)
+    editToolMode.value = 'none'
+    ensurePanelPosition()
+    hideDragTemplates()
+    updateHiddenOverlaysVisibility()
     return
   }
-  editUnlocked.value = false
-  snapshotShapes.value = []
-  selectedCell.value = null
+  // 請求退出編輯模式：有改動則彈確認框，無改動直接退出
+  if (editDirty.value) {
+    openExitConfirm()
+  } else {
+    exitEditSession()
+  }
 }
 
 /** 對外暴露的方法，供父組件 BuildingViewerView 於提示文字框連點 3 次時調用 */
 defineExpose({ toggleEditMode })
 
-/** 完成編輯：彈出確認框，詢問是否保存本次修改 */
-function onCompleteEdit() {
-  Modal.confirm({
-    title: t('building.saveChangesTitle'),
-    content: t('building.saveChangesContent'),
-    okText: t('building.saveChangesOk'),
-    cancelText: t('building.saveChangesCancel'),
-    onOk: () => {
-      // 保存：編輯操作已在編輯過程中即時生效，關閉編輯框並提示成功
-      selectedCell.value = null
-      message.success(t('building.savedSuccess'))
-    },
-    onCancel: () => {
-      void discardChanges()
-    },
-  })
+/** 打開「退出編輯會話」確認框（保存 / 放棄 / 繼續編輯） */
+function openExitConfirm() {
+  confirmOpen.value = true
 }
 
-/** 放棄本次修改：對比快照與當前 DB 狀態，逆向恢復（還原刪除／移除新增／恢復旋轉） */
+/** 統一退出編輯會話：清空快照、工具模式與改動標記 */
+function exitEditSession() {
+  editUnlocked.value = false
+  snapshotShapes.value = []
+  editDirty.value = false
+  undoableOps.value = 0
+  editToolMode.value = 'none'
+  hideDragTemplates()
+  updateHiddenOverlaysVisibility()
+}
+
+/**
+ * 「完成」按鈕：僅在本次會話有改動時彈確認框；無改動直接退出編輯模式。
+ */
+function onDoneClick() {
+  if (editDirty.value) {
+    openExitConfirm()
+  } else {
+    exitEditSession()
+  }
+}
+
+/**
+ * 完成編輯會話：save=true 保留改動（操作已即時生效）；save=false 放棄並回滾到快照。
+ */
+async function finishEditSession(save: boolean) {
+  confirmOpen.value = false
+  if (save) {
+    exitEditSession()
+    message.success(t('building.savedSuccess'))
+    return
+  }
+  await discardChanges()
+}
+
+/** floor3d (1~11) → DB floor.id（優先從已有格子推斷，其次查 floors 表，緩存結果） */
+const floorIdCache = new Map<number, number>()
+async function resolveFloorId(floor3d: number): Promise<number | null> {
+  const cached = floorIdCache.get(floor3d)
+  if (cached != null) return cached
+  const s = props.cellShapes?.find((x) => x.floor === floor3d && x.floor_id != null)
+  if (s?.floor_id != null) {
+    floorIdCache.set(floor3d, s.floor_id)
+    return s.floor_id
+  }
+  if (!props.buildingId) return null
+  try {
+    const { data } = await listBuildingFloors(props.buildingId)
+    const f = data?.find((x) => x.level_3d === floor3d)
+    if (f) {
+      floorIdCache.set(floor3d, f.id)
+      return f.id
+    }
+  } catch {
+    // ignore, fall through to null
+  }
+  return null
+}
+
+/** 放棄本次修改：對比快照與當前 DB 狀態，逆向恢復（還原刪除／移除新增／恢復旋轉），成功後退出編輯會話 */
 async function discardChanges() {
   const buildingId = props.buildingId
-  selectedCell.value = null
   if (!buildingId || !snapshotShapes.value.length) {
     message.warning(t('building.changesDiscarded'))
+    exitEditSession()
     return
   }
   try {
@@ -166,6 +293,8 @@ async function discardChanges() {
           action: 'add',
           scope: 'single',
           floor_id: s.floor_id,
+          // 按快照恢復原形狀（Hidden 由後端歸一化為 Rect，但 re_delete 恢復時 is_active 不變，仍為隱形）
+          shape: s.shape === 'Cylinder' || s.shape === 'Triangle' ? s.shape : 'Rect',
         })
       }
     }
@@ -196,7 +325,9 @@ async function discardChanges() {
     }
     message.success(t('building.changesDiscarded'))
     emit('refreshShapes')
+    exitEditSession()
   } catch {
+    // 回滾失敗：保留編輯會話，允許用戶重試
     message.error(t('building.discardFailed'))
   }
 }
@@ -368,6 +499,77 @@ function rebuildFloors() {
   buildingGroup.add(ground)
 
   updateFloorAppearance()
+  buildHiddenCellOverlays()
+}
+
+// ---- 編輯模式：Hidden 格子（is_active=0 的停用格子）以「透明填充 + 黑線邊框」顯示，可點擊選中刪除 ----
+let hiddenCellGroup: THREE.Group | null = null
+let hiddenCellMaterials: THREE.Material[] = []
+let hiddenCellGeos: THREE.BufferGeometry[] = []
+/** 可點擊的隱形格子占位 mesh（編輯模式下可選中並刪除） */
+let hiddenCellMeshes: THREE.Mesh[] = []
+
+function buildHiddenCellOverlays() {
+  if (!scene) return
+  if (hiddenCellGroup) {
+    scene.remove(hiddenCellGroup)
+    hiddenCellGeos.forEach((g) => g.dispose())
+    hiddenCellMaterials.forEach((m) => m.dispose())
+    hiddenCellGeos = []
+    hiddenCellMaterials = []
+    hiddenCellGroup = null
+  }
+  hiddenCellMeshes = []
+  hiddenCellGroup = new THREE.Group()
+  const cellSize = CELL_SIZE * 0.96
+  const boxGeo = new THREE.BoxGeometry(cellSize, FLOOR_H, cellSize)
+  const edgeGeo = new THREE.EdgesGeometry(boxGeo)
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.14,
+    depthWrite: false,
+  })
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x000000 })
+  hiddenCellGeos.push(boxGeo, edgeGeo)
+  hiddenCellMaterials.push(fillMat, edgeMat)
+
+  for (const s of props.cellShapes ?? []) {
+    if (!isHiddenType(s.shape)) continue
+    if (s.floor < 1 || s.floor > FLOOR_COUNT) continue
+    const level = s.floor
+    const yBase = (level - 1) * SLAB
+    const { x: wx, z: wz } = cellToWorld(s.row, s.col)
+    const hasDbPos = s.x != null && s.y != null && s.z != null
+    const px = hasDbPos ? s.x! : wx
+    const py = hasDbPos ? s.z! : yBase + FLOOR_H / 2
+    const pz = hasDbPos ? s.y! : wz
+
+    const fill = new THREE.Mesh(boxGeo, fillMat)
+    fill.position.set(px, py, pz)
+    fill.userData = {
+      row: s.row,
+      col: s.col,
+      floor: level,
+      floor_id: s.floor_id ?? null,
+      isHidden: true,
+    }
+    const edges = new THREE.LineSegments(edgeGeo, edgeMat)
+    edges.position.copy(fill.position)
+    if (s.rotation) {
+      fill.rotation.copy(parseRotation(s.rotation))
+      edges.rotation.copy(fill.rotation)
+    }
+    hiddenCellGroup.add(fill, edges)
+    hiddenCellMeshes.push(fill)
+  }
+  hiddenCellGroup.visible = editUnlocked.value
+  scene.add(hiddenCellGroup)
+}
+
+function updateHiddenOverlaysVisibility() {
+  if (!hiddenCellGroup) return
+  hiddenCellGroup.visible = editUnlocked.value
 }
 
 function updateFloorAppearance() {
@@ -427,10 +629,26 @@ function placeToast(clientX: number, clientY: number, rect: DOMRect) {
 
 function onPointerMove(ev: PointerEvent) {
   if (!host.value || !camera || !raycaster) return
+  // 拖拽中：位置與預覽由 onDragMove 處理，此處不更新 hover
+  if (activeDragSource) return
   const pos = updatePointer(ev)
   if (!pos) return
 
   raycaster.setFromCamera(pointer, camera)
+  // 編輯模式：hover 到「拖拽模板」時顯示可拖拽光標
+  if (editUnlocked.value) {
+    const srcHits = raycaster.intersectObjects(dragSourceMeshes, false)
+    if (srcHits.length) {
+      loggedCellKey = ''
+      if (hoveredFloor.value != null) {
+        hoveredFloor.value = null
+        updateFloorAppearance()
+      }
+      toastVisible.value = false
+      host.value.style.cursor = 'copy'
+      return
+    }
+  }
   const hits = raycaster.intersectObjects(floorMeshes, false)
   if (hits.length) {
     const mesh = hits[0].object as THREE.Mesh
@@ -467,65 +685,324 @@ function onPointerLeave() {
   if (host.value) host.value.style.cursor = 'grab'
 }
 
+/**
+ * 編輯模式：射線與各層水平面求交，反算點擊的網格行列（含該位置是否已有格子）。
+ * 供拖拽放置時的目標吸附使用；命中已有格子本身由 mesh 分支處理。
+ */
+function pickGridCellFromRay(): { row: number; col: number; floor3d: number; exists: boolean } | null {
+  if (!raycaster) return null
+  let best: { row: number; col: number; floor3d: number; exists: boolean } | null = null
+  let bestDist = Infinity
+  const hit = new THREE.Vector3()
+  const plane = new THREE.Plane()
+  for (let level = 1; level <= FLOOR_COUNT; level++) {
+    // 每層水平面位於該層樓板底部：y = (level-1) * SLAB
+    plane.set(new THREE.Vector3(0, 1, 0), -((level - 1) * SLAB))
+    if (!raycaster.ray.intersectPlane(plane, hit)) continue
+    const dist = raycaster.ray.origin.distanceTo(hit)
+    if (dist >= bestDist) continue // 取離相機最近的命中
+    const col = Math.round(hit.x / CELL_SIZE + (GRID_COLS + 1) / 2)
+    const row = Math.round(hit.z / CELL_SIZE + (GRID_ROWS + 1) / 2)
+    if (row < 1 || row > GRID_ROWS || col < 1 || col > GRID_COLS) continue
+    // 「已有格子」判定排除 Hidden 類型（is_active=0 的停用格子不渲染，視覺上等同空位，可重新放置）
+    const exists = props.cellShapes?.some(
+      (s) =>
+        s.floor === level &&
+        s.row === row &&
+        s.col === col &&
+        !isHiddenType(s.shape),
+    ) ?? false
+    best = { row, col, floor3d: level, exists }
+    bestDist = dist
+  }
+  return best
+}
+
+// ---- 拖拽添加格子：點「添加」按鈕後，樓宇旁出現模板格子（圓/方/三角）→ 拖到樓宇上放置 ----
+let dragSourceGroup: THREE.Group | null = null
+let dragSourceMeshes: THREE.Mesh[] = []
+/** 拖拽中的預覽格子（跟隨滑鼠吸附到網格） */
+let dragPreviewMesh: THREE.Mesh | null = null
+let dragPreviewMat: THREE.MeshStandardMaterial | null = null
+/** 當前正在拖拽的模板 mesh（拖拽中非 null，用於抑制 hover 邏輯） */
+let activeDragSource: THREE.Mesh | null = null
+/** 拖拽目標（每次移動更新，松手時提交；shape 為模板對應的形狀） */
+let dragTarget: { row: number; col: number; floor3d: number; exists: boolean; shape: 'Rect' | 'Cylinder' | 'Triangle' } | null = null
+/** 拖拽前自動旋轉狀態（拖拽期間暫停，松手恢復） */
+let prevAutoRotate = true
+/** 模板格子的三種形狀（對應大樓中已有的形狀） */
+const DRAG_SHAPES: Array<'Rect' | 'Cylinder' | 'Triangle'> = ['Cylinder', 'Rect', 'Triangle']
+const DRAG_SOURCE_COLOR = 0x5fb8b8
+/** 拖拽中模板的旋轉角度（度，滚輪 ±15° / R 鍵 ±45°） */
+let dragRotationDeg = 0
+
+/** 拖拽中滾輪旋轉模板（±15°/格） */
+function onDragWheel(ev: WheelEvent) {
+  if (!activeDragSource) return
+  ev.preventDefault()
+  dragRotationDeg = (dragRotationDeg + (ev.deltaY > 0 ? 15 : -15) + 360) % 360
+  applyDragPreviewRotation()
+}
+
+/** 拖拽中 R 鍵旋轉模板（+45°，Shift+R 逆時針） */
+function onDragKeyDown(ev: KeyboardEvent) {
+  if (!activeDragSource) return
+  if (ev.key === 'r' || ev.key === 'R') {
+    ev.preventDefault()
+    dragRotationDeg = (dragRotationDeg + (ev.shiftKey ? -45 : 45) + 360) % 360
+    applyDragPreviewRotation()
+  }
+}
+
+/** 將當前旋轉角度應用到預覽格子 */
+function applyDragPreviewRotation() {
+  if (!dragPreviewMesh) return
+  dragPreviewMesh.rotation.y = (dragRotationDeg * Math.PI) / 180
+}
+
+/** 創建樓宇左側的「模板格子」（點「添加」按鈕後才顯示） */
+function buildDragSources() {
+  if (!scene) return
+  dragSourceGroup = new THREE.Group()
+  const mat = new THREE.MeshStandardMaterial({
+    color: DRAG_SOURCE_COLOR,
+    metalness: 0.1,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.65,
+  })
+  const size = CELL_SIZE * 0.96
+  const height = 0.5
+  for (let i = 0; i < DRAG_SHAPES.length; i++) {
+    const shape = DRAG_SHAPES[i]
+    const geo = createGeometryByType(shape, size, height)
+    const mesh = new THREE.Mesh(geo, mat)
+    // 樓宇左側、貼地排成一列（圓/方/三角）
+    mesh.position.set(-8.4, height / 2, (i - 1) * 1.8)
+    mesh.userData.isDragSource = true
+    mesh.userData.shape = shape
+    dragSourceGroup.add(mesh)
+    dragSourceMeshes.push(mesh)
+  }
+  dragSourceGroup.visible = false
+  scene.add(dragSourceGroup)
+}
+
+/** 隱藏所有拖拽模板（進入/退出編輯模式時調用，模板不自動顯示） */
+function hideDragTemplates() {
+  if (!dragSourceGroup) return
+  dragSourceGroup.visible = false
+}
+
+/** 點擊「添加」按鈕：顯示一組模板（圓/方/三角），拖走一個用掉一個 */
+function spawnDragTemplates() {
+  if (!dragSourceGroup) return
+  for (const m of dragSourceMeshes) m.visible = true
+  dragSourceGroup.visible = true
+}
+
+/** 開始拖拽：暫停視角旋轉與自動旋轉，創建跟隨滑鼠的預覽格子（形狀與模板一致） */
+function startDragCell(mesh: THREE.Mesh, ev: PointerEvent) {
+  if (!scene || !raycaster) return
+  activeDragSource = mesh
+  dragTarget = null
+  dragRotationDeg = 0
+  if (controls) controls.enabled = false // 拖拽期間暫停 OrbitControls
+  prevAutoRotate = autoRotate.value // 拖拽期間暫停樓宇自動旋轉，避免放置錯位
+  autoRotate.value = false
+  if (host.value) host.value.style.cursor = 'grabbing'
+  const size = CELL_SIZE * 0.96
+  const shape = (mesh.userData.shape as 'Rect' | 'Cylinder' | 'Triangle') ?? 'Rect'
+  dragPreviewMat = new THREE.MeshStandardMaterial({
+    color: 0x4caf50,
+    metalness: 0.1,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.75,
+  })
+  dragPreviewMesh = new THREE.Mesh(createGeometryByType(shape, size, 0.5), dragPreviewMat)
+  dragPreviewMesh.visible = false
+  scene.add(dragPreviewMesh)
+  updateDragPreview(ev)
+  document.addEventListener('pointermove', onDragMove)
+  document.addEventListener('pointerup', endDragCell)
+  // 拖拽期間支持滾輪 / R 鍵旋轉模板
+  document.addEventListener('wheel', onDragWheel, { passive: false })
+  document.addEventListener('keydown', onDragKeyDown)
+}
+
+function onDragMove(ev: PointerEvent) {
+  updatePointer(ev)
+  if (raycaster && camera) raycaster.setFromCamera(pointer, camera)
+  updateDragPreview(ev)
+}
+
+/** 更新預覽格子：吸附到滑鼠所指網格位，綠色=可放置，紅色=已有格子 */
+function updateDragPreview(_ev: PointerEvent) {
+  if (!raycaster || !dragPreviewMesh || !dragPreviewMat) return
+  const cell = pickGridCellFromRay()
+  dragTarget = cell
+    ? { ...cell, shape: (activeDragSource?.userData.shape as 'Rect' | 'Cylinder' | 'Triangle') ?? 'Rect' }
+    : null
+  if (!cell) {
+    dragPreviewMesh.visible = false
+    return
+  }
+  const { x, z } = cellToWorld(cell.row, cell.col)
+  // 懸浮在目標層樓板上方（高於上層樓板頂面），確保完全可見、不嵌入樓板
+  const y = (cell.floor3d - 1) * SLAB + FLOOR_H + 0.9
+  dragPreviewMesh.position.set(x, y, z)
+  dragPreviewMesh.visible = true
+  applyDragPreviewRotation()
+  dragPreviewMat.color.set(cell.exists ? 0xe53935 : 0x4caf50)
+}
+
+/** 松手：目標合法（網格內且無格子）則按模板形狀添加，否則取消 */
+async function endDragCell() {
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDragCell)
+  document.removeEventListener('wheel', onDragWheel)
+  document.removeEventListener('keydown', onDragKeyDown)
+  if (controls) controls.enabled = true
+  autoRotate.value = prevAutoRotate // 恢復自動旋轉
+  if (host.value) host.value.style.cursor = 'grab'
+  if (scene && dragPreviewMesh) {
+    scene.remove(dragPreviewMesh)
+    dragPreviewMat?.dispose() // 預覽 geometry 來自共享緩存，不 dispose
+    dragPreviewMesh = null
+    dragPreviewMat = null
+  }
+  const src = activeDragSource
+  const target = dragTarget
+  const placedRotationDeg = dragRotationDeg
+  dragTarget = null
+  activeDragSource = null
+  dragRotationDeg = 0
+  if (!src) return
+  if (!target || target.exists) return // 不在網格上 / 已有格子 → 取消，模板保留
+  if (!props.buildingId) return
+  const floorId = await resolveFloorId(target.floor3d)
+  if (!floorId) {
+    message.warning(t('building.addCellFloorNotFound'))
+    return
+  }
+  try {
+    const res = await cellEdit({
+      building_id: props.buildingId,
+      row_no: target.row,
+      col_no: target.col,
+      action: 'add',
+      scope: 'single',
+      floor_id: floorId,
+      shape: target.shape,
+    })
+    const n = res?.data?.affected ?? 0
+    if (n > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
+      // 拖拽中旋轉過：放置後寫入旋轉角度（旋轉也會進撤回棧，可單獨撤回）
+      if (placedRotationDeg !== 0) {
+        const rad = `0,${(placedRotationDeg * Math.PI / 180).toFixed(4)},0`
+        try {
+          await updateCellRotation({
+            floor_id: floorId,
+            row_no: target.row,
+            col_no: target.col,
+            rotation_xyz: rad,
+          })
+        } catch {
+          // 旋轉寫入失敗不阻礙放置（格子已添加，角度保持默認）
+          console.warn('[Building3D] Failed to write placed rotation:', placedRotationDeg)
+        }
+      }
+      message.success(t('building.addCellSuccess'))
+      // 模板無限使用：放置成功後模板保留在原處，可繼續拖拽下一個
+    } else {
+      message.warning(t('building.addCellExists'))
+    }
+  } catch {
+    // 網絡/服務異常：模板保留，提示用戶重試
+    message.error(t('building.addCellFailed'))
+  }
+  emit('refreshShapes')
+}
+
 function onPointerDown(ev: PointerEvent) {
   if (!camera || !raycaster) return
   updatePointer(ev)
   raycaster.setFromCamera(pointer, camera)
+  // 編輯模式
+  if (editUnlocked.value) {
+    // 添加模式：拖拽樓宇旁的模板格子
+    if (editToolMode.value === 'add') {
+      const srcHits = raycaster.intersectObjects(dragSourceMeshes, false)
+      if (srcHits.length) {
+        startDragCell(srcHits[0].object as THREE.Mesh, ev)
+        return
+      }
+      return // 添加模式下點擊其他位置無操作
+    }
+    // 刪除模式：點擊格子（含隱形占位格子）立即刪除，可連續點擊
+    if (editToolMode.value === 'delete') {
+      const hiddenHits = raycaster.intersectObjects(hiddenCellMeshes, false)
+      if (hiddenHits.length) {
+        const ud = hiddenHits[0].object.userData
+        if (ud.floor_id != null) {
+          void deleteCellAt(ud.floor_id, ud.row, ud.col)
+        }
+        return
+      }
+      const hits = raycaster.intersectObjects(floorMeshes, false)
+      if (hits.length) {
+        const ud = hits[0].object.userData
+        const shape = props.cellShapes?.find(
+          (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
+        )
+        if (shape?.floor_id != null) {
+          void deleteCellAt(shape.floor_id, ud.row, ud.col)
+        }
+        return
+      }
+      return // 刪除模式下點擊空白無操作
+    }
+    // 未激活任何工具模式（none）：編輯模式下點擊不觸發普通選樓層
+    return
+  }
   const hits = raycaster.intersectObjects(floorMeshes, false)
   if (hits.length) {
     const mesh = hits[0].object as THREE.Mesh
     const ud = mesh.userData
-    // 編輯模式：點擊格子 → 彈出該格子的編輯面板
-    if (editUnlocked.value) {
-      const shape = props.cellShapes?.find(
-        (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
-      )
-      if (shape?.floor_id != null) {
-        selectedCell.value = {
-          floor_id: shape.floor_id,
-          row: ud.row,
-          col: ud.col,
-          floor3d: ud.floor,
-          rotation: shape.rotation ?? null,
-        }
-      }
-      return
-    }
     // 普通模式：點擊樓層 → 選中／進入該樓層（恢復最初的交互）
     const floor = ud.floor as number
     emit('selectFloor', floor)
-  } else if (editUnlocked.value) {
-    // 編輯模式下點擊空白區域：關閉編輯面板
-    selectedCell.value = null
   }
 }
 
-async function applyRotation(deg: number) {
-  if (!selectedCell.value) return
-  const rad = deg === 0 ? null : `0,${(deg * Math.PI / 180).toFixed(4)},0`
-  const { floor_id, row, col } = selectedCell.value
-  await updateCellRotation({ floor_id, row_no: row, col_no: col, rotation_xyz: rad })
-  selectedCell.value = { ...selectedCell.value, rotation: rad }
+/** 刪除模式：刪除指定格子（單格），可連續調用 */
+async function deleteCellAt(floor_id: number, row: number, col: number) {
+  if (!props.buildingId) return
+  try {
+    const res = await cellEdit({
+      building_id: props.buildingId,
+      row_no: row,
+      col_no: col,
+      action: 'delete',
+      scope: 'single',
+      floor_id,
+    })
+    const n = res?.data?.affected ?? 0
+    if (n > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
+      showFeedback(`已删除格子 (${row}, ${col})`)
+    } else {
+      showFeedback('无变化：没有可删除的格子')
+    }
+  } catch {
+    message.error(t('building.addCellFailed'))
+  }
   emit('refreshShapes')
 }
-
-function isRotationActive(deg: number): boolean {
-  const rot = selectedCell.value?.rotation
-  if (!rot) return deg === 0
-  const parts = rot.split(',').map(Number)
-  const y = parts[1] ?? 0
-  return Math.abs(y - deg * Math.PI / 180) < 0.01
-}
-
-function formatRotation(rot: string | null): string {
-  if (!rot) return '0°'
-  const parts = rot.split(',').map(Number)
-  const y = parts[1] ?? 0
-  return `${Math.round(y * 180 / Math.PI)}°`
-}
-
-/** Edit scope: single cell / entire row / entire column */
-const editScope = ref<'single' | 'row' | 'col'>('single')
 
 /** Operation feedback shown near the edit buttons */
 const editFeedback = ref('')
@@ -537,76 +1014,21 @@ function showFeedback(msg: string) {
   feedbackTimer = setTimeout(() => { editFeedback.value = '' }, 2500)
 }
 
-async function handleCellEdit(action: 'add' | 'delete') {
-  if (!props.buildingId || !selectedCell.value) return
-  const { row, col, floor_id } = selectedCell.value
-  const res = await cellEdit({
-    building_id: props.buildingId,
-    row_no: row,
-    col_no: col,
-    action,
-    scope: editScope.value,
-    floor_id,
-  })
-  const n = res?.data?.affected ?? 0
-  if (n > 0) {
-    showFeedback(action === 'add' ? `已添加 ${n} 个格子` : `已删除 ${n} 个格子`)
-  } else {
-    showFeedback(action === 'add' ? '无变化：格子已存在' : '无变化：没有可删除的格子')
-  }
-  emit('refreshShapes')
-}
-
-async function handleAppend(scope: 'append_row' | 'append_col') {
-  if (!props.buildingId || !selectedCell.value) return
-  const { row, col, floor_id } = selectedCell.value
-  const res = await cellEdit({
-    building_id: props.buildingId,
-    row_no: row,
-    col_no: col,
-    action: 'add',
-    scope,
-    floor_id,
-  })
-  const n = res?.data?.affected ?? 0
-  if (n > 0) {
-    showFeedback(scope === 'append_row' ? `已追加一行，共 ${n} 个格子` : `已追加一列，共 ${n} 个格子`)
-  } else {
-    showFeedback('追加失败或没有变化')
-  }
-  emit('refreshShapes')
-}
-
-async function handleResetGrid() {
-  if (!props.buildingId) return
-  const res = await resetGridExtras(props.buildingId)
-  const n = res?.data?.affected ?? 0
-  if (n > 0) {
-    showFeedback(`已还原网格，删除 ${n} 个追加格子`)
-  } else {
-    showFeedback('当前无超出网格的格子')
-  }
-  emit('refreshShapes')
-}
-
 async function handleUndo() {
   const res = await undoEdit()
   if (res && res.data && res.data.ok) {
+    if ((res.data.affected ?? 0) > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.max(0, undoableOps.value - 1)
+    }
     showFeedback(`已撤回 ${res.data.affected} 个格子`)
     emit('refreshShapes')
+  } else if (undoableOps.value > 0) {
+    // 本會話有過操作但後端已無可撤回內容 → 達到撤回上限
+    showFeedback(t('building.undoLimitReached'))
   } else {
     showFeedback('没有可撤回的操作')
   }
-}
-
-async function applyColRotation(deg: number) {
-  if (!props.buildingId || !selectedCell.value) return
-  const rad = deg === 0 ? null : `0,${(deg * Math.PI / 180).toFixed(4)},0`
-  await updateColCellsRotation({ building_id: props.buildingId, col_no: selectedCell.value.col, rotation_xyz: rad })
-  if (selectedCell.value) {
-    selectedCell.value = { ...selectedCell.value, rotation: rad }
-  }
-  emit('refreshShapes')
 }
 
 function onResize() {
@@ -632,12 +1054,24 @@ function animate() {
       buildingGroup.rotation.y += 0.004 * rotateSpeed.value
     }
   }
+  // 編輯模式：模板格子輕微上下浮動，提示「可拖拽」
+  if (dragSourceGroup && dragSourceGroup.visible && !activeDragSource) {
+    dragSourceGroup.position.y = Math.sin(Date.now() * 0.002) * 0.06
+  }
   controls?.update()
   if (renderer && scene && camera) renderer.render(scene, camera)
 }
 
 onMounted(() => {
   if (!host.value) return
+  // Defer initialization until loading is false (all data ready)
+  if (props.loading) return
+  initThreeJS()
+})
+
+/** Initialize Three.js scene and start rendering */
+function initThreeJS() {
+  if (!host.value || scene) return // Already initialized
   const w = host.value.clientWidth
   const h = host.value.clientHeight
 
@@ -675,6 +1109,8 @@ onMounted(() => {
   rebuildFloors()
 
   raycaster = new THREE.Raycaster()
+  buildDragSources()
+  hideDragTemplates()
   renderer.domElement.addEventListener('pointerdown', onPointerDown)
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('pointerleave', onPointerLeave)
@@ -689,7 +1125,17 @@ onMounted(() => {
     autoRotate.value = true
   }
   animate()
-})
+}
+
+// Initialize Three.js when loading becomes false (all data ready)
+watch(
+  () => props.loading,
+  (newVal) => {
+    if (newVal === false && !scene) {
+      initThreeJS()
+    }
+  },
+)
 
 watch(
   () => props.selectedFloor,
@@ -748,6 +1194,10 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
   if (editModeToastTimer) clearTimeout(editModeToastTimer)
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('pointermove', onDragPanelMove)
+  document.removeEventListener('pointerup', endDragPanel)
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDragCell)
   renderer?.domElement.removeEventListener('pointerdown', onPointerDown)
   renderer?.domElement.removeEventListener('pointermove', onPointerMove)
   renderer?.domElement.removeEventListener('pointerleave', onPointerLeave)
@@ -759,6 +1209,25 @@ onBeforeUnmount(() => {
   floorMeshes.forEach((m) => {
     ;(m.material as THREE.Material).dispose()
   })
+  // 釋放拖拽模板資源（geometry 來自 createGeometryByType 的共享緩存，不能 dispose，只釋放材質）
+  if (scene && dragSourceGroup) {
+    scene.remove(dragSourceGroup)
+    dragSourceGroup.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+      if (Array.isArray(m)) m.forEach((x) => x.dispose())
+      else if (m) m.dispose()
+    })
+  }
+  if (scene && dragPreviewMesh) {
+    scene.remove(dragPreviewMesh)
+    dragPreviewMat?.dispose() // 預覽 geometry 亦為共享緩存，不 dispose
+  }
+  // 釋放 Hidden 格子佔位資源
+  if (scene && hiddenCellGroup) {
+    scene.remove(hiddenCellGroup)
+    hiddenCellGeos.forEach((g) => g.dispose())
+    hiddenCellMaterials.forEach((m) => m.dispose())
+  }
   scene = null
   camera = null
   renderer = null
@@ -767,8 +1236,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="host" class="building3d">
+    <!-- Loading overlay while data is being fetched -->
+    <div v-if="loading" class="loading-overlay">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">加载中...</div>
+    </div>
     <div
-      v-show="toastVisible && hoveredFloor != null && !selectedCell"
+      v-show="toastVisible && hoveredFloor != null"
       class="floor-toast"
       :style="toastStyle"
     >
@@ -777,68 +1251,60 @@ onBeforeUnmount(() => {
         {{ t('building.toastDevices', { n: deviceCountFor(hoveredFloor ?? 0) }) }}
       </div>
     </div>
-    <!-- Cell rotation panel -->
-    <div v-if="selectedCell" class="rotate-panel">
-      <div class="rotate-header">
-        <span class="rotate-title">格子 ({{ selectedCell.row }}, {{ selectedCell.col }}) · {{ floorName(selectedCell.floor3d) }}F</span>
-        <button class="rotate-close" @click="selectedCell = null">&times;</button>
+    <!-- 編輯工具面板（四按鈕常駐：添加 / 刪除 / 撤回 / 關閉，可拖動） -->
+    <div
+      v-if="editUnlocked"
+      class="edit-tool-panel"
+      :style="{ left: `${panelPos.x}px`, top: `${panelPos.y}px` }"
+    >
+      <div
+        class="edit-tool-header drag-handle"
+        :title="t('building.panelDragHint')"
+        @pointerdown="startDragPanel"
+      >
+        <span class="edit-tool-title">編輯工具</span>
       </div>
-      <div class="rotate-presets">
+      <div class="edit-tool-actions">
         <button
-          v-for="deg in [0, 45, 90, 135, 180, 225, 270, 315]"
-          :key="deg"
-          class="rotate-btn"
-          :class="{ active: isRotationActive(deg) }"
-          @click="applyRotation(deg)"
+          class="edit-tool-btn edit-tool-btn-add"
+          :class="{ active: editToolMode === 'add' }"
+          @click="toggleToolMode('add')"
         >
-          {{ deg }}°
+          添加
         </button>
-      </div>
-      <div class="rotate-current">
-        当前旋转: {{ formatRotation(selectedCell.rotation) }}
-      </div>
-      <div class="rotate-divider" />
-      <div class="rotate-all-label">旋转第{{ selectedCell.col }}列全部格子</div>
-      <div class="rotate-presets">
         <button
-          v-for="deg in [0, 45, 90, 135, 180, 225, 270, 315]"
-          :key="'col-' + deg"
-          class="rotate-btn rotate-btn-all"
-          @click="applyColRotation(deg)"
+          class="edit-tool-btn edit-tool-btn-del"
+          :class="{ active: editToolMode === 'delete' }"
+          @click="toggleToolMode('delete')"
         >
-          {{ deg }}°
+          删除
         </button>
+        <button class="edit-tool-btn edit-tool-btn-undo" @click="handleUndo">撤回</button>
+        <button class="edit-tool-btn edit-tool-btn-close" @click="onDoneClick">关闭</button>
       </div>
-      <div class="rotate-divider" />
-      <div class="rotate-all-label">添加 / 删除格子</div>
-      <div class="edit-scope-row">
-        <button
-          v-for="s in (['single', 'row', 'col'] as const)"
-          :key="s"
-          class="scope-btn"
-          :class="{ active: editScope === s }"
-          @click="editScope = s"
-        >
-          {{ s === 'single' ? '单格' : s === 'row' ? '整行' : '整列' }}
-        </button>
+      <div v-if="editToolMode === 'add'" class="edit-tool-hint">
+        拖動模板放到樓宇上；滾輪 / R 鍵旋轉；模板可無限使用
       </div>
-      <div class="edit-actions">
-        <button class="edit-btn edit-btn-add" @click="handleCellEdit('add')">添加</button>
-        <button class="edit-btn edit-btn-del" @click="handleCellEdit('delete')">删除</button>
-        <button class="edit-btn edit-btn-undo" @click="handleUndo">撤回</button>
-      </div>
-      <div class="edit-actions">
-        <button class="edit-btn edit-btn-append" @click="handleAppend('append_row')">追加一行</button>
-        <button class="edit-btn edit-btn-append" @click="handleAppend('append_col')">追加一列</button>
-      </div>
-      <div class="edit-actions">
-        <button class="edit-btn edit-btn-reset" @click="handleResetGrid">还原网格</button>
-      </div>
-      <div class="edit-actions">
-        <button class="edit-btn edit-btn-done" @click="onCompleteEdit">{{ t('building.editDone') }}</button>
+      <div v-else-if="editToolMode === 'delete'" class="edit-tool-hint">
+        點擊格子立即刪除，可連續刪除多個
       </div>
       <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
+    <!-- 退出編輯會話確認框：保存 / 放棄 / 繼續編輯 -->
+    <a-modal
+      :open="confirmOpen"
+      :title="t('building.saveChangesTitle')"
+      :footer="null"
+      width="460px"
+      @cancel="confirmOpen = false"
+    >
+      <p class="confirm-content">{{ t('building.saveChangesContent') }}</p>
+      <div class="confirm-actions">
+        <a-button @click="confirmOpen = false">{{ t('building.saveChangesKeep') }}</a-button>
+        <a-button danger @click="finishEditSession(false)">{{ t('building.saveChangesDiscard') }}</a-button>
+        <a-button type="primary" @click="finishEditSession(true)">{{ t('building.saveChangesOk') }}</a-button>
+      </div>
+    </a-modal>
     <div class="auto-rotate">
       <button
         type="button"
@@ -863,9 +1329,13 @@ onBeforeUnmount(() => {
     <!-- 編輯模式短暫提示（進入編輯模式時出現，1.5 秒後自動消失） -->
     <transition name="fade">
       <div v-if="editModeToast" class="edit-mode-toast">
-        {{ t('building.editModeOn') }} — 点击格子即可编辑
+        {{ t('building.editModeOn') }}
       </div>
     </transition>
+    <!-- 編輯模式：拖拽模板（進入添加模式後在樓宇左側顯示，可無限使用） -->
+    <div v-if="editUnlocked && editToolMode === 'add'" class="drag-source-toolbar">
+      <span class="drag-source-hint">{{ t('building.dragSourceHint') }}</span>
+    </div>
     <div class="env-legend">
       <div class="legend-head">
         <span class="legend-title">{{ legendLabel }}</span>
@@ -926,6 +1396,39 @@ onBeforeUnmount(() => {
   height: 100% !important;
 }
 
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f7f7f5;
+  z-index: 100;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #c4a574;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #6b6b6b;
+}
+
 .floor-toast {
   position: absolute;
   z-index: 5;
@@ -952,146 +1455,135 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.82);
 }
 
-/* Cell rotation panel */
-.rotate-panel {
+/* 編輯工具面板（四按鈕常駐：添加 / 刪除 / 撤回 / 關閉，可拖動） */
+.edit-tool-panel {
   position: absolute;
   z-index: 10;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  min-width: 300px;
-  padding: 10px 14px;
-  border-radius: 6px;
-  background: rgba(13, 13, 13, 0.85);
+  width: 248px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(13, 13, 13, 0.9);
   border: 1px solid rgba(196, 165, 116, 0.45);
   backdrop-filter: blur(8px);
   color: #fff;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
-  animation: rotate-panel-in 180ms ease-out;
+  animation: edit-tool-in 180ms ease-out;
+  user-select: none;
+  touch-action: none;
 }
 
-.rotate-header {
+.edit-tool-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 2px 0;
+  cursor: move;
+  border-radius: 4px;
 }
 
-.rotate-title {
-  font-size: 13px;
+.edit-tool-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.edit-tool-title {
+  font-size: 14px;
   font-weight: 650;
+  color: #f5ead7;
+  pointer-events: none;
+}
+
+.edit-tool-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.edit-tool-btn {
+  padding: 9px 12px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.edit-tool-btn-add {
+  background: rgba(76, 175, 80, 0.22);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+
+.edit-tool-btn-add:hover,
+.edit-tool-btn-add.active {
+  background: rgba(76, 175, 80, 0.45);
+  border-color: #4caf50;
+  color: #fff;
+}
+
+.edit-tool-btn-del {
+  background: rgba(244, 67, 54, 0.18);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #e57373;
+}
+
+.edit-tool-btn-del:hover,
+.edit-tool-btn-del.active {
+  background: rgba(244, 67, 54, 0.4);
+  border-color: #f44336;
+  color: #fff;
+}
+
+.edit-tool-btn-undo {
+  background: rgba(156, 39, 176, 0.18);
+  border-color: rgba(156, 39, 176, 0.45);
+  color: #ce93d8;
+}
+
+.edit-tool-btn-undo:hover {
+  background: rgba(156, 39, 176, 0.4);
+  border-color: #9c27b0;
+  color: #fff;
+}
+
+.edit-tool-btn-close {
+  background: rgba(196, 165, 116, 0.22);
+  border-color: rgba(196, 165, 116, 0.55);
   color: #f5ead7;
 }
 
-.rotate-close {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 18px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.rotate-close:hover {
-  color: #fff;
-}
-
-.rotate-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.rotate-btn {
-  flex: 1 1 auto;
-  min-width: 52px;
-  padding: 5px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.rotate-btn:hover {
-  background: rgba(196, 165, 116, 0.3);
-  border-color: rgba(196, 165, 116, 0.5);
-}
-
-.rotate-btn.active {
+.edit-tool-btn-close:hover {
   background: rgba(196, 165, 116, 0.5);
   border-color: #c4a574;
   color: #fff;
-  font-weight: 600;
 }
 
-.rotate-current {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
-  text-align: center;
-}
-
-.rotate-divider {
-  height: 1px;
-  margin: 8px 0;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.rotate-all-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #c4a574;
-  margin-bottom: 6px;
-  text-align: center;
-}
-
-.rotate-btn-all {
-  background: rgba(196, 165, 116, 0.12);
-  border-color: rgba(196, 165, 116, 0.25);
-  color: #c4a574;
-}
-
-.rotate-btn-all:hover {
-  background: rgba(196, 165, 116, 0.35);
-  border-color: #c4a574;
-  color: #fff;
-}
-
-.edit-scope-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.scope-btn {
-  flex: 1;
-  padding: 4px 8px;
+.edit-tool-hint {
+  margin-top: 10px;
+  padding: 6px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cfe9e9;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
 }
 
-.scope-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+/* 退出編輯會話確認框 */
+.confirm-content {
+  margin: 0 0 4px;
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.scope-btn.active {
-  background: rgba(196, 165, 116, 0.4);
-  border-color: #c4a574;
-  color: #fff;
-}
-
-.edit-actions {
+.confirm-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
+  margin-top: 16px;
 }
 
 .edit-feedback {
@@ -1105,93 +1597,11 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.edit-btn {
-  flex: 1;
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+@keyframes edit-tool-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.edit-btn-add {
-  background: rgba(76, 175, 80, 0.25);
-  border-color: rgba(76, 175, 80, 0.5);
-  color: #81c784;
-}
-
-.edit-btn-add:hover {
-  background: rgba(76, 175, 80, 0.45);
-  border-color: #4caf50;
-  color: #fff;
-}
-
-.edit-btn-del {
-  background: rgba(244, 67, 54, 0.2);
-  border-color: rgba(244, 67, 54, 0.45);
-  color: #e57373;
-}
-
-.edit-btn-del:hover {
-  background: rgba(244, 67, 54, 0.4);
-  border-color: #f44336;
-  color: #fff;
-}
-
-.edit-btn-undo {
-  background: rgba(156, 39, 176, 0.2);
-  border-color: rgba(156, 39, 176, 0.45);
-  color: #ce93d8;
-}
-
-.edit-btn-undo:hover {
-  background: rgba(156, 39, 176, 0.4);
-  border-color: #9c27b0;
-  color: #fff;
-}
-
-.edit-btn-append {
-  background: rgba(0, 150, 136, 0.2);
-  border-color: rgba(0, 150, 136, 0.45);
-  color: #80cbc4;
-}
-
-.edit-btn-append:hover {
-  background: rgba(0, 150, 136, 0.4);
-  border-color: #009688;
-  color: #fff;
-}
-
-.edit-btn-reset {
-  background: rgba(255, 87, 34, 0.2);
-  border-color: rgba(255, 87, 34, 0.45);
-  color: #ffab91;
-}
-
-.edit-btn-reset:hover {
-  background: rgba(255, 87, 34, 0.4);
-  border-color: #ff5722;
-  color: #fff;
-}
-
-.edit-btn-done {
-  background: rgba(196, 165, 116, 0.25);
-  border-color: rgba(196, 165, 116, 0.55);
-  color: #f5ead7;
-}
-
-.edit-btn-done:hover {
-  background: rgba(196, 165, 116, 0.5);
-  border-color: #c4a574;
-  color: #fff;
-}
-
-@keyframes rotate-panel-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
 
 .env-legend {
   position: absolute;
@@ -1379,6 +1789,33 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #f5ead7;
   white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 編輯模式：添加格子按鈕 + 拖拽提示（左下角） */
+.drag-source-toolbar {
+  position: absolute;
+  z-index: 7;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.drag-source-hint {
+  max-width: 260px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.72);
+  border: 1px solid rgba(95, 184, 184, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cfe9e9;
   pointer-events: none;
 }
 

@@ -30,8 +30,10 @@ def bind_device_cell(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """绑定设备到具体格子（设备→格子；替换设备原有绑定）。"""
-    ok = db.bind_device_cell(sn, body.floor_id, body.row_no, body.col_no)
-    if not ok:
+    result = db.bind_device_cell(sn, body.floor_id, body.row_no, body.col_no)
+    if result != "ok":
+        if result == "floor_mismatch":
+            raise HTTPException(status_code=409, detail="Floor mismatch: device floor differs from cell floor")
         raise HTTPException(status_code=404, detail="Device or cell not found")
     return {"ok": True}
 

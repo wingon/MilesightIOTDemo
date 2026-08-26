@@ -26,6 +26,8 @@ const props = defineProps<{
   bindSn?: string | null
   /** 大厅/开放区域设备数 */
   lobbyCount?: number
+  /** 大厅格子数（未被房间占用的有效格子） */
+  lobbyCellCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -191,6 +193,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
         >
           <i class="swatch" :style="{ background: '#9A9A9A' }" />
           <span>{{ t('building.lobby') }}</span>
+          <span class="count" :title="t('building.cellCount')">{{ lobbyCellCount ?? 0 }}</span>
           <span class="count dim">{{ lobbyCount }}</span>
         </button>
         <p v-if="bindSn" class="legend-hint">{{ t('building.bindHint') }}</p>
@@ -260,6 +263,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
   font-weight: 400;
   font-size: 12px;
   color: #6b6b6b;
+  user-select: none;
 }
 
 .stage {
@@ -327,13 +331,19 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
 }
 
 .count {
+  min-width: 24px;
+  text-align: right;
   margin-left: auto;
   color: #0d0d0d;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
 
+  &:first-of-type {
+    margin-left: auto;
+  }
+
   &.dim {
-    margin-left: 4px;
+    margin-left: 8px;
     color: #6b6b6b;
   }
 }

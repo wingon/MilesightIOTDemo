@@ -28,6 +28,7 @@ import {
   listBuildings,
   listBuildingFloors,
   listFloorRooms,
+  saveFloorLayout as apiSaveFloorLayout,
   type BuildingInfo,
   type FloorInfo,
   type FloorRoom,
@@ -228,6 +229,26 @@ export const useBuildingStore = defineStore('building', () => {
   const floorLayouts = reactive<Record<number, Record<string, Cell[]>>>({})
   /** floor -> custom walls (manually added by the user in edit mode) */
   const floorCustomWalls = reactive<Record<number, { x1: number; z1: number; x2: number; z2: number }[]>>({})
+  /** 快照：进入编辑模式前保存原始布局，取消时恢复 */
+  const layoutSnapshot = reactive<Record<number, Record<string, Cell[]> | null>>({})
+  const customWallsSnapshot = reactive<Record<number, { x1: number; z1: number; x2: number; z2: number }[] | null>>({})
+
+  function saveLayoutSnapshot(floor: number) {
+    ensureFloor(floor)
+    layoutSnapshot[floor] = JSON.parse(JSON.stringify(floorLayouts[floor]))
+    customWallsSnapshot[floor] = JSON.parse(JSON.stringify(floorCustomWalls[floor]))
+  }
+
+  function restoreLayoutSnapshot(floor: number) {
+    if (layoutSnapshot[floor]) {
+      floorLayouts[floor] = layoutSnapshot[floor]
+      layoutSnapshot[floor] = null
+    }
+    if (customWallsSnapshot[floor]) {
+      floorCustomWalls[floor] = customWallsSnapshot[floor]
+      customWallsSnapshot[floor] = null
+    }
+  }
 
   function ensureFloor(floor: number) {
     if (!floorInventory[floor]) {
@@ -378,6 +399,25 @@ export const useBuildingStore = defineStore('building', () => {
   function resetFloorLayout(floor: number) {
     floorLayouts[floor] = createDefaultRoomLayout()
     floorCustomWalls[floor] = []
+  }
+
+  /** 将当前本地布局保存到后端数据库（原子替换整层楼的 room_cell） */
+  async function saveFloorLayoutToDb(floor: number): Promise<boolean> {
+    const fid = floorIdByLevel(floor)
+    if (fid == null) return false
+    try {
+      const layout = floorLayouts[floor] || {}
+      // 转换为后端格式: { room_id: [[row, col], ...] }
+      const dbLayout: Record<string, Array<[number, number]>> = {}
+      for (const [roomId, cells] of Object.entries(layout)) {
+        dbLayout[roomId] = cells.map((c) => [c.row, c.col])
+      }
+      await apiSaveFloorLayout({ floor_id: fid, layout: dbLayout })
+      return true
+    } catch (err) {
+      console.warn('[building] saveFloorLayoutToDb failed:', err)
+      return false
+    }
   }
 
   /** Move a cell from its source position to a target position (keeping room ownership) */
@@ -667,6 +707,7 @@ export const useBuildingStore = defineStore('building', () => {
     getCellOwner,
     assignRoomCell,
     resetFloorLayout,
+    saveFloorLayoutToDb,
     moveRoomCell,
     getCustomWalls,
     addCustomWall,
@@ -674,6 +715,8 @@ export const useBuildingStore = defineStore('building', () => {
     moveCustomWall,
     cellToRoomMap,
     roomCellCount,
+    saveLayoutSnapshot,
+    restoreLayoutSnapshot,
     listDeviceInstances,
     getFloorStats,
     allFloorStats,

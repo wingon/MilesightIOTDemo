@@ -131,3 +131,48 @@ feat: 5F 平面重排與設備格子綁定功能
 - DeviceDetailPanel 新增綁定/解綁按鈕與綁定標籤、大廳/未綁定計數；FloorModelPanel 傳入 devices/bindSn/lobbyCount 並加「大廳」圖例與綁定提示
 - FloorViewerView 設備數依格子歸屬房間統計（不再全塞 1 號房），區分大廳/未綁定設備；新增 pendingBindSn 綁定流程與 editDirty 離開編輯模式保存確認（Modal）
 - i18n 新增綁定相關 12 組文案（bindStart/bindHint/bindClickCell/unbindCell/deviceBound/deviceBindFailed/deviceUnboundMsg/deviceUnbindFailed/cell/lobby 等，en.ts 與 zh-TW.ts 同步）
+
+
+## 2026-08-26 12:20
+feat: 3D 編輯工具重構、布局保存到 DB 與資料治理
+
+### 3D 編輯工具重構（Building3D.vue）
+- 新增拖曳添加格子功能：左側工具列顯示圆形/方形/三角形拖曳來源，拖到樓宇上即可放置（綠色可放、紅色已佔用）
+- 可拖曳浮動工具面板（edit-tool-panel）：添加/刪除/撤回/關閉按鈕，面板可拖曳定位
+- 新增格子形狀支援：cellEdit API 新增 shape 參數（Rect/Cylinder/Triangle），新增格子時可指定形狀
+- 載入狀態：onMounted 平行 fetch 所有資料後再渲染 3D，避免畫面閃爍
+- 撤回功能：前端 undoableOps 計數 + 後端 10 步撤回上限，支援旋轉/格子操作撤回
+- 編輯完成對話框：可保存到 DB 或放棄（含確認提示），取消時自動恢復快照
+- 格子刪除聯動清理：刪除格子時同步軟刪 room_cell、物理刪 device_cell，並記錄 undo 以便恢復
+- 隱藏格子 overlay 顯示（is_active=0 的格子以半透明提示）
+
+### 布局保存到資料庫（前後端）
+- stores 新增 saveFloorLayoutToDb（原子替換整層樓 room_cell）+ saveLayoutSnapshot / restoreLayoutSnapshot
+- building API 新增 POST /save-floor-layout（批量保存樓層佈局）
+- FloorViewerView 編輯完成時自動保存到 DB，取消時恢復快照
+- 設備數歸屬改為優先使用本地 layout 映射（反映用戶編輯後的最新狀態）
+
+### 資料治理（WingOnIOT 風險修復）
+- migrate_wingon_fixes.sql：表名統一小寫、Monitoring 改複合主鍵+按月分區、room_cell 加 is_deleted 軟刪+改唯一索引、device_cell 收斂為一設備一格(UNIQUE(sn))、building_cell 加 active_key 生成列+唯一索引
+- migrate_wingon_trigger.sql：一格一房觸發器（R3）禁止同一格子被多個有效房間同時佔用
+- migrate_remove_hidden_cells.sql：清理隱藏格子（is_active=0）的 room_cell 與 device_cell
+- cleanup_wingon.py：資料治理定時任務（孤兒清理、超期軟刪物理刪除、分區維護與淘汰）
+- migrate_wingon_fixes.py / test_wingon_fixes.py：遷移執行腳本與測試
+- migrate_wingon_revert.sql：表名還原腳本（可選）
+
+### DDL 同步（WingOnIOT_DDL_Data.sql）
+- building_cell 新增 active_key 生成列 + uk_cell_active 唯一索引
+- Environmental_Monitoring 改複合主鍵（id,toDateTime）+ 按月 RANGE 分區（p202603~p202608+pmax）
+- room_cell 新增 is_deleted 軟刪欄位 + 唯一索引含 is_deleted + idx_cell_active
+- device_cell 唯一索引改為 uk_device_sn（一設備一格）+ DDL 腳本中新增建表語句
+- INSERT 語句改為指定欄位列表（避免新增欄位導致位置偏移）
+
+### 其他改進
+- EnvironmentDevice 新增 cell_lost 欄位（設備綁定已失效：目標格子已軟刪）
+- DeviceDetailPanel：失效綁定顯示「格子已失效」+ 清除按鈕；bind/unbind 按鈕顯示條件調整
+- FloorModelPanel：大廳圖例新增格子數顯示，count 樣式對齊
+- 綁定設備時新增樓層一致性校驗（bind_device_cell 回傳 floor_mismatch）
+- 大廳格子數 lobbyCellCount 計算（有效格子中不屬於任何房間的數量）
+- unboundDevices 排除 cell_lost 設備，新增 lostDevices 計算
+- pane-label 新增 user-select:none；.gitignore 新增 /.opencode/
+- i18n 新增 ~20 組文案（dragSourceHint/addCellBtn/saveChangesKeep/savingLayout/undoLimitReached/cellLost/clearLostCell 等，en.ts 與 zh-TW.ts 同步）

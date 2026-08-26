@@ -6,7 +6,7 @@ import { message, Modal } from 'ant-design-vue'
 import FloorModelPanel from '@/components/building/FloorModelPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
 import { useBuildingStore, TEMP_THRESHOLD, HUMIDITY_THRESHOLD } from '@/stores/building'
-import { FLOOR_COUNT, buildRoomMeta, floorName, type Cell } from '@/utils/buildingDemo'
+import { FLOOR_COUNT, buildRoomMeta, floorName, isInterior, GRID_ROWS, GRID_COLS, shouldExcludeCell, type Cell } from '@/utils/buildingDemo'
 import type { EnvironmentDevice } from '@/api/environment'
 
 const { t } = useI18n()
@@ -88,8 +88,9 @@ const panelEnvDevices = computed(() => {
 /** 本层房间业务键集合（用于判断格子归属） */
 const deviceRoomIds = computed(() => new Set(dbRooms.value.map((r) => r.room_id)))
 
-/** 每台真实设备归属统计：按设备绑定格子反查所属房间（不再硬塞 1 号房间）。
- *  优先使用 API 返回的 room_id，若为空则用当前 3D layout 的格子归属兜底解析。 */
+/** 每台真实设备归属统计：按设备绑定格子反查所属房间。
+ *  优先使用当前 3D layout 的格子归属（用户编辑后的状态），
+ *  仅当格子在本地 layout 中无归属时才回退到 API 返回的 room_id。 */
 const deviceCountMap = computed(() => {
   const map: Record<string, number> = {}
   for (const r of dbRooms.value) map[r.room_id] = 0
@@ -103,10 +104,11 @@ const deviceCountMap = computed(() => {
   for (const d of panelEnvDevices.value) {
     if (!d.cell) continue
     const key = `${d.cell.row_no}-${d.cell.col_no}`
+    // 优先使用本地 layout 映射（反映用户编辑后的最新状态），
+    // 仅当本地无映射时回退到 API room_id（兜底）
     const roomId =
-      d.room_id && deviceRoomIds.value.has(d.room_id)
-        ? d.room_id
-        : cellToRoom.get(key) ?? null
+      cellToRoom.get(key) ??
+      (d.room_id && deviceRoomIds.value.has(d.room_id) ? d.room_id : null)
     if (roomId && deviceRoomIds.value.has(roomId)) {
       map[roomId] = (map[roomId] || 0) + 1
     }
@@ -115,14 +117,48 @@ const deviceCountMap = computed(() => {
 })
 
 /** 大厅/开放区域设备（已绑定到非房间格子） */
-const lobbyDevices = computed(() =>
-  panelEnvDevices.value.filter(
-    (d) => d.cell && (!d.room_id || !deviceRoomIds.value.has(d.room_id)),
-  ),
-)
+const lobbyDevices = computed(() => {
+  // 构建本地 layout 的格子→房间映射
+  const cellToRoom = new Map<string, string>()
+  for (const [rid, cells] of Object.entries(layout.value)) {
+    for (const c of cells) cellToRoom.set(`${c.row}-${c.col}`, rid)
+  }
+  return panelEnvDevices.value.filter((d) => {
+    if (!d.cell) return false
+    const key = `${d.cell.row_no}-${d.cell.col_no}`
+    // 本地 layout 有归属 → 不是大厅
+    if (cellToRoom.has(key)) return false
+    // 本地无归属，但 API room_id 有效 → 不是大厅
+    if (d.room_id && deviceRoomIds.value.has(d.room_id)) return false
+    // 本地无归属 且 API 也无有效 room_id → 大厅设备
+    return true
+  })
+})
 
-/** 未绑定格子的设备（尚无位置） */
-const unboundDevices = computed(() => panelEnvDevices.value.filter((d) => !d.cell))
+/** 大厅格子数：所有有效格子中，不属于任何房间的格子数量 */
+const lobbyCellCount = computed(() => {
+  // 收集所有属于房间的格子
+  const roomCellSet = new Set<string>()
+  for (const cells of Object.values(layout.value)) {
+    for (const c of cells) roomCellSet.add(`${c.row}-${c.col}`)
+  }
+  // 统计所有有效格子（内部格子且未被排除）中不属于任何房间的数量
+  let count = 0
+  for (let row = 1; row <= GRID_ROWS; row++) {
+    for (let col = 1; col <= GRID_COLS; col++) {
+      if (!isInterior(row, col)) continue
+      if (shouldExcludeCell(floor.value, row, col)) continue
+      if (!roomCellSet.has(`${row}-${col}`)) count++
+    }
+  }
+  return count
+})
+
+/** 未绑定格子的设备（尚无位置；不含绑定已失效的设备） */
+const unboundDevices = computed(() => panelEnvDevices.value.filter((d) => !d.cell && !d.cell_lost))
+
+/** 绑定已失效的设备（device_cell 残留但目标格子已删/不存在） */
+const lostDevices = computed(() => panelEnvDevices.value.filter((d) => d.cell_lost))
 
 /** 设备 3D 标记（仅已绑定格子的设备；x/z 前端由 cellToWorld 计算） */
 const deviceMarkers = computed(() =>
@@ -278,13 +314,26 @@ function onRequestExitEdit() {
     content: t('building.saveChangesContent'),
     okText: t('building.saveChangesOk'),
     cancelText: t('building.saveChangesCancel'),
-    onOk() {
-      editMode.value = false
-      editDirty.value = false
-      message.success(t('building.savedSuccess'))
+    async onOk() {
+      // 保存布局到后端数据库
+      const saving = message.loading(t('building.savingLayout') || '保存中...', 0)
+      try {
+        const ok = await store.saveFloorLayoutToDb(floor.value)
+        if (ok) {
+          message.success(t('building.savedSuccess'))
+        } else {
+          message.error(t('building.saveFailed') || '保存失败')
+        }
+      } finally {
+        saving()
+        editMode.value = false
+        editDirty.value = false
+      }
     },
     onCancel() {
-      // 留在编辑模式
+      store.restoreLayoutSnapshot(floor.value)
+      selectedRoom.value = null
+      editDirty.value = false
     },
   })
 }
@@ -328,8 +377,9 @@ const roomLabel = computed(() => {
           :devices="deviceMarkers"
           :bind-sn="pendingBindSn"
           :lobby-count="lobbyDevices.length"
+          :lobby-cell-count="lobbyCellCount"
           @select-room="onSelectRoom"
-          @update:edit-mode="(v) => { if (v) { editMode = true; editDirty = false } else { onRequestExitEdit() } }"
+          @update:edit-mode="(v) => { if (v) { store.saveLayoutSnapshot(floor); editMode = true; editDirty = false } else { onRequestExitEdit() } }"
           @toggle-cell="onToggleCell"
           @drop-cell="onDropCell"
           @drop-wall="onDropWall"

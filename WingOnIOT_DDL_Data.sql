@@ -87,10 +87,12 @@ CREATE TABLE `building_cell` (
   `color` varchar(32) DEFAULT NULL COMMENT '顏色；NULL=按溫溼度着色',
   `render_height` decimal(6,3) DEFAULT NULL COMMENT '自定義渲染高度',
   `is_deleted` tinyint(4) NOT NULL DEFAULT 0 COMMENT '邏輯刪除：0=正常，1=已刪除',
+  `active_key` varchar(80) GENERATED ALWAYS AS (IF(`is_deleted` = 0, CONCAT(`floor_id`, '#', `row_no`, '#', `col_no`), NULL)) STORED COMMENT '同坐標活動格子唯一鍵',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '創建時間',
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3) COMMENT '最後更新時間',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_cell` (`floor_id`,`row_no`,`col_no`,`is_deleted`),
+  UNIQUE KEY `uk_cell_active` (`active_key`),
   KEY `idx_id_floor` (`id`,`floor_id`),
   KEY `idx_building_floor` (`building_id`,`floor_id`),
   KEY `idx_floor_active` (`floor_id`,`is_active`),
@@ -107,7 +109,7 @@ CREATE TABLE `building_cell` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `building_cell` WRITE;
 /*!40000 ALTER TABLE `building_cell` DISABLE KEYS */;
-INSERT INTO `building_cell` VALUES
+INSERT INTO `building_cell` (`id`, `building_id`, `floor_id`, `row_no`, `col_no`, `x`, `y`, `z`, `length`, `width`, `cell_height`, `rotation_xyz`, `is_active`, `shape`, `color`, `render_height`, `is_deleted`, `created_at`, `updated_at`) VALUES
 (4192,4,46,1,1,-6.325,-4.025,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:12:23.592'),
 (4193,4,46,2,1,-6.325,-2.875,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:04:15.705'),
 (4194,4,46,3,1,-6.325,-1.725,0.380,1.150,1.150,0.000,NULL,1,'Rect',NULL,NULL,0,'2026-08-18 03:11:05.452','2026-08-18 06:04:15.705'),
@@ -1300,10 +1302,19 @@ CREATE TABLE `Environmental_Monitoring` (
   `humidityMedian` decimal(6,1) DEFAULT NULL,
   `humidityMax` decimal(6,1) DEFAULT NULL,
   `InsertAt` timestamp NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`) USING BTREE,
+  PRIMARY KEY (`id`,`toDateTime`) USING BTREE,
   KEY `toDateTime` (`toDateTime`) USING BTREE,
   KEY `DateSN` (`toDateTime`,`sn`) USING BTREE
-) ENGINE=InnoDB AUTO_INCREMENT=87676 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC;
+) ENGINE=InnoDB AUTO_INCREMENT=87676 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=DYNAMIC
+PARTITION BY RANGE (TO_DAYS(`toDateTime`)) (
+  PARTITION p202603 VALUES LESS THAN (TO_DAYS('2026-04-01')),
+  PARTITION p202604 VALUES LESS THAN (TO_DAYS('2026-05-01')),
+  PARTITION p202605 VALUES LESS THAN (TO_DAYS('2026-06-01')),
+  PARTITION p202606 VALUES LESS THAN (TO_DAYS('2026-07-01')),
+  PARTITION p202607 VALUES LESS THAN (TO_DAYS('2026-08-01')),
+  PARTITION p202608 VALUES LESS THAN (TO_DAYS('2026-09-01')),
+  PARTITION pmax VALUES LESS THAN MAXVALUE
+);
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -89087,12 +89098,14 @@ CREATE TABLE `room_cell` (
   `room_ref_id` bigint(20) unsigned NOT NULL COMMENT '房間外鍵（代理鍵）',
   `floor_id` bigint(20) unsigned NOT NULL COMMENT '樓層外鍵，保證同樓層',
   `cell_id` bigint(20) unsigned NOT NULL COMMENT '格子外鍵',
+  `is_deleted` tinyint(4) NOT NULL DEFAULT 0 COMMENT '邏輯刪除：0=正常，1=已刪除',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '創建時間',
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3) COMMENT '最後更新時間',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_room_cell` (`room_ref_id`,`floor_id`,`cell_id`),
+  UNIQUE KEY `uk_room_cell` (`room_ref_id`,`floor_id`,`cell_id`,`is_deleted`),
   KEY `idx_cell_id` (`cell_id`,`floor_id`),
   KEY `idx_floor_id` (`floor_id`),
+  KEY `idx_cell_active` (`cell_id`,`floor_id`,`is_deleted`),
   CONSTRAINT `fk_rc_cell` FOREIGN KEY (`cell_id`, `floor_id`) REFERENCES `building_cell` (`id`, `floor_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_rc_room` FOREIGN KEY (`room_ref_id`, `floor_id`) REFERENCES `room` (`id`, `floor_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=1534 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='房間佔用格子關聯表';
@@ -89105,7 +89118,7 @@ CREATE TABLE `room_cell` (
 SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;
 LOCK TABLES `room_cell` WRITE;
 /*!40000 ALTER TABLE `room_cell` DISABLE KEYS */;
-INSERT INTO `room_cell` VALUES
+INSERT INTO `room_cell` (`id`, `room_ref_id`, `floor_id`, `cell_id`, `created_at`, `updated_at`) VALUES
 (1023,255,46,4200,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1024,255,46,4194,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
 (1025,255,46,4199,'2026-08-18 03:11:05.520','2026-08-18 03:11:05.520'),
@@ -89616,6 +89629,26 @@ INSERT INTO `room_cell` VALUES
 UNLOCK TABLES;
 COMMIT;
 SET AUTOCOMMIT=@OLD_AUTOCOMMIT;
+
+--
+-- Table structure for table `device_cell`
+--
+
+DROP TABLE IF EXISTS `device_cell`;
+CREATE TABLE `device_cell` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
+  `sn` varchar(20) NOT NULL COMMENT '設備序列號（Environment_Device.sn）',
+  `cell_id` bigint(20) unsigned NOT NULL COMMENT '格子外鍵',
+  `floor_id` bigint(20) unsigned NOT NULL COMMENT '樓層外鍵，保證同樓層',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) COMMENT '創建時間',
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3) COMMENT '最後更新時間',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_device_sn` (`sn`),
+  KEY `idx_cell_id` (`cell_id`,`floor_id`),
+  KEY `idx_floor_id` (`floor_id`),
+  CONSTRAINT `fk_dc_cell` FOREIGN KEY (`cell_id`, `floor_id`) REFERENCES `building_cell` (`id`, `floor_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_dc_sn` FOREIGN KEY (`sn`) REFERENCES `Environment_Device` (`sn`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='設備關聯格子表（一設備一格）';
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

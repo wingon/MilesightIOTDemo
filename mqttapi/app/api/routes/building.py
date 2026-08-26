@@ -47,6 +47,37 @@ def list_floor_rooms(floor_id: int, db: Database = Depends(get_db)) -> list[dict
     return db.list_floor_rooms(floor_id)
 
 
+@router.delete("/building/rooms/{room_id}")
+def delete_room(room_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
+    """物理删除房间：房间占用格子由外键级联清空，其上设备变回大厅设备。
+
+    不可恢复（房间=格子集合，可重建）。确认后再删。
+    """
+    ok = db.delete_room(room_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return {"ok": True}
+
+
+class AssignRoomCellRequest(BaseModel):
+    floor_id: int
+    row_no: int
+    col_no: int
+
+
+@router.post("/building/rooms/{room_id}/cells")
+def assign_room_cell(
+    room_id: str,
+    body: AssignRoomCellRequest,
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """原子切换房间↔格子占用（一格一房；已占用则移除）。"""
+    result = db.assign_room_cell(room_id, body.floor_id, body.row_no, body.col_no)
+    if result == "invalid":
+        raise HTTPException(status_code=404, detail="Room or cell not found")
+    return {"ok": True, "result": result}
+
+
 class RotationUpdate(BaseModel):
     floor_id: int
     row_no: int
@@ -95,6 +126,12 @@ class CellEditRequest(BaseModel):
     action: str          # "add" | "delete"
     scope: str           # "single" | "row" | "col" | "append_row" | "append_col"
     floor_id: int | None = None  # required when scope=single
+    shape: str | None = None     # "Rect" | "Cylinder" | "Triangle"（add 时指定新格子的形状，默认 Rect）
+
+
+class SaveFloorLayoutRequest(BaseModel):
+    floor_id: int
+    layout: dict[str, list[tuple[int, int]]]  # { room_id: [[row, col], ...], ... }
 
 
 class ResetGridExtrasRequest(BaseModel):
@@ -111,6 +148,7 @@ def cell_edit(body: CellEditRequest, db: Database = Depends(get_db)):
         action=body.action,
         scope=body.scope,
         floor_id=body.floor_id,
+        shape=body.shape,
     )
 
 
@@ -118,6 +156,13 @@ def cell_edit(body: CellEditRequest, db: Database = Depends(get_db)):
 def undo_edit(db: Database = Depends(get_db)):
     """Undo the previous cell edit operation."""
     return db.undo_last_edit()
+
+
+@router.post("/building/save-floor-layout")
+def save_floor_layout(body: SaveFloorLayoutRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
+    """批量保存楼层房间↔格子布局（原子替换整层楼的 room_cell）。"""
+    inserted = db.save_floor_layout(body.floor_id, body.layout)
+    return {"ok": True, "inserted": inserted}
 
 
 @router.post("/building/reset-grid-extras")

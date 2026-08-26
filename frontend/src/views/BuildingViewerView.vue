@@ -21,6 +21,8 @@ const selectedFloor = ref<number | null>(null)
 const metric = ref<EnvMetric>('temperature')
 /** 編輯模式開關（由左上角提示文字框連點 3 次觸發，無任何介面提示） */
 const building3dRef = ref<InstanceType<typeof Building3D>>()
+/** Loading state - wait for all data before rendering 3D */
+const loading3D = ref(true)
 
 /**
  * 左上角提示文字框「連點 3 次」計數（3 秒內累計，超時重置）。
@@ -69,7 +71,7 @@ function onEditHintClick() {
 const cellShapes = ref<CellShapeConfig[]>([])
 
 /** Fetch cell shape settings from the DB; keep empty on failure (fall back to frontend hard-coded rectangles) */
-async function fetchCellShapes() {
+async function fetchCellShapes(): Promise<void> {
   try {
     const { data } = await listBuildingCellShapes()
     cellShapes.value = data ?? []
@@ -79,16 +81,18 @@ async function fetchCellShapes() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   // Warm inventory for dashboard metrics
   for (let i = 1; i <= FLOOR_COUNT; i++) store.ensureFloor(i)
-  // 拉取 WingOnIOT 各樓層真實溫度/濕度 + 設備明細
-  store.fetchFloorEnv()
-  store.fetchEnvDevices()
-  // Fetch the DB-driven building/floor structure (building/floor tables)
-  store.fetchBuildingStructure()
-  // Fetch the DB-driven cell shape settings (building_cell table, non-blocking for the rest of the init)
-  fetchCellShapes()
+  // Fetch all critical data in parallel before rendering 3D
+  await Promise.all([
+    store.fetchFloorEnv(),
+    store.fetchEnvDevices(),
+    store.fetchBuildingStructure(),
+    fetchCellShapes(),
+  ])
+  // All data ready - enable 3D rendering
+  loading3D.value = false
   const q = Number(route.query.floor)
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {
     onSelectFloor(q)
@@ -189,6 +193,7 @@ const panelEnvDevices = computed(() => {
             :metric="metric"
             :cell-shapes="cellShapes"
             :building-id="store.buildings[0]?.id"
+            :loading="loading3D"
             @select-floor="onSelectFloor"
             @refresh-shapes="fetchCellShapes"
           />
@@ -306,6 +311,7 @@ const panelEnvDevices = computed(() => {
   font-size: 12px;
   color: #6b6b6b;
   transition: border-color 0.15s;
+  user-select: none;
 }
 
 .pane-label.flash {

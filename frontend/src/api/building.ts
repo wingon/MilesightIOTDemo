@@ -117,6 +117,8 @@ export function cellEdit(params: {
   action: 'add' | 'delete'
   scope: 'single' | 'row' | 'col' | 'append_row' | 'append_col'
   floor_id?: number
+  /** Shape for new cells ('Rect' default; 'Cylinder' / 'Triangle' supported) */
+  shape?: 'Rect' | 'Cylinder' | 'Triangle'
 }) {
   return api.post<{ ok: boolean; affected: number }>('/api/v1/building/cell-edit', params)
 }
@@ -129,4 +131,12 @@ export function undoEdit() {
 /** Delete all appended cells beyond the 8x12 grid, restoring the original grid */
 export function resetGridExtras(building_id: number) {
   return api.post<{ ok: boolean; affected: number }>('/api/v1/building/reset-grid-extras', { building_id })
+}
+
+/** Batch save floor room-cell layout (atomic replacement) */
+export function saveFloorLayout(params: {
+  floor_id: number
+  layout: Record<string, Array<[number, number]>>
+}) {
+  return api.post<{ ok: boolean; inserted: number }>('/api/v1/building/save-floor-layout', params)
 }
