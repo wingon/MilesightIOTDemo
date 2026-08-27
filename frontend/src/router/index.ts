@@ -56,6 +56,12 @@ const router = createRouter({
           meta: { titleKey: 'building.floorRouteTitle' },
         },
         {
+          // 楼宇外观美化 DEMO（轮廓 1:1 还原 building-viewer，幕墙美化参考 bim-viewer）
+          path: 'building-facade-demo',
+          name: 'building-facade-demo',
+          component: () => import('@/demo/building-facade/FacadeDemoView.vue'),
+        },
+        {
           path: 'devices',
           name: 'devices',
           component: () => import('@/views/DevicesManageView.vue'),
