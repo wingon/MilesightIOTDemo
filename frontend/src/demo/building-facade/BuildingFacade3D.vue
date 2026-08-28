@@ -132,18 +132,18 @@ interface PresetConf {
 
 const PRESETS: Record<'day' | 'dusk' | 'night', PresetConf> = {
   day: {
-    dirColor: 0xfff2df,
-    dirIntensity: 1.15,
+    dirColor: 0xffe8c8,
+    dirIntensity: 1.05,
     dirPos: [18, 55, 12],
-    hemiSky: 0xffffff,
-    hemiGround: 0xb8a894,
-    hemiIntensity: 0.75,
-    fog: '#e9e5dc',
-    sky: ['#a9c9de', '#f0ece3'],
+    hemiSky: 0xc8d8f0,
+    hemiGround: 0xa08870,
+    hemiIntensity: 0.65,
+    fog: '#c8d4e0',
+    sky: ['#5b8ab8', '#d8cfc0'],
     innerLight: 0,
-    envIntensity: 1.0,
-    glassOpacity: 0.68,
-    bgIntensity: 1,
+    envIntensity: 0.85,
+    glassOpacity: 0.72,
+    bgIntensity: 0.92,
   },
   dusk: {
     dirColor: 0xff9a5c,
@@ -218,13 +218,100 @@ interface WallSeg {
 }
 
 /**
+ * 顶层（ROOF 层）的外轮廓点（XZ 平面）。
+ *
+ * 方法：枚举每个顶层格子的暴露边（四邻缺格/出界），按"共线相邻段合并"
+ * 消除格子分缝造成的小断点，再以有向边首尾相接闭合出轮廓环。
+ * 结果精确贴合幕墙外边缘，含 P3 布局西南/东南角的阶梯缺角。
+ */
+function topFloorOutline(): THREE.Vector2[] {
+  const floor = FLOORS.find((f) => f.level === FLOOR_COUNT)
+  if (!floor) return []
+  const cells = new Set(floor.cells.map((c) => `${c.row},${c.col}`))
+  const has = (r: number, c: number) => cells.has(`${r},${c}`)
+
+  // 暴露边（在格子中心坐标体系下）：dir=方向, line=固定坐标线, from/to=沿线的起止
+  interface RawEdge { dir: 'N' | 'S' | 'E' | 'W'; line: number; from: number; to: number }
+  const raw: RawEdge[] = []
+  for (const cell of floor.cells) {
+    const { x, z } = cellCenter(cell.row, cell.col)
+    if (!has(cell.row - 1, cell.col)) raw.push({ dir: 'N', line: z - HALF, from: x - HALF, to: x + HALF })
+    if (!has(cell.row + 1, cell.col)) raw.push({ dir: 'S', line: z + HALF, from: x - HALF, to: x + HALF })
+    if (!has(cell.row, cell.col - 1)) raw.push({ dir: 'W', line: x - HALF, from: z - HALF, to: z + HALF })
+    if (!has(cell.row, cell.col + 1)) raw.push({ dir: 'E', line: x + HALF, from: z - HALF, to: z + HALF })
+  }
+
+  // 共线相邻段合并（跨格子缝隙，容忍 4% 格缝）
+  const GAP_TOL = 0.05
+  const groups = new Map<string, RawEdge[]>()
+  for (const e of raw) {
+    const key = `${e.dir}|${e.line.toFixed(4)}`
+    const arr = groups.get(key) ?? []
+    arr.push(e)
+    groups.set(key, arr)
+  }
+  const merged: RawEdge[] = []
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => a.from - b.from)
+    let cur: RawEdge = { ...arr[0] }
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i].from - cur.to < GAP_TOL) {
+        cur.to = Math.max(cur.to, arr[i].to)
+      } else {
+        merged.push(cur)
+        cur = { ...arr[i] }
+      }
+    }
+    merged.push(cur)
+  }
+
+  // 生成有向边（俯视逆时针闭合：北西→东、东西→南、南东→西、西南→北）
+  interface Edge { bx: number; bz: number; ex: number; ez: number }
+  const edges: Edge[] = []
+  for (const m of merged) {
+    if (m.dir === 'N') edges.push({ bx: m.from, bz: m.line, ex: m.to, ez: m.line })
+    else if (m.dir === 'E') edges.push({ bx: m.line, bz: m.from, ex: m.line, ez: m.to })
+    else if (m.dir === 'S') edges.push({ bx: m.to, bz: m.line, ex: m.from, ez: m.line })
+    else edges.push({ bx: m.line, bz: m.to, ex: m.line, ez: m.from })
+  }
+
+  const nextMap = new Map<string, Edge>()
+  for (const e of edges) nextMap.set(`${e.bx.toFixed(4)},${e.bz.toFixed(4)}`, e)
+
+  // 追踪闭合环；阶梯缺角处（两段暴露边端点错位 <0.08）就近连接
+  const pts: THREE.Vector2[] = []
+  const startKey = `${edges[0].bx.toFixed(4)},${edges[0].bz.toFixed(4)}`
+  let cur = edges[0]
+  for (let i = 0; i <= edges.length; i++) {
+    pts.push(new THREE.Vector2(cur.bx, cur.bz))
+    const key = `${cur.ex.toFixed(4)},${cur.ez.toFixed(4)}`
+    if (key === startKey) break
+    let nxt = nextMap.get(key)
+    if (!nxt) {
+      let best: Edge | null = null
+      let bestD = 0.08
+      for (const e of edges) {
+        const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
+        if (d < bestD) {
+          bestD = d
+          best = e
+        }
+      }
+      nxt = best
+    }
+    if (!nxt) break
+    cur = nxt
+  }
+  return pts
+}
+
+/**
  * 计算某层的全部外墙段（连续外露面合并成整片，跨格子缝隙）。
  *
  * 外露判定（与原轮廓严格对应）：
  *  - 矩形格子的正交面：邻居缺失（缺格/出界）或邻居是三角形（三角形只占半格）
  *  - 三角形格子：不生成正交面（其正交面均被邻居遮挡），斜边单独成段
- */
-function segmentsForFloor(cells: SnapCell[]): WallSeg[] {
+ */function segmentsForFloor(cells: SnapCell[]): WallSeg[] {
   const map = new Map<string, SnapCell>()
   for (const c of cells) map.set(`${c.row},${c.col}`, c)
   const has = (r: number, c: number) => map.has(`${r},${c}`)
@@ -513,6 +600,21 @@ function buildBuilding(): THREE.Group {
   group.add(roofMesh)
   disposables.push(roofMesh.geometry)
 
+  // 整片灰色屋顶盖板：边追踪生成精确轮廓（含西南/东南阶梯缺角），贴合幕墙外轮廓
+  const coverPts = topFloorOutline()
+  const coverShape = new THREE.Shape(coverPts)
+  // 加厚盖板（0.12）并抬高：核心筒顶部(y=9.20)与旧盖板顶面共面导致闪烁，
+  // 现盖板底面=ROOF_Y-0.02、顶面=ROOF_Y+0.10，核心筒顶被完全包住
+  const coverGeo = new THREE.ExtrudeGeometry(coverShape, { depth: 0.12, bevelEnabled: false })
+  // rotateX(π/2)：shape 的 y（=建筑 z）→ 世界 +z，避免南北镜像
+  coverGeo.rotateX(Math.PI / 2)
+  coverGeo.translate(0, ROOF_Y + 0.10, 0)
+  const coverMat = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide })
+  const roofCover = new THREE.Mesh(coverGeo, coverMat)
+  roofCover.receiveShadow = true
+  group.add(roofCover)
+  disposables.push(coverGeo, coverMat)
+
   glassBuckets.forEach((geos, i) => {
     if (!geos.length) return
     const mesh = new THREE.Mesh(mergeCompat(geos), glassMats[i])
@@ -560,10 +662,173 @@ function buildBuilding(): THREE.Group {
 }
 
 /** 地面（与原 Building3D 的圆形地面一致 + 广场装饰环） */
+/** 矩形环几何（外环 - 内孔），旋转到 XZ 平面（shape 的 y → 世界 +z，无镜像） */
+function makeRectRing(
+  outer: { x0: number; z0: number; x1: number; z1: number },
+  inner: { x0: number; z0: number; x1: number; z1: number },
+  color: number,
+  y: number,
+): THREE.Mesh {
+  const shape = new THREE.Shape()
+  shape.moveTo(outer.x0, outer.z0)
+  shape.lineTo(outer.x1, outer.z0)
+  shape.lineTo(outer.x1, outer.z1)
+  shape.lineTo(outer.x0, outer.z1)
+  shape.closePath()
+  const hole = new THREE.Path()
+  hole.moveTo(inner.x1, inner.z0)
+  hole.lineTo(inner.x0, inner.z0)
+  hole.lineTo(inner.x0, inner.z1)
+  hole.lineTo(inner.x1, inner.z1)
+  hole.closePath()
+  shape.holes.push(hole)
+  const geo = new THREE.ShapeGeometry(shape, 1)
+  geo.rotateX(Math.PI / 2)
+  geo.translate(0, y, 0)
+  // envMapIntensity 调低：避免环境反射把地面/道路洗白，保持材质固有色
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, envMapIntensity: 0.12, side: THREE.DoubleSide })
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.receiveShadow = true
+  disposables.push(geo, mat)
+  return mesh
+}
+
+/** 沿某层外墙幕墙段拼出的闭合轮廓（XZ 平面，贴合墙体，含切角/阶梯） */
+function wallOutline(level: number): THREE.Vector2[] {
+  const floor = FLOORS.find((f) => f.level === level)
+  if (!floor) return []
+  const segs = segmentsForFloor(floor.cells)
+  interface Edge { bx: number; bz: number; ex: number; ez: number }
+  const edges: Edge[] = []
+  for (const seg of segs) {
+    const dx = Math.cos(seg.phi)
+    const dz = -Math.sin(seg.phi)
+    const hx = (dx * seg.len) / 2
+    const hz = (dz * seg.len) / 2
+    edges.push({ bx: seg.cx - hx, bz: seg.cz - hz, ex: seg.cx + hx, ez: seg.cz + hz })
+  }
+  const nextMap = new Map<string, Edge>()
+  for (const e of edges) nextMap.set(`${e.bx.toFixed(4)},${e.bz.toFixed(4)}`, e)
+  const pts: THREE.Vector2[] = []
+  const visited = new Set<string>()
+  const startKey = `${edges[0].bx.toFixed(4)},${edges[0].bz.toFixed(4)}`
+  let cur = edges[0]
+  for (let i = 0; i <= edges.length * 2; i++) {
+    const k = `${cur.bx.toFixed(4)},${cur.bz.toFixed(4)}`
+    if (visited.has(k)) break
+    visited.add(k)
+    pts.push(new THREE.Vector2(cur.bx, cur.bz))
+    const key = `${cur.ex.toFixed(4)},${cur.ez.toFixed(4)}`
+    if (key === startKey) break
+    let nxt = nextMap.get(key)
+    if (!nxt) {
+      let best: Edge | null = null
+      let bestD = 0.2
+      for (const e of edges) {
+        const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
+        if (d < bestD) {
+          bestD = d
+          best = e
+        }
+      }
+      nxt = best
+    }
+    if (!nxt) break
+    cur = nxt
+  }
+  return pts
+}
+
+/** 多边形外扩（miter 尖角，保持切角），dist 向外为正 */
+function offsetPolygon(pts: THREE.Vector2[], dist: number): THREE.Vector2[] {
+  const n = pts.length
+  const center = new THREE.Vector2()
+  for (const p of pts) center.add(p)
+  center.divideScalar(n)
+  const out: THREE.Vector2[] = []
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n]
+    const cur = pts[i]
+    const next = pts[(i + 1) % n]
+    const v1 = cur.clone().sub(prev)
+    const v2 = next.clone().sub(cur)
+    const l1 = v1.length() || 1
+    const l2 = v2.length() || 1
+    const e1 = v1.divideScalar(l1)
+    const e2 = v2.divideScalar(l2)
+    const bis = e1.clone().add(e2)
+    if (bis.lengthSq() < 1e-6) bis.set(-e1.y, e1.x)
+    bis.normalize()
+    const away = cur.clone().sub(center)
+    if (bis.dot(away) < 0) bis.multiplyScalar(-1)
+    const cosA = Math.max(-1, Math.min(1, e1.dot(e2)))
+    const mlen = dist / Math.cos(Math.acos(cosA) / 2)
+    out.push(cur.clone().addScaledVector(bis, mlen))
+  }
+  return out
+}
+
+/** 任意多边形环（外轮廓 - 内孔），旋转到 XZ 平面 */
+function makePolygonRing(
+  outer: THREE.Vector2[],
+  inner: THREE.Vector2[],
+  color: number,
+  y: number,
+): THREE.Mesh {
+  const shape = new THREE.Shape(outer)
+  const hole = new THREE.Path()
+  for (let i = inner.length - 1; i >= 0; i--) {
+    const p = inner[i]
+    if (i === inner.length - 1) hole.moveTo(p.x, p.y)
+    else hole.lineTo(p.x, p.y)
+  }
+  hole.closePath()
+  shape.holes.push(hole)
+  const geo = new THREE.ShapeGeometry(shape, 1)
+  geo.rotateX(Math.PI / 2)
+  geo.translate(0, y, 0)
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, envMapIntensity: 0.12, side: THREE.DoubleSide })
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.receiveShadow = true
+  disposables.push(geo, mat)
+  return mesh
+}
+
+/** 一棵简单行道树（树干 + 双层树冠） */
+function buildTree(x: number, z: number): THREE.Group {
+  const g = new THREE.Group()
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4f2f, roughness: 0.9, envMapIntensity: 0.15 })
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.1, 1.0, 8),
+    trunkMat,
+  )
+  trunk.position.y = 0.45
+  const crownMat1 = new THREE.MeshStandardMaterial({ color: 0x4c7a3d, roughness: 0.85, envMapIntensity: 0.2 })
+  const crown1 = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 10, 8),
+    crownMat1,
+  )
+  crown1.position.y = 1.35
+  crown1.scale.set(1, 1.15, 1)
+  const crownMat2 = new THREE.MeshStandardMaterial({ color: 0x5c8a46, roughness: 0.85, envMapIntensity: 0.2 })
+  const crown2 = new THREE.Mesh(
+    new THREE.SphereGeometry(0.34, 10, 8),
+    crownMat2,
+  )
+  crown2.position.y = 1.85
+  g.add(trunk, crown1, crown2)
+  g.position.set(x, -0.05, z)
+  g.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) o.castShadow = true
+  })
+  disposables.push(...[trunk, crown1, crown2].map((m) => m.geometry), trunkMat, crownMat1, crownMat2)
+  return g
+}
+
 function buildGround(): THREE.Group {
   const group = new THREE.Group()
   const groundGeo = new THREE.CircleGeometry(32, 64)
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.95 })
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x7f8769, roughness: 0.95, metalness: 0, envMapIntensity: 0.1 })
   const ground = new THREE.Mesh(groundGeo, groundMat)
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -0.05
@@ -571,22 +836,111 @@ function buildGround(): THREE.Group {
   group.add(ground)
   disposables.push(groundGeo, groundMat)
 
-  // 广场铺装环（仅地面装饰，不影响建筑轮廓）
-  const ringSpecs: Array<[number, number, number]> = [
-    [10.4, 11.0, 0xdcd7cb],
-    [11.15, 11.23, 0xd0cabd],
-    [12.4, 12.52, 0xdcd7cb],
-  ]
-  for (const [r0, r1, color] of ringSpecs) {
-    const geo = new THREE.RingGeometry(r0, r1, 96)
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95 })
-    const ring = new THREE.Mesh(geo, mat)
-    ring.rotation.x = -Math.PI / 2
-    ring.position.y = -0.048
-    ring.receiveShadow = true
-    group.add(ring)
-    disposables.push(geo, mat)
+  // 建筑底部外包矩形（所有层最外：x∈[-6.877,6.877], z∈[-4.577,3.427]）
+  const bX0 = -6.877
+  const bX1 = 6.877
+  const bZ0 = -4.577
+  const bZ1 = 3.427
+
+  // 道路系统尺寸：行人道宽 1.2；双车道道路宽 4.8
+  const SIDE_WALK = 1.2
+  const ROAD_W = 4.8
+
+  // 行人道贴合墙体轮廓（含东南/西南切角）：
+  // base = 首层外墙轮廓，行人道内/外边 = base 向外偏移 0.08 / 1.28
+  const base = wallOutline(1)
+  const walkInnerP = offsetPolygon(base, 0.08)
+  const walkOuterP = offsetPolygon(base, 1.28)
+  const roadRect = {
+    x0: bX0 - 0.08 - SIDE_WALK - ROAD_W,
+    z0: bZ0 - 0.08 - SIDE_WALK - ROAD_W,
+    x1: bX1 + 0.08 + SIDE_WALK + ROAD_W,
+    z1: bZ1 + 0.08 + SIDE_WALK + ROAD_W,
   }
+  const rectPts = (r: { x0: number; z0: number; x1: number; z1: number }) => [
+    new THREE.Vector2(r.x0, r.z0),
+    new THREE.Vector2(r.x1, r.z0),
+    new THREE.Vector2(r.x1, r.z1),
+    new THREE.Vector2(r.x0, r.z1),
+  ]
+
+  // 1) 行人道铺装面（灰色，贴合切角）+ 内沿条带 + 外沿条带
+  group.add(makePolygonRing(walkOuterP, walkInnerP, 0x8a8a8a, 0.006))
+  group.add(makePolygonRing(offsetPolygon(base, 0.28), walkInnerP, 0x757575, 0.008))
+  group.add(makePolygonRing(walkOuterP, offsetPolygon(base, 1.1), 0x9a9a9a, 0.008))
+
+  // 2) 路缘石：行人道与道路交界凸起条（贴合 walkOuterP 轮廓）
+  group.add(makePolygonRing(offsetPolygon(walkOuterP, 0.06), offsetPolygon(walkOuterP, -0.06), 0xb8b1a3, 0.03))
+
+  // 3) 双车道道路（黑灰沥青，外缘矩形 + 行人道轮廓内孔）
+  group.add(makePolygonRing(rectPts(roadRect), walkOuterP, 0x333333, 0.006))
+
+  // 4) 车道标线
+  const lineY = 0.013
+  const rectLines = (
+    rx0: number, rz0: number, rx1: number, rz1: number,
+    dash: number, gap: number, color: number,
+  ) => {
+    const mat = new THREE.LineBasicMaterial({ color })
+    const pts: number[] = []
+    const seg = (ax: number, az: number, bx: number, bz: number) => {
+      const dx = bx - ax
+      const dz = bz - az
+      const len = Math.hypot(dx, dz)
+      const nx = dx / len
+      const nz = dz / len
+      let d = 0
+      while (d < len) {
+        const e = Math.min(d + dash, len)
+        pts.push(ax + nx * d, lineY, az + nz * d, ax + nx * e, lineY, az + nz * e)
+        d += dash + gap
+      }
+    }
+    seg(rx0, rz0, rx1, rz0)
+    seg(rx1, rz0, rx1, rz1)
+    seg(rx1, rz1, rx0, rz1)
+    seg(rx0, rz1, rx0, rz0)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    const line = new THREE.LineSegments(geo, mat)
+    disposables.push(geo, mat)
+    return line
+  }
+
+  // 车道边缘实线（道路内缘贴路缘石、外缘，白色实线）
+  const edgeIn = { x0: bX0 - 0.08 - SIDE_WALK - 0.22, z0: bZ0 - 0.08 - SIDE_WALK - 0.22, x1: bX1 + 0.08 + SIDE_WALK + 0.22, z1: bZ1 + 0.08 + SIDE_WALK + 0.22 }
+  const edgeOut = { x0: roadRect.x0 + 0.22, z0: roadRect.z0 + 0.22, x1: roadRect.x1 - 0.22, z1: roadRect.z1 - 0.22 }
+  group.add(rectLines(edgeIn.x0, edgeIn.z0, edgeIn.x1, edgeIn.z1, 1e6, 1e6, 0xe8e6e0))
+  group.add(rectLines(edgeOut.x0, edgeOut.z0, edgeOut.x1, edgeOut.z1, 1e6, 1e6, 0xe8e6e0))
+
+  // 双车道中线（白色虚线）
+  const midOff = 0.08 + SIDE_WALK + ROAD_W / 2
+  const mX0 = bX0 - midOff
+  const mX1 = bX1 + midOff
+  const mZ0 = bZ0 - midOff
+  const mZ1 = bZ1 + midOff
+  group.add(rectLines(mX0, mZ0, mX1, mZ1, 1.2, 0.6, 0xf0eee8))
+
+  // 5) 行人道铺装砖缝（暖灰细线，沿矩形行人道带四边各两条）
+  const jointY = 0.009
+  const jointColor = 0x6f675a
+  const walkRect = { x0: bX0 - 0.08 - SIDE_WALK, z0: bZ0 - 0.08 - SIDE_WALK, x1: bX1 + 0.08 + SIDE_WALK, z1: bZ1 + 0.08 + SIDE_WALK }
+  const j1 = 0.35
+  const j2 = 0.75
+  group.add(rectLines(walkRect.x0, walkRect.z0 + j1, walkRect.x1, walkRect.z0 + j1, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x0, walkRect.z0 + j2, walkRect.x1, walkRect.z0 + j2, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x0, walkRect.z1 - j1, walkRect.x1, walkRect.z1 - j1, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x0, walkRect.z1 - j2, walkRect.x1, walkRect.z1 - j2, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x0 + j1, walkRect.z0, walkRect.x0 + j1, walkRect.z1, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x0 + j2, walkRect.z0, walkRect.x0 + j2, walkRect.z1, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x1 - j1, walkRect.z0, walkRect.x1 - j1, walkRect.z1, 0.95, 0.18, jointColor))
+  group.add(rectLines(walkRect.x1 - j2, walkRect.z0, walkRect.x1 - j2, walkRect.z1, 0.95, 0.18, jointColor))
+
+  // 6) 南面行道树：一排 4 棵，沿行人道外侧
+  const treeZ = bZ1 + 0.08 + SIDE_WALK + 0.15
+  const TREE_X = [-4.5, -1.5, 1.5, 4.5]
+  for (const tx of TREE_X) group.add(buildTree(tx, treeZ))
+
   return group
 }
 
@@ -709,13 +1063,57 @@ function buildLogo() {
   const tex = new THREE.TextureLoader().load('/wingon-logo.png')
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 8
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
-  const logo = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat)
+  // 自定义 emboss 材质：基于透明度梯度生成法线，产生高光/阴影的 3D 凸起感
+  const embossMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTex: { value: tex },
+      uTexel: { value: new THREE.Vector2(1 / w, 1 / h) },
+      uLightDir: { value: new THREE.Vector3(-0.45, 0.75, 0.45).normalize() },
+      uSpecPower: { value: 32.0 },
+      uEmboss: { value: 0.55 },
+      uAmbient: { value: 0.35 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uTex;
+      uniform vec2 uTexel;
+      uniform vec3 uLightDir;
+      uniform float uSpecPower;
+      uniform float uEmboss;
+      uniform float uAmbient;
+      varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(uTex, vUv);
+        float aL = texture2D(uTex, vUv + vec2(-uTexel.x, 0.0)).a;
+        float aR = texture2D(uTex, vUv + vec2( uTexel.x, 0.0)).a;
+        float aU = texture2D(uTex, vUv + vec2(0.0,  uTexel.y)).a;
+        float aD = texture2D(uTex, vUv + vec2(0.0, -uTexel.y)).a;
+        vec3 grad = vec3((aR - aL) * uEmboss, (aU - aD) * uEmboss, 1.0);
+        vec3 N = normalize(grad);
+        float diff = max(dot(N, uLightDir), 0.0);
+        float spec = pow(max(diff, 0.0), uSpecPower);
+        float light = uAmbient + diff * (1.0 - uAmbient) + spec * 0.3;
+        float shadow = max(0.0, dot(N, normalize(vec3(0.4, -0.3, 0.8))));
+        light = mix(light, 0.18, clamp(shadow * 0.6, 0.0, 1.0));
+        vec3 rgb = c.rgb * light;
+        gl_FragColor = vec4(rgb, c.a);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(w, h), embossMat)
   logo.position.set(cx, yCenter, cz)
-  // 平面默认法线 +Z，绕 Y 旋转使法线朝 (nx, nz) = (0.707, 0.707)，即贴合切角斜面
   logo.rotation.y = Math.atan2(nx, nz)
-  logo.renderOrder = 21
-  disposables.push(tex, mat, logo.geometry as THREE.BufferGeometry)
+  logo.renderOrder = 22
+  disposables.push(tex, embossMat, logo.geometry as THREE.BufferGeometry)
   return logo
 }
 
@@ -766,19 +1164,22 @@ function onPointerMove(ev: PointerEvent) {
   if (buildingGroup) {
     const wallRoot = buildingGroup.children[0]
     const buildHits = wallRoot ? raycaster.intersectObject(wallRoot, true) : []
-    if (buildHits.length) {
-      const hit = buildHits[0]
+    // 排除 LineSegments（BIM 线框无 face），取第一个实体 Mesh 命中
+    const hit = buildHits.find((h) => h.object.type === 'Mesh')
+    if (hit) {
       // 建筑会自动旋转：命中点/法线先转回建筑局部坐标，方便对照快照格子
       const inv = buildingGroup.matrixWorld.clone().invert()
       const local = hit.point.clone().applyMatrix4(inv)
-      const wn = (hit.face?.normal ?? new THREE.Vector3())
+      const wn = hit.face.normal
         .clone()
         .transformDirection(hit.object.matrixWorld)
         .transformDirection(inv)
       let face = 'unknown'
       const ax = Math.abs(wn.x)
       const az = Math.abs(wn.z)
-      if (ax > 0.45 && az > 0.45) {
+      if (Math.abs(wn.y) > 0.7) {
+        face = '屋顶面'
+      } else if (ax > 0.45 && az > 0.45) {
         face = '斜面 (切角)'
       } else if (ax > az) {
         face = wn.x > 0 ? '东面 (+X)' : '西面 (-X)'
