@@ -1700,3 +1700,42 @@ class Database:
                     "col_no": col_no,
                 })
                 return cur.rowcount
+
+    # ── 幕墙外观配置 ─────────────────────────────────────────────
+
+    def get_facade_config(self) -> dict[str, Any] | None:
+        """获取幕墙配置（单行），无记录返回 None。"""
+        sql = "SELECT id, config_json FROM building_facade_config ORDER BY id ASC LIMIT 1"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                row = cur.fetchone()
+        if row is None:
+            return None
+        import json
+        d = dict(row)
+        if isinstance(d.get("config_json"), str):
+            d["config_json"] = json.loads(d["config_json"])
+        return d
+
+    def save_facade_config(self, config: dict[str, Any]) -> int:
+        """保存幕墙配置（UPSERT 单行），返回 id。"""
+        import json
+        payload = json.dumps(config, ensure_ascii=False)
+        sql_check = "SELECT id FROM building_facade_config ORDER BY id ASC LIMIT 1"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql_check)
+                row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        "UPDATE building_facade_config SET config_json = %s WHERE id = %s",
+                        (payload, int(row["id"])),
+                    )
+                    return int(row["id"])
+                else:
+                    cur.execute(
+                        "INSERT INTO building_facade_config (config_json) VALUES (%s)",
+                        (payload,),
+                    )
+                    return cur.lastrowid

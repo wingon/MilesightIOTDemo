@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -17,6 +17,7 @@ import {
   floorName,
   type SnapCell,
 } from './facadeSnapshot'
+import { getFacadeConfig, saveFacadeConfig, type FacadeConfig } from '../../api/facade'
 
 /*
  * 楼宇幕墙美化 DEMO（参考 thingraph/bim-viewer 的外观风格）
@@ -39,20 +40,10 @@ import {
 /** 格子边长 = CELL_SIZE * 0.96（同原组件 cellSize） */
 const CELL_W = CELL_SIZE * 0.96
 const HALF = CELL_W / 2
-/** 幕墙板厚 */
-const PANEL_T = 0.05
 /** 幕墙外表面外凸量（防 z-fighting，视觉可忽略） */
 const PROUD = 0.012
-/** 楼层实体带（spandrel）高度 */
-const SPANDREL_H = 0.11
-/** 玻璃带高度 */
-const GLASS_H = FLOOR_H - SPANDREL_H * 2
-/** 竖向分隔框截面宽 */
-const MULLION_W = 0.055
-/** 竖向分隔框截面深 */
+/** 竖向分隔框截面深（LOGO 定位用） */
 const MULLION_D = 0.075
-/** 竖向分隔框高（整层高，跨层缝连续） */
-const MULLION_H = FLOOR_H + FLOOR_GAP
 /** 核心筒尺寸/位置（与原 Building3D 的 Visual core 一致） */
 const CORE_W = CELL_SIZE * 1.6
 const CORE_H = FLOOR_COUNT * SLAB
@@ -64,9 +55,19 @@ const ROOF_Y = (FLOOR_COUNT - 1) * SLAB + FLOOR_H
 const autoRotate = ref(true)
 const rotateSpeed = ref(1)
 const glassOpacity = ref(0.55)
-const showMullions = ref(true)
 const showOutline = ref(false)
 const preset = ref<'day' | 'dusk' | 'night'>('day')
+
+// ---- 幕墙窗户配置 ----
+const windowOrientation = ref<'vertical' | 'horizontal'>('vertical')
+const windowWidthRatio = ref(0.4)
+const windowHeightRatio = ref(0.7)
+const cellWindows = ref<Record<string, boolean>>({})
+const showFloorLines = ref(true)
+const showColLines = ref(false)
+const windowMeshes: THREE.Mesh[] = []
+let windowGlassMat: THREE.MeshPhysicalMaterial | null = null
+let windowFrameMat: THREE.MeshStandardMaterial | null = null
 
 // ---- 楼层悬停状态 ----（参照 /building-viewer 行为）
 const hoveredFloor = ref<number | null>(null)
@@ -92,9 +93,7 @@ let animId = 0
 let pmrem: THREE.PMREMGenerator | null = null
 
 // 可动态调整的材质
-let glassMats: THREE.MeshPhysicalMaterial[] = []
 let innerMat: THREE.MeshStandardMaterial | null = null
-let mullionMesh: THREE.Mesh | null = null
 let outlineLines: THREE.LineSegments | null = null
 
 // 拾取/悬停句柄
@@ -105,6 +104,10 @@ let floorHits: THREE.Mesh[] = []
 /** 悬停高亮盒 */
 let hoverHighlight: THREE.Mesh | null = null
 let hoverHighlightMat: THREE.MeshBasicMaterial | null = null
+/** 按楼层分组的建筑 mesh（用于悬停凸出动画） */
+let floorGroups: THREE.Group[] = []
+/** 当前凸出目标楼层（0 = 无） */
+let hoverScaleFloor = 0
 
 /** 需要统一释放的资源 */
 const disposables: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = []
@@ -394,49 +397,213 @@ function segNormal(seg: WallSeg): THREE.Vector3 {
   return new THREE.Vector3(Math.sin(seg.phi), 0, Math.cos(seg.phi))
 }
 
-/** 生成一段幕墙的板材几何（上带 / 玻璃 / 下带），返回后由调用方归入对应材质桶 */
-function panelGeometries(seg: WallSeg, yC: number): {
-  bands: THREE.BoxGeometry[]
-  glass: THREE.BoxGeometry
-} {
-  const n = segNormal(seg)
-  // 板中心：面位置沿法线内移（板外表面 = 格子外表面 + PROUD）
-  const px = seg.cx - n.x * (PANEL_T / 2 - PROUD)
-  const pz = seg.cz - n.z * (PANEL_T / 2 - PROUD)
+/**
+ * 生成单个格子的窗户（窗框 + 深色玻璃）。
+ * 检查四邻是否缺失（暴露面），在每个暴露面上生成一扇竖向/横向窗户。
+ */
+function buildCellWindows(
+  cell: SnapCell,
+  level: number,
+  yC: number,
+  cellSet: Set<string>,
+  has: (r: number, c: number) => boolean,
+): { frames: THREE.BufferGeometry[]; glass: THREE.BufferGeometry[] } {
+  const key = `${level},${cell.row},${cell.col}`
+  if (!cellWindows.value[key]) return { frames: [], glass: [] }
+  const { x, z } = cellCenter(cell.row, cell.col)
 
-  const band = (y: number) => {
-    const g = new THREE.BoxGeometry(seg.len, SPANDREL_H, PANEL_T)
-    g.rotateY(seg.phi)
-    g.translate(px, y, pz)
-    return g
-  }
-  const glass = new THREE.BoxGeometry(seg.len, GLASS_H, PANEL_T - 0.014)
-  glass.rotateY(seg.phi)
-  glass.translate(px, yC, pz)
+  const glassW = cellWidthRatio() * CELL_SIZE
+  const glassH = cellHeightRatio() * FLOOR_H
+  const frames: THREE.BufferGeometry[] = []
+  const glass: THREE.BufferGeometry[] = []
 
-  return {
-    bands: [band(yC + FLOOR_H / 2 - SPANDREL_H / 2), band(yC - FLOOR_H / 2 + SPANDREL_H / 2)],
-    glass,
+  const addWindow = (
+    o: number, // 0=北(-z) 1=南(+z) 2=西(-x) 3=东(+x)
+    winW: number,
+    winH: number,
+  ) => {
+    const t = 0.018
+    const frameT = 0.04
+    const frameD = 0.05
+    const HW = CELL_SIZE / 2 // 墙体半宽（外表面 = 中心 ± HW）
+    // 法线单位向量
+    let nx = 0, nz = 0
+    if (o === 0) nz = -1
+    else if (o === 1) nz = 1
+    else if (o === 2) nx = -1
+    else nx = 1
+    // 玻璃中心：贴墙外表面（外表面在中心+法线*HW），略凸出 PROUD
+    const gx = x + nx * (HW + t / 2 - PROUD)
+    const gz = z + nz * (HW + t / 2 - PROUD)
+    const fx = x + nx * (HW + frameD / 2 - PROUD)
+    const fz = z + nz * (HW + frameD / 2 - PROUD)
+    const horiz = (o === 0 || o === 1) // 法线沿 z，窗平面沿 x
+
+    // 玻璃（凸出墙外，成"开窗"感）
+    const g = horiz
+      ? new THREE.BoxGeometry(winW, winH, t)
+      : new THREE.BoxGeometry(t, winH, winW)
+    g.translate(gx, yC, gz)
+    glass.push(g)
+
+    // 四根窗框条（面板外缘）
+    const bars: THREE.BoxGeometry[] = []
+    if (horiz) {
+      bars.push(new THREE.BoxGeometry(winW + frameT, frameT, frameD))
+      bars.push(new THREE.BoxGeometry(winW + frameT, frameT, frameD))
+      bars.push(new THREE.BoxGeometry(frameT, winH + frameT, frameD))
+      bars.push(new THREE.BoxGeometry(frameT, winH + frameT, frameD))
+      bars[0].translate(fx, yC + winH / 2, fz)
+      bars[1].translate(fx, yC - winH / 2, fz)
+      bars[2].translate(fx, yC + frameT / 2, fz)
+      bars[3].translate(fx, yC - frameT / 2, fz)
+    } else {
+      bars.push(new THREE.BoxGeometry(frameD, frameT, winW + frameT))
+      bars.push(new THREE.BoxGeometry(frameD, frameT, winW + frameT))
+      bars.push(new THREE.BoxGeometry(frameD, winH + frameT, frameT))
+      bars.push(new THREE.BoxGeometry(frameD, winH + frameT, frameT))
+      bars[0].translate(fx, yC + winH / 2, fz)
+      bars[1].translate(fx, yC - winH / 2, fz)
+      bars[2].translate(fx, yC + frameT / 2, fz)
+      bars[3].translate(fx, yC - frameT / 2, fz)
+    }
+    frames.push(...bars)
   }
+
+  if (cell.shape === 'Rect') {
+    if (!has(cell.row - 1, cell.col)) addWindow(0, glassW, glassH)
+    if (!has(cell.row + 1, cell.col)) addWindow(1, glassW, glassH)
+    if (!has(cell.row, cell.col - 1)) addWindow(2, glassW, glassH)
+    if (!has(cell.row, cell.col + 1)) addWindow(3, glassW, glassH)
+  } else {
+    // 三角形：斜面 45°，在斜面上开一扇窗
+    const t = 0.018
+    const diagW = glassW * 1.1
+    const g = new THREE.BoxGeometry(diagW, glassH, t)
+    if (cell.rotY > 0) g.rotateY(-Math.PI / 4)
+    else g.rotateY(Math.PI / 4)
+    // 斜面外表面：沿法线（±π/4）外移，凸出墙面
+    const d = CELL_SIZE / 2
+    const ang = cell.rotY > 0 ? -Math.PI / 4 : Math.PI / 4
+    const nx = Math.sin(ang) * -1
+    const nz = Math.cos(ang)
+    g.translate(x + nx * d, yC, z + nz * d)
+    glass.push(g)
+  }
+
+  return { frames, glass }
 }
 
-/** 生成一段幕墙的竖向分隔框几何（含段两端） */
-function mullionGeometries(seg: WallSeg, yC: number): THREE.BoxGeometry[] {
-  const n = segNormal(seg)
-  const d = new THREE.Vector3(Math.cos(seg.phi), 0, -Math.sin(seg.phi))
-  // 分隔框中心：板外表面再向外凸出
-  const px = seg.cx + n.x * (PROUD + MULLION_D / 2 - 0.018)
-  const pz = seg.cz + n.z * (PROUD + MULLION_D / 2 - 0.018)
-  const count = Math.max(2, Math.round(seg.len / CELL_SIZE) + 1)
-  const out: THREE.BoxGeometry[] = []
-  for (let i = 0; i < count; i++) {
-    const t = -seg.len / 2 + (i / (count - 1)) * seg.len
-    const g = new THREE.BoxGeometry(MULLION_W, MULLION_H, MULLION_D)
-    g.rotateY(seg.phi)
-    g.translate(px + d.x * t, yC, pz + d.z * t)
-    out.push(g)
+function cellWidthRatio() {
+  // 窗户占格子宽度的比例：竖向=滑块值；横向=滑块值向上取到较宽
+  const v = windowOrientation.value === 'vertical' ? windowWidthRatio.value : windowWidthRatio.value * 2.2
+  return Math.min(v, 0.92)
+}
+
+function cellHeightRatio() {
+  // 窗户占楼层高度的比例：竖向=滑块值向上取到较高；横向=滑块值
+  const v = windowOrientation.value === 'vertical' ? windowHeightRatio.value * 1.15 : windowHeightRatio.value
+  return Math.min(v, 0.92)
+}
+
+/**
+ * 通用楼层外轮廓（与 topFloorOutline 同源算法，适用于任意楼层布局）。
+ * 返回 XZ 平面闭合多边形（逆时针），用于 ExtrudeGeometry 生成连续墙面。
+ */
+function computeFloorOutline(cells: SnapCell[]): THREE.Vector2[] {
+  if (!cells.length) return []
+  const cellSet = new Set(cells.map((c) => `${c.row},${c.col}`))
+  const has = (r: number, c: number) => cellSet.has(`${r},${c}`)
+  const HW = CELL_SIZE / 2
+
+  interface RawEdge { dir: 'N' | 'S' | 'E' | 'W'; line: number; from: number; to: number }
+  const raw: RawEdge[] = []
+  for (const cell of cells) {
+    const { x, z } = cellCenter(cell.row, cell.col)
+    if (cell.shape === 'Rect') {
+      if (!has(cell.row - 1, cell.col)) raw.push({ dir: 'N', line: z - HW, from: x - HW, to: x + HW })
+      if (!has(cell.row + 1, cell.col)) raw.push({ dir: 'S', line: z + HW, from: x - HW, to: x + HW })
+      if (!has(cell.row, cell.col - 1)) raw.push({ dir: 'W', line: x - HW, from: z - HW, to: z + HW })
+      if (!has(cell.row, cell.col + 1)) raw.push({ dir: 'E', line: x + HW, from: z - HW, to: z + HW })
+    } else {
+      if (cell.rotY > 0) {
+        if (!has(cell.row - 1, cell.col)) raw.push({ dir: 'N', line: z - HW, from: x - HW, to: x + HW })
+        if (!has(cell.row, cell.col - 1)) raw.push({ dir: 'W', line: x - HW, from: z - HW, to: z + HW })
+      } else {
+        if (!has(cell.row + 1, cell.col)) raw.push({ dir: 'S', line: z + HW, from: x - HW, to: x + HW })
+        if (!has(cell.row, cell.col - 1)) raw.push({ dir: 'W', line: x - HW, from: z - HW, to: z + HW })
+      }
+    }
   }
-  return out
+
+  const GAP_TOL = 0.05
+  const groups = new Map<string, RawEdge[]>()
+  for (const e of raw) {
+    const key = `${e.dir}|${e.line.toFixed(4)}`
+    const arr = groups.get(key) ?? []
+    arr.push(e)
+    groups.set(key, arr)
+  }
+  const merged: RawEdge[] = []
+  for (const arr of groups.values()) {
+    arr.sort((a, b) => a.from - b.from)
+    let cur: RawEdge = { ...arr[0] }
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i].from - cur.to < GAP_TOL) {
+        cur.to = Math.max(cur.to, arr[i].to)
+      } else {
+        merged.push(cur)
+        cur = { ...arr[i] }
+      }
+    }
+    merged.push(cur)
+  }
+
+  interface Edge { bx: number; bz: number; ex: number; ez: number }
+  const edges: Edge[] = []
+  for (const m of merged) {
+    if (m.dir === 'N') edges.push({ bx: m.from, bz: m.line, ex: m.to, ez: m.line })
+    else if (m.dir === 'E') edges.push({ bx: m.line, bz: m.from, ex: m.line, ez: m.to })
+    else if (m.dir === 'S') edges.push({ bx: m.to, bz: m.line, ex: m.from, ez: m.line })
+    else edges.push({ bx: m.line, bz: m.to, ex: m.line, ez: m.from })
+  }
+
+  for (const cell of cells) {
+    if (cell.shape !== 'Triangle') continue
+    const { x, z } = cellCenter(cell.row, cell.col)
+    if (cell.rotY > 0) {
+      edges.push({ bx: x - HW, bz: z + HW, ex: x + HW, ez: z - HW })
+    } else {
+      edges.push({ bx: x + HW, bz: z + HW, ex: x - HW, ez: z - HW })
+    }
+  }
+
+  if (!edges.length) return []
+
+  const nextMap = new Map<string, Edge>()
+  for (const e of edges) nextMap.set(`${e.bx.toFixed(4)},${e.bz.toFixed(4)}`, e)
+
+  const pts: THREE.Vector2[] = []
+  const startKey = `${edges[0].bx.toFixed(4)},${edges[0].bz.toFixed(4)}`
+  let cur = edges[0]
+  for (let i = 0; i <= edges.length; i++) {
+    pts.push(new THREE.Vector2(cur.bx, cur.bz))
+    const key = `${cur.ex.toFixed(4)},${cur.ez.toFixed(4)}`
+    if (key === startKey) break
+    let nxt = nextMap.get(key)
+    if (!nxt) {
+      let best: Edge | null = null
+      let bestD = 0.08
+      for (const e of edges) {
+        const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
+        if (d < bestD) { bestD = d; best = e }
+      }
+      nxt = best
+    }
+    if (!nxt) break
+    cur = nxt
+  }
+  return pts
 }
 
 /** 三角形格子几何（与原 floorGridTriangle.createTriangleGeometry 完全一致） */
@@ -467,16 +634,6 @@ function mergeCompat(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return merged
 }
 
-/** 简单字符串哈希（玻璃色调稳定分配） */
-function hashStr(s: string): number {
-  let h = 2166136261
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return Math.abs(h)
-}
-
 // ---- 建筑构建 ----
 
 function buildBuilding(): THREE.Group {
@@ -484,21 +641,28 @@ function buildBuilding(): THREE.Group {
 
   // 材质
   innerMat = new THREE.MeshStandardMaterial({
-    color: 0x2b3440,       // 冷灰蓝内衬（透过玻璃看是"室内"）
+    color: 0x857c70,       // 深米灰墙面
     roughness: 0.9,
-    metalness: 0,
+    metalness: 0.02,
     emissive: 0xffb46b,    // 夜间内透暖光
     emissiveIntensity: 0,
   })
-  const spandrelMat = new THREE.MeshStandardMaterial({
-    color: 0xd6d0c4,       // 浅暖灰楼层带
-    roughness: 0.5,
-    metalness: 0.15,
+  windowGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x4a6a80,       // 深灰蓝玻璃（与浅色混凝土形成对比）
+    metalness: 0.25,
+    roughness: 0.08,
+    transparent: true,
+    opacity: 0.82,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.06,
+    envMapIntensity: 1.3,
+    side: THREE.DoubleSide,
+    depthWrite: false,
   })
-  const mullionMat = new THREE.MeshStandardMaterial({
-    color: 0x3b444e,       // 深灰金属分隔框
-    roughness: 0.35,
-    metalness: 0.75,
+  windowFrameMat = new THREE.MeshStandardMaterial({
+    color: 0x54595f,       // 金属窗框
+    roughness: 0.4,
+    metalness: 0.7,
   })
   const roofMat = new THREE.MeshStandardMaterial({
     color: 0xc9c4ba,
@@ -510,118 +674,117 @@ function buildBuilding(): THREE.Group {
     roughness: 0.4,
     metalness: 0.65,
   })
-  const GLASS_COLORS = [0x9fc6d6, 0x8fbccf, 0xa9cfd4]
-  glassMats = GLASS_COLORS.map(
-    (c) =>
-      new THREE.MeshPhysicalMaterial({
-        color: c,
-        metalness: 0.15,
-        roughness: 0.05,
-        transparent: true,
-        opacity: glassOpacity.value,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.06,
-        envMapIntensity: 1.4,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-  )
-  disposables.push(innerMat, spandrelMat, mullionMat, roofMat, coreMat, ...glassMats)
+  disposables.push(innerMat, windowGlassMat!, windowFrameMat!, roofMat, coreMat)
 
-  // 几何收集桶（按材质分组，最后合并成少量 mesh）
+  // 几何收集桶（源几何统一释放用；线框用 outlineGeos）
   const innerGeos: THREE.BufferGeometry[] = []
-  const bandGeos: THREE.BufferGeometry[] = []
-  const mullionGeos: THREE.BufferGeometry[] = []
+  const windowGeos: THREE.BufferGeometry[] = []
+  const frameGeos: THREE.BufferGeometry[] = []
   const roofGeos: THREE.BufferGeometry[] = []
-  const glassBuckets: THREE.BufferGeometry[][] = [[], [], []]
   const outlineGeos: THREE.BufferGeometry[] = []
+  floorGroups = []
 
   for (const floor of FLOORS) {
     const yC = floorCenterY(floor.level)
 
-    // 1) 格子本体（内衬，轮廓 1:1 的决定因素）
+    // 计算本楼层中心（XZ 取格子中心范围中点，作为凸出缩放的原点）
+    let fminX = Infinity, fmaxX = -Infinity, fminZ = Infinity, fmaxZ = -Infinity
+    for (const c of floor.cells) {
+      const p = cellCenter(c.row, c.col)
+      fminX = Math.min(fminX, p.x); fmaxX = Math.max(fmaxX, p.x)
+      fminZ = Math.min(fminZ, p.z); fmaxZ = Math.max(fmaxZ, p.z)
+    }
+    const fcx = (fminX + fmaxX) / 2
+    const fcz = (fminZ + fmaxZ) / 2
+
+    // 墙盒子中心：开启横线时留缝（用层中心 yC）；关闭时填满层缝（中心下移 FLOOR_GAP/2）。
+    // 顶层恒用 FLOOR_H（顶面固定 ROOF_Y），因盖板在上，避免格子顶面与盖板 z-fighting
+    const isTop = floor.level === FLOOR_COUNT
+    const boxH = showFloorLines.value || isTop ? FLOOR_H : FLOOR_H + FLOOR_GAP
+    const cy = showFloorLines.value || isTop ? yC : yC + FLOOR_GAP / 2
+    // 竖线开关：开启时用 CELL_W（留 4% 列缝显示竖线）；关闭时用全尺寸 CELL_SIZE（无缝）
+    const bw = showColLines.value ? CELL_W : CELL_SIZE
+
+    const floorGroup = new THREE.Group()
+    floorGroup.position.set(fcx, cy, fcz)
+    const fInnerGeos: THREE.BufferGeometry[] = []
+    const fWindowGeos: THREE.BufferGeometry[] = []
+    const fFrameGeos: THREE.BufferGeometry[] = []
+
+    const floorCellSet = new Set(floor.cells.map((c) => `${c.row},${c.col}`))
+    const hasCell = (r: number, c: number) => floorCellSet.has(`${r},${c}`)
     for (const cell of floor.cells) {
       const { x, z } = cellCenter(cell.row, cell.col)
       let geo: THREE.BufferGeometry
       if (cell.shape === 'Rect') {
-        geo = new THREE.BoxGeometry(CELL_W, FLOOR_H, CELL_W)
+        geo = new THREE.BoxGeometry(bw, boxH, bw)
       } else {
-        geo = triangleGeometry(CELL_W, FLOOR_H)
+        geo = triangleGeometry(bw, boxH)
         if (cell.rotY > 0) geo.rotateY(TRI_ROT_Y)
       }
-      geo.translate(x, yC, z)
+      // 相对楼层中心构建（便于围绕中心缩放凸出）
+      geo.translate(x - fcx, 0, z - fcz)
+      fInnerGeos.push(geo)
       innerGeos.push(geo)
+      // 线框用绝对坐标副本
+      const absGeo = geo.clone().translate(fcx, 0, fcz)
+      outlineGeos.push(absGeo)
+
+      // 逐格窗户（窗框 + 玻璃）—— 每层独立，一格一格
+      const win = buildCellWindows(cell, floor.level, cy, floorCellSet, hasCell)
+      for (const g of win.glass) { g.translate(-fcx, -cy, -fcz); fWindowGeos.push(g); windowGeos.push(g) }
+      for (const f of win.frames) { f.translate(-fcx, -cy, -fcz); fFrameGeos.push(f); frameGeos.push(f) }
     }
 
-    // 2) 幕墙段（整片玻璃 + 楼层带 + 分隔框）
-    const segs = segmentsForFloor(floor.cells)
-    segs.forEach((seg, idx) => {
-      const { bands, glass } = panelGeometries(seg, yC)
-      bandGeos.push(...bands)
-      outlineGeos.push(...bands)
-      const bucket = hashStr(`${floor.level}-${idx}`) % 3
-      glassBuckets[bucket].push(glass)
-      mullionGeos.push(...mullionGeometries(seg, yC))
-    })
-
-    // 3) 屋顶板（仅顶层，覆盖格子顶面的分缝）
-    if (floor.level === FLOOR_COUNT) {
+    // 顶层格子顶面线框（供 BIM outline）
+    if (isTop) {
       for (const cell of floor.cells) {
         const { x, z } = cellCenter(cell.row, cell.col)
-        const g = new THREE.BoxGeometry(CELL_W, 0.03, CELL_W)
+        const g = new THREE.BoxGeometry(CELL_SIZE, 0.03, CELL_SIZE)
         g.translate(x, ROOF_Y + 0.015, z)
         roofGeos.push(g)
         outlineGeos.push(g)
       }
     }
+
+    // 层内合并为少量 mesh（随楼层凸出一起缩放）
+    const fInnerMesh = new THREE.Mesh(mergeCompat(fInnerGeos), innerMat)
+    fInnerMesh.castShadow = true
+    fInnerMesh.receiveShadow = true
+    floorGroup.add(fInnerMesh)
+    disposables.push(fInnerMesh.geometry)
+
+    if (fWindowGeos.length) {
+      const fWindowMesh = new THREE.Mesh(mergeCompat(fWindowGeos), windowGlassMat)
+      fWindowMesh.renderOrder = 10
+      floorGroup.add(fWindowMesh)
+      disposables.push(fWindowMesh.geometry)
+    }
+    if (fFrameGeos.length) {
+      const fFrameMesh = new THREE.Mesh(mergeCompat(fFrameGeos), windowFrameMat)
+      fFrameMesh.renderOrder = 9
+      floorGroup.add(fFrameMesh)
+      disposables.push(fFrameMesh.geometry)
+    }
+
+    group.add(floorGroup)
+    floorGroups.push(floorGroup)
   }
-
-  // 合并 & 建网格（源几何在最后统一释放）
-  const innerMesh = new THREE.Mesh(mergeCompat(innerGeos), innerMat)
-  innerMesh.castShadow = true
-  innerMesh.receiveShadow = true
-  group.add(innerMesh)
-  disposables.push(innerMesh.geometry)
-
-  const bandMesh = new THREE.Mesh(mergeCompat(bandGeos), spandrelMat)
-  bandMesh.castShadow = true
-  bandMesh.receiveShadow = true
-  group.add(bandMesh)
-  disposables.push(bandMesh.geometry)
-
-  mullionMesh = new THREE.Mesh(mergeCompat(mullionGeos), mullionMat)
-  mullionMesh.castShadow = true
-  group.add(mullionMesh)
-  disposables.push(mullionMesh.geometry)
-
-  const roofMesh = new THREE.Mesh(mergeCompat(roofGeos), roofMat)
-  roofMesh.castShadow = true
-  roofMesh.receiveShadow = true
-  group.add(roofMesh)
-  disposables.push(roofMesh.geometry)
 
   // 整片灰色屋顶盖板：边追踪生成精确轮廓（含西南/东南阶梯缺角），贴合幕墙外轮廓
   const coverPts = topFloorOutline()
   const coverShape = new THREE.Shape(coverPts)
-  // 加厚盖板（0.12）并抬高：核心筒顶部(y=9.20)与旧盖板顶面共面导致闪烁，
-  // 现盖板底面=ROOF_Y-0.02、顶面=ROOF_Y+0.10，核心筒顶被完全包住
+  // 盖板底面 = ROOF_Y+0.02（略高于顶层格子顶面 9.16），顶面 = ROOF_Y+0.14；
+  // 核心筒顶部(y=9.20)被盖板完全包住，消除与格子顶面的 z-fighting
   const coverGeo = new THREE.ExtrudeGeometry(coverShape, { depth: 0.12, bevelEnabled: false })
   // rotateX(π/2)：shape 的 y（=建筑 z）→ 世界 +z，避免南北镜像
   coverGeo.rotateX(Math.PI / 2)
-  coverGeo.translate(0, ROOF_Y + 0.10, 0)
+  coverGeo.translate(0, ROOF_Y + 0.14, 0)
   const coverMat = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide })
   const roofCover = new THREE.Mesh(coverGeo, coverMat)
   roofCover.receiveShadow = true
   group.add(roofCover)
   disposables.push(coverGeo, coverMat)
-
-  glassBuckets.forEach((geos, i) => {
-    if (!geos.length) return
-    const mesh = new THREE.Mesh(mergeCompat(geos), glassMats[i])
-    mesh.renderOrder = 10
-    group.add(mesh)
-    disposables.push(mesh.geometry)
-  })
 
   // 核心筒（与原 Building3D 的 Visual core 完全一致）
   const coreGeo = new THREE.BoxGeometry(CORE_W, CORE_H, CORE_W)
@@ -649,10 +812,9 @@ function buildBuilding(): THREE.Group {
   // 统一释放源几何（数据已拷贝进 merge/Edges 结果，不再需要）
   const sourceGeos = [
     ...innerGeos,
-    ...bandGeos,
-    ...mullionGeos,
+    ...windowGeos,
+    ...frameGeos,
     ...roofGeos,
-    ...glassBuckets.flat(),
     ...lineGeos,
     coreOutlineGeo,
   ]
@@ -762,7 +924,10 @@ function offsetPolygon(pts: THREE.Vector2[], dist: number): THREE.Vector2[] {
     const away = cur.clone().sub(center)
     if (bis.dot(away) < 0) bis.multiplyScalar(-1)
     const cosA = Math.max(-1, Math.min(1, e1.dot(e2)))
-    const mlen = dist / Math.cos(Math.acos(cosA) / 2)
+    let mlen = dist / Math.cos(Math.acos(cosA) / 2)
+    // 尖角处 miter 过长会导致多边形自交，ShapeGeometry 三角化失败露出背景色（白带）。
+    // 限制 miter 长度上限，防止自交。
+    mlen = Math.min(mlen, dist * 2.5)
     out.push(cur.clone().addScaledVector(bis, mlen))
   }
   return out
@@ -787,7 +952,7 @@ function makePolygonRing(
   const geo = new THREE.ShapeGeometry(shape, 1)
   geo.rotateX(Math.PI / 2)
   geo.translate(0, y, 0)
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, envMapIntensity: 0.12, side: THREE.DoubleSide })
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, envMapIntensity: 0.03, side: THREE.DoubleSide })
   const mesh = new THREE.Mesh(geo, mat)
   mesh.receiveShadow = true
   disposables.push(geo, mat)
@@ -827,6 +992,7 @@ function buildTree(x: number, z: number): THREE.Group {
 
 function buildGround(): THREE.Group {
   const group = new THREE.Group()
+  ;(group as any).__isGround = true
   const groundGeo = new THREE.CircleGeometry(32, 64)
   const groundMat = new THREE.MeshStandardMaterial({ color: 0x7f8769, roughness: 0.95, metalness: 0, envMapIntensity: 0.1 })
   const ground = new THREE.Mesh(groundGeo, groundMat)
@@ -846,34 +1012,27 @@ function buildGround(): THREE.Group {
   const SIDE_WALK = 1.2
   const ROAD_W = 4.8
 
-  // 行人道贴合墙体轮廓（含东南/西南切角）：
-  // base = 首层外墙轮廓，行人道内/外边 = base 向外偏移 0.08 / 1.28
-  const base = wallOutline(1)
-  const walkInnerP = offsetPolygon(base, 0.08)
-  const walkOuterP = offsetPolygon(base, 1.28)
-  const roadRect = {
-    x0: bX0 - 0.08 - SIDE_WALK - ROAD_W,
-    z0: bZ0 - 0.08 - SIDE_WALK - ROAD_W,
-    x1: bX1 + 0.08 + SIDE_WALK + ROAD_W,
-    z1: bZ1 + 0.08 + SIDE_WALK + ROAD_W,
-  }
+  // 行人道 / 道路均用简单【矩形环】（凸多边形，earcut 稳定，绝无自交产生的白色缺陷区）。
+  // （原实现用 offsetPolygon 沿含切角的凹轮廓外扩，在东南/西南尖角处自交，
+  //   ShapeGeometry 三角化失败露出白色背景，无法直视 —— 已弃用。）
+  const swRect = { x0: bX0 - 0.08 - SIDE_WALK, z0: bZ0 - 0.08 - SIDE_WALK, x1: bX1 + 0.08 + SIDE_WALK, z1: bZ1 + 0.08 + SIDE_WALK }
+  const innerRect = { x0: bX0 - 0.08, z0: bZ0 - 0.08, x1: bX1 + 0.08, z1: bZ1 + 0.08 }
+  const roadRect = { x0: swRect.x0 - ROAD_W, z0: swRect.z0 - ROAD_W, x1: swRect.x1 + ROAD_W, z1: swRect.z1 + ROAD_W }
   const rectPts = (r: { x0: number; z0: number; x1: number; z1: number }) => [
     new THREE.Vector2(r.x0, r.z0),
     new THREE.Vector2(r.x1, r.z0),
     new THREE.Vector2(r.x1, r.z1),
     new THREE.Vector2(r.x0, r.z1),
   ]
+  const mkRing = (o: { x0: number; z0: number; x1: number; z1: number }, i: { x0: number; z0: number; x1: number; z1: number }, color: number, y: number) =>
+    group.add(makePolygonRing(rectPts(o), rectPts(i), color, y))
 
-  // 1) 行人道铺装面（灰色，贴合切角）+ 内沿条带 + 外沿条带
-  group.add(makePolygonRing(walkOuterP, walkInnerP, 0x8a8a8a, 0.006))
-  group.add(makePolygonRing(offsetPolygon(base, 0.28), walkInnerP, 0x757575, 0.008))
-  group.add(makePolygonRing(walkOuterP, offsetPolygon(base, 1.1), 0x9a9a9a, 0.008))
-
-  // 2) 路缘石：行人道与道路交界凸起条（贴合 walkOuterP 轮廓）
-  group.add(makePolygonRing(offsetPolygon(walkOuterP, 0.06), offsetPolygon(walkOuterP, -0.06), 0xb8b1a3, 0.03))
-
-  // 3) 双车道道路（黑灰沥青，外缘矩形 + 行人道轮廓内孔）
-  group.add(makePolygonRing(rectPts(roadRect), walkOuterP, 0x333333, 0.006))
+  // 1) 行人道铺装面（灰色矩形环）
+  mkRing(swRect, innerRect, 0x9d9d9d, 0.006)
+  // 2) 路缘石：行人道与道路交界凸起条（灰色石材）
+  mkRing(swRect, { x0: swRect.x0 + 0.14, z0: swRect.z0 + 0.14, x1: swRect.x1 - 0.14, z1: swRect.z1 - 0.14 }, 0x8f8f8f, 0.03)
+  // 3) 双车道道路（黑灰沥青矩形环）
+  mkRing(roadRect, swRect, 0x333333, 0.006)
 
   // 4) 车道标线
   const lineY = 0.013
@@ -996,8 +1155,9 @@ function buildHoverHighlight() {
   disposables.push(geo, hoverHighlightMat)
 }
 
-/** 更新高亮盒：匹配悬停楼层的外包轮廓 */
+/** 更新高亮盒：匹配悬停楼层的外包轮廓，并标记凸出目标楼层 */
 function updateHoverHighlight(floor: number | null) {
+  hoverScaleFloor = floor ?? 0
   if (!hoverHighlight) return
   if (floor == null) {
     hoverHighlight.visible = false
@@ -1007,7 +1167,8 @@ function updateHoverHighlight(floor: number | null) {
   const y0 = (floor - 1) * SLAB
   const y1 = floor === FLOOR_COUNT ? ROOF_Y : floor * SLAB
   hoverHighlight.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
-  hoverHighlight.scale.set(maxX - minX, y1 - y0, maxZ - minZ)
+  // 略大于楼层轮廓，形成"鼓起"的金色光晕
+  hoverHighlight.scale.set((maxX - minX) * 1.05, (y1 - y0) * 1.01, (maxZ - minZ) * 1.05)
   hoverHighlight.visible = true
 }
 
@@ -1110,6 +1271,7 @@ function buildLogo() {
     side: THREE.DoubleSide,
   })
   const logo = new THREE.Mesh(new THREE.PlaneGeometry(w, h), embossMat)
+  ;(logo as any).__isLogo = true
   logo.position.set(cx, yCenter, cz)
   logo.rotation.y = Math.atan2(nx, nz)
   logo.renderOrder = 22
@@ -1208,6 +1370,46 @@ function onPointerLeave() {
   clearHover()
 }
 
+/** 点击建筑表面 → 识别格子 → 开关窗户 */
+function onPointerClick(ev: PointerEvent) {
+  if (!host.value || !camera || !raycaster || !buildingGroup) return
+  updatePointer(ev)
+  raycaster.setFromCamera(pointer, camera)
+
+  // 射线与建筑本体相交（第一个子对象 = buildBuilding 返回的 group）
+  const wallRoot = buildingGroup.children.find(
+    (c) => c !== hoverHighlight && !floorHits.includes(c as THREE.Mesh) && !(c as any).__isGround && !(c as any).__isLogo,
+  )
+  if (!wallRoot) return
+  const hits = raycaster.intersectObject(wallRoot, true)
+  const hit = hits.find((h) => h.object.type === 'Mesh')
+  if (!hit) return
+
+  // 命中点转回建筑局部坐标
+  const inv = buildingGroup.matrixWorld.clone().invert()
+  const local = hit.point.clone().applyMatrix4(inv)
+
+  // 反推格子行列号：x = (col-6.5)*CELL_SIZE, z = (row-4.5)*CELL_SIZE
+  const col = Math.round(local.x / CELL_SIZE + 6.5)
+  const row = Math.round(local.z / CELL_SIZE + 4.5)
+  // 外墙表面的浮点误差可能让边界格子圆整出界，clamp 回有效范围
+  const cr = Math.min(7, Math.max(1, row))
+  const cc = Math.min(12, Math.max(1, col))
+  if ((cr < 1 || cr > 7 || cc < 1 || cc > 12)) return
+
+  // 反推 3D 楼层：floorCenterY = (level-1)*SLAB + FLOOR_H/2
+  const level = Math.min(FLOOR_COUNT, Math.max(1, Math.round((local.y - FLOOR_H / 2) / SLAB) + 1))
+
+  const key = `${level},${cr},${cc}`
+  const next = { ...cellWindows.value }
+  if (next[key]) {
+    delete next[key]
+  } else {
+    next[key] = true
+  }
+  cellWindows.value = next
+}
+
 // ---- 预设应用 ----
 
 function applyPreset(name: 'day' | 'dusk' | 'night') {
@@ -1237,11 +1439,36 @@ function initThreeJS() {
   const h = host.value.clientHeight
 
   scene = new THREE.Scene()
+  ;(window as any).__dbg = {
+    scene,
+    camera,
+    get cam() { return camera },
+    get raycaster() { return raycaster },
+    get groups() { return floorGroups },
+  }
+  ;(window as any).__ray = (nx: number, ny: number) => {
+    if (!raycaster || !camera) return []
+    raycaster.setFromCamera(new THREE.Vector2(nx, ny), camera!)
+    const hits = raycaster.intersectObject(buildingGroup!, true)
+    return hits.slice(0, 15).map((h) => ({
+      obj: h.object.type,
+      name: h.object.name || '',
+      matColor: (h.object as THREE.Mesh).material ? ((h.object as THREE.Mesh).material as THREE.MeshBasicMaterial).color?.getHexString?.() : undefined,
+      matTransparent: (h.object as THREE.Mesh).material?.transparent,
+      matVisible: (h.object as THREE.Mesh).material?.visible,
+      objVisible: h.object.visible,
+      geo: (h.object as THREE.Mesh).geometry?.type,
+      dist: +h.distance.toFixed(2),
+      world: [+h.point.x.toFixed(2), +h.point.y.toFixed(2), +h.point.z.toFixed(2)],
+      parent: h.object.parent?.type,
+      parentName: h.object.parent?.name || '',
+    }))
+  }
 
   camera = new THREE.PerspectiveCamera(42, w / Math.max(1, h), 0.1, 400)
   camera.position.set(18, 13, 22)
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(w, h, false)
   renderer.shadowMap.enabled = true
@@ -1299,6 +1526,7 @@ function initThreeJS() {
 
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('pointerleave', onPointerLeave)
+  renderer.domElement.addEventListener('click', onPointerClick)
 
   applyPreset(preset.value)
   animate()
@@ -1308,6 +1536,19 @@ function animate() {
   animId = requestAnimationFrame(animate)
   if (buildingGroup && autoRotate.value) {
     buildingGroup.rotation.y += 0.004 * rotateSpeed.value
+  }
+  // 楼层悬停凸出动画：悬停层水平放大（Y 固定），其余层平滑缩回
+  const TARGET_SCALE = 1.06
+  for (let i = 0; i < floorGroups.length; i++) {
+    const g = floorGroups[i]
+    if (!g) continue
+    const level = i + 1
+    const target = level === hoverScaleFloor ? TARGET_SCALE : 1
+    // 平滑插值逼近（指数缓动）
+    const k = 0.16
+    g.scale.x += (target - g.scale.x) * k
+    g.scale.z += (target - g.scale.z) * k
+    g.scale.y = 1
   }
   controls?.update()
   if (renderer && scene && camera) renderer.render(scene, camera)
@@ -1334,21 +1575,91 @@ function resetView() {
 watch(preset, (v) => applyPreset(v))
 
 watch(glassOpacity, (v) => {
-  for (const m of glassMats) m.opacity = v
-})
-
-watch(showMullions, (v) => {
-  if (mullionMesh) mullionMesh.visible = v
+  if (windowGlassMat) windowGlassMat.opacity = v
 })
 
 watch(showOutline, (v) => {
   if (outlineLines) outlineLines.visible = v
 })
 
+// ---- 幕墙窗户配置变更触发重建 ----
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleRebuild() {
+  if (rebuildTimer) clearTimeout(rebuildTimer)
+  rebuildTimer = setTimeout(() => {
+    rebuildTimer = null
+    rebuildBuilding()
+  }, 60)
+}
+
+watch([windowOrientation, windowWidthRatio, windowHeightRatio], () => {
+  scheduleRebuild()
+  persistConfig()
+})
+
+watch(showFloorLines, () => {
+  scheduleRebuild()
+})
+
+watch(showColLines, () => {
+  scheduleRebuild()
+})
+
+watch(cellWindows, () => {
+  scheduleRebuild()
+  persistConfig()
+}, { deep: true })
+
+function rebuildBuilding() {
+  if (!scene || !buildingGroup) return
+  // 移除旧建筑 mesh（保留 ground、floorHits、hoverHighlight、logo）
+  const toRemove: THREE.Object3D[] = []
+  for (const child of buildingGroup.children) {
+    if (child === hoverHighlight) continue
+    if (floorHits.includes(child as THREE.Mesh)) continue
+    if ((child as any).__isGround || (child as any).__isLogo) continue
+    toRemove.push(child)
+  }
+  for (const obj of toRemove) {
+    buildingGroup.remove(obj)
+    if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose()
+  }
+  buildingGroup.add(buildBuilding())
+}
+
+async function loadConfig() {
+  try {
+    const { data } = await getFacadeConfig()
+    if (data) {
+      windowOrientation.value = data.orientation || 'vertical'
+      windowWidthRatio.value = data.widthRatio ?? 0.4
+      windowHeightRatio.value = data.heightRatio ?? 0.7
+      cellWindows.value = data.cellWindows || {}
+    }
+  } catch { /* 后端未启动时静默 */ }
+}
+
+async function persistConfig() {
+  try {
+    await saveFacadeConfig({
+      orientation: windowOrientation.value,
+      widthRatio: windowWidthRatio.value,
+      heightRatio: windowHeightRatio.value,
+      cellWindows: cellWindows.value,
+    })
+  } catch { /* 静默 */ }
+}
+
+function clearAllWindows() {
+  cellWindows.value = {}
+}
+
 onMounted(() => {
   if (!host.value) return
   initThreeJS()
   window.addEventListener('resize', onResize)
+  loadConfig()
 })
 
 onBeforeUnmount(() => {
@@ -1357,6 +1668,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   renderer?.domElement.removeEventListener('pointermove', onPointerMove)
   renderer?.domElement.removeEventListener('pointerleave', onPointerLeave)
+  renderer?.domElement.removeEventListener('click', onPointerClick)
   controls?.dispose()
   pmrem?.dispose()
   renderer?.dispose()
@@ -1373,9 +1685,11 @@ onBeforeUnmount(() => {
   buildingGroup = null
   pmrem = null
   raycaster = null
-  glassMats = []
+  floorGroups = []
+  hoverScaleFloor = 0
   innerMat = null
-  mullionMesh = null
+  windowGlassMat = null
+  windowFrameMat = null
   outlineLines = null
   floorHits = []
   hoverHighlight = null
@@ -1387,7 +1701,7 @@ onBeforeUnmount(() => {
   <div ref="host" class="facade3d">
     <!-- 控制面板 -->
     <div class="ctrl-panel">
-      <div class="ctrl-title">幕墙外观 DEMO</div>
+      <div class="ctrl-title">混凝土幕墙 DEMO</div>
       <div class="ctrl-row">
         <label class="ctrl-label">场景</label>
         <div class="seg-group">
@@ -1402,30 +1716,74 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+
+      <!-- 窗户方向 -->
       <div class="ctrl-row">
-        <label class="ctrl-label">玻璃透明度</label>
+        <label class="ctrl-label">窗户方向</label>
+        <div class="seg-group">
+          <button
+            class="seg-btn"
+            :class="{ active: windowOrientation === 'vertical' }"
+            @click="windowOrientation = 'vertical'"
+          >竖向</button>
+          <button
+            class="seg-btn"
+            :class="{ active: windowOrientation === 'horizontal' }"
+            @click="windowOrientation = 'horizontal'"
+          >横向</button>
+        </div>
+      </div>
+
+      <!-- 窗户宽度 -->
+      <div class="ctrl-row">
+        <label class="ctrl-label">窗户宽度</label>
         <input
-          v-model.number="glassOpacity"
+          v-model.number="windowWidthRatio"
           class="ctrl-slider"
           type="range"
-          min="0.2"
+          min="0.15"
+          max="0.9"
+          step="0.05"
+        />
+        <span class="ctrl-value">{{ (windowWidthRatio * 100).toFixed(0) }}%</span>
+      </div>
+
+      <!-- 窗户高度 -->
+      <div class="ctrl-row">
+        <label class="ctrl-label">窗户高度</label>
+        <input
+          v-model.number="windowHeightRatio"
+          class="ctrl-slider"
+          type="range"
+          min="0.15"
           max="0.95"
           step="0.05"
         />
-        <span class="ctrl-value">{{ glassOpacity.toFixed(2) }}</span>
+        <span class="ctrl-value">{{ (windowHeightRatio * 100).toFixed(0) }}%</span>
+      </div>
+
+      <!-- 批量操作 -->
+      <div class="ctrl-row">
+        <button type="button" class="ctrl-btn" :class="{ on: showFloorLines }" @click="showFloorLines = !showFloorLines">
+          {{ showFloorLines ? '隐藏横线' : '显示横线' }}
+        </button>
+        <button type="button" class="ctrl-btn" :class="{ on: showColLines }" @click="showColLines = !showColLines">
+          {{ showColLines ? '隐藏竖线' : '显示竖线' }}
+        </button>
       </div>
       <div class="ctrl-row">
-        <button type="button" class="ctrl-btn" :class="{ on: showMullions }" @click="showMullions = !showMullions">
-          {{ showMullions ? '隐藏竖框' : '显示竖框' }}
-        </button>
+        <button type="button" class="ctrl-btn" @click="clearAllWindows">全部清除</button>
+      </div>
+
+      <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: showOutline }" @click="showOutline = !showOutline">
           {{ showOutline ? '关闭线框' : 'BIM 线框' }}
         </button>
-      </div>
-      <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: autoRotate }" @click="autoRotate = !autoRotate">
           {{ autoRotate ? '暂停旋转' : '自动旋转' }}
         </button>
+      </div>
+      <div class="ctrl-row">
         <button type="button" class="ctrl-btn" @click="resetView">复位视角</button>
       </div>
       <div v-if="autoRotate" class="ctrl-row">
@@ -1440,6 +1798,7 @@ onBeforeUnmount(() => {
         />
         <span class="ctrl-value">{{ rotateSpeed.toFixed(1) }}×</span>
       </div>
+      <div class="ctrl-hint">点击建筑表面可逐格开关窗户</div>
     </div>
     <!-- 左上角信息 -->
     <div class="info-badge">
@@ -1583,6 +1942,13 @@ onBeforeUnmount(() => {
 .ctrl-btn:hover,
 .seg-btn:hover {
   background: rgba(255, 255, 255, 0.16);
+}
+
+.ctrl-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
 }
 
 .info-badge {
