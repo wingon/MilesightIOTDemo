@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { message, Modal } from 'ant-design-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -18,6 +19,35 @@ import {
   type SnapCell,
 } from './facadeSnapshot'
 import { getFacadeConfig, saveFacadeConfig, type FacadeConfig } from '../../api/facade'
+import { getFloorEnvironmentSummary } from '../../api/environment'
+import {
+  INTERIOR_CELLS,
+  cellToWorld,
+  shouldExcludeCell,
+} from '../../utils/buildingDemo'
+import {
+  listBuildingCellShapes,
+  listBuildingFloors,
+  updateCellRotation,
+  cellEdit,
+  undoEdit,
+} from '../../api/building'
+import {
+  createGeometryByType,
+  isHiddenType,
+  parseRotation,
+  type CellShapeConfig,
+  type GridType,
+} from '../../utils/floorGrid'
+import {
+  envColorFor,
+  envRange,
+  TEMPERATURE_BAND_COLORS,
+  TEMPERATURE_GRADIENT_STOPS,
+  TEMPERATURE_TICKS,
+  type EnvMetric,
+  type FloorEnvValue,
+} from '../../utils/envColor'
 
 /*
  * 楼宇幕墙美化 DEMO（参考 thingraph/bim-viewer 的外观风格）
@@ -51,12 +81,43 @@ const CORE_POS = new THREE.Vector3(CELL_SIZE * 2, CORE_H / 2 - FLOOR_GAP / 2, CE
 /** 建筑总高（不含核心筒凸出） */
 const ROOF_Y = (FLOOR_COUNT - 1) * SLAB + FLOOR_H
 
+// ---- 父组件接口（与 /building-viewer 的 Building3D 对齐：选中楼层 / 着色指标 / 加载态 / 编辑数据） ----
+const props = defineProps<{
+  /** 当前选中的 3D 楼层（1..11），用于高亮显示 */
+  selectedFloor?: number | null
+  /** 外部着色指标（温度/湿度）；控制面板内部按钮亦会同步回传 */
+  metric?: EnvMetric
+  /** 数据加载完成前不初始化 3D */
+  loading?: boolean
+  /** 编辑模式用的格子设置（building_cell，DB 驱动） */
+  cellShapes?: CellShapeConfig[]
+  /** 楼栋 ID（用于添加/删除/撤回格子） */
+  buildingId?: number
+}>()
+
+const emit = defineEmits<{
+  selectFloor: [floor: number]
+  'update:metric': [v: EnvMetric]
+  refreshShapes: []
+}>()
+
 // ---- 控件状态 ----
-const autoRotate = ref(true)
+const autoRotate = ref(false)
+/** 控制面板显示状态（左上角提示文字连点 3 次弹出/收起） */
+const panelVisible = ref(false)
 const rotateSpeed = ref(1)
 const glassOpacity = ref(0.55)
 const showOutline = ref(false)
 const preset = ref<'day' | 'dusk' | 'night'>('day')
+/** 自动场景：按本地实时日出/日落时间自动切换 日间/黄昏/夜间；关闭时回到日间 */
+const autoPreset = ref(false)
+/** 自动场景检测定时器 */
+let autoSceneTimer: ReturnType<typeof setInterval> | undefined
+/** 楼宇位置（永安貨倉大廈，香港）用于日出日落计算 */
+const SUN_LAT = 22.3
+const SUN_LNG = 114.2
+/** 黄昏窗口：日落前后各 1 小时 */
+const DUSK_WINDOW_H = 1
 
 // ---- 幕墙窗户配置 ----
 const windowOrientation = ref<'vertical' | 'horizontal'>('vertical')
@@ -65,6 +126,14 @@ const windowHeightRatio = ref(0.7)
 const cellWindows = ref<Record<string, boolean>>({})
 const showFloorLines = ref(true)
 const showColLines = ref(false)
+/** 原始状态：建筑渲成独立格子体块（绿/灰分层、带格缝），复刻 /building-viewer 外观 */
+const rawMode = ref(false)
+/** 原始状态下按温湿度着色的指标 */
+const metric = ref<EnvMetric>('temperature')
+/** 各楼层温湿度（level 为 3D 层号 1..11） */
+const floorEnv = ref<Record<number, FloorEnvValue>>({})
+/** 是否允许点击墙面创建窗户 */
+const cellClickEnabled = ref(false)
 const windowMeshes: THREE.Mesh[] = []
 let windowGlassMat: THREE.MeshPhysicalMaterial | null = null
 let windowFrameMat: THREE.MeshStandardMaterial | null = null
@@ -74,9 +143,25 @@ const hoveredFloor = ref<number | null>(null)
 const toastVisible = ref(false)
 const toastStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
 
-// ---- 调试提示 ----
+// ---- 调试提示（由控制面板「调试信息」开关控制）----
+const debugEnabled = ref(false)
 const debugInfo = ref<string>('')
 const debugVisible = ref(false)
+
+// ---- 格子编辑模式（整合自 /building-viewer 的 Building3D 编辑面板，入口放入控制面板）----
+const editUnlocked = ref(false)
+const editDirty = ref(false)
+const confirmOpen = ref(false)
+const UNDO_LIMIT = 10
+const undoableOps = ref(0)
+const snapshotShapes = ref<CellShapeConfig[]>([])
+const editToolMode = ref<'none' | 'add' | 'delete'>('none')
+const editFeedback = ref('')
+let feedbackTimer: ReturnType<typeof setTimeout> | undefined
+const editModeToast = ref(false)
+let editModeToastTimer: ReturnType<typeof setTimeout> | undefined
+/** 进入编辑模式前的外观状态（退出时恢复） */
+const prevRawMode = ref(false)
 
 const host = ref<HTMLDivElement>()
 
@@ -95,6 +180,9 @@ let pmrem: THREE.PMREMGenerator | null = null
 // 可动态调整的材质
 let innerMat: THREE.MeshStandardMaterial | null = null
 let outlineLines: THREE.LineSegments | null = null
+let logoMesh: THREE.Mesh | null = null
+/** 美化状态各楼层 inner 材质（按温湿度着色；夜间预设需逐层调整 emissiveIntensity） */
+let floorInnerMats: THREE.MeshStandardMaterial[] = []
 
 // 拾取/悬停句柄
 let raycaster: THREE.Raycaster | null = null
@@ -104,10 +192,39 @@ let floorHits: THREE.Mesh[] = []
 /** 悬停高亮盒 */
 let hoverHighlight: THREE.Mesh | null = null
 let hoverHighlightMat: THREE.MeshBasicMaterial | null = null
+/** 选中楼层高亮盒 */
+let selectedHighlight: THREE.Mesh | null = null
+let selectedHighlightMat: THREE.MeshBasicMaterial | null = null
 /** 按楼层分组的建筑 mesh（用于悬停凸出动画） */
 let floorGroups: THREE.Group[] = []
 /** 当前凸出目标楼层（0 = 无） */
 let hoverScaleFloor = 0
+
+// ---- 编辑模式拾取/渲染句柄（与 Building3D 一致） ----
+/** 编辑模式下所有可拾取的格子 mesh */
+let floorMeshes: THREE.Mesh[] = []
+/** floor number -> meshes */
+const meshesByFloor = new Map<number, THREE.Mesh[]>()
+/** 编辑模式下隐藏格子（is_active=0）的占位组 */
+let hiddenCellGroup: THREE.Group | null = null
+let hiddenCellMaterials: THREE.Material[] = []
+let hiddenCellGeos: THREE.BufferGeometry[] = []
+let hiddenCellMeshes: THREE.Mesh[] = []
+/** 拖拽模板组（添加模式：楼宇旁的圆/方/三角） */
+let dragSourceGroup: THREE.Group | null = null
+let dragSourceMeshes: THREE.Mesh[] = []
+let dragPreviewMesh: THREE.Mesh | null = null
+let dragPreviewMat: THREE.MeshStandardMaterial | null = null
+let activeDragSource: THREE.Mesh | null = null
+let dragTarget: { row: number; col: number; floor3d: number; exists: boolean; shape: 'Rect' | 'Cylinder' | 'Triangle' } | null = null
+let prevAutoRotate = true
+const DRAG_SHAPES: Array<'Rect' | 'Cylinder' | 'Triangle'> = ['Cylinder', 'Rect', 'Triangle']
+const DRAG_SOURCE_COLOR = 0x5fb8b8
+let dragRotationDeg = 0
+/** 编辑模式使用的几何集合（含 createGeometryByType 的共享缓存，重建时不得 dispose） */
+let editGeos = new Set<THREE.BufferGeometry>()
+/** 编辑模式每层 Rect 复用的 BoxGeometry（每次新建，下次编辑前释放） */
+let lastEditCellGeo: THREE.BufferGeometry | null = null
 
 /** 需要统一释放的资源 */
 const disposables: Array<THREE.BufferGeometry | THREE.Material | THREE.Texture> = []
@@ -291,7 +408,7 @@ function topFloorOutline(): THREE.Vector2[] {
     if (key === startKey) break
     let nxt = nextMap.get(key)
     if (!nxt) {
-      let best: Edge | null = null
+      let best: Edge | undefined = undefined
       let bestD = 0.08
       for (const e of edges) {
         const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
@@ -592,7 +709,7 @@ function computeFloorOutline(cells: SnapCell[]): THREE.Vector2[] {
     if (key === startKey) break
     let nxt = nextMap.get(key)
     if (!nxt) {
-      let best: Edge | null = null
+      let best: Edge | undefined = undefined
       let bestD = 0.08
       for (const e of edges) {
         const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
@@ -636,7 +753,105 @@ function mergeCompat(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
 
 // ---- 建筑构建 ----
 
+/**
+ * 原始状态：复刻 /building-viewer 的格子化建筑。
+ * 每格独立 Box（CELL_W 留 4% 格缝），绿/灰按楼层交替，顶部灰色网格盖板，
+ * 屋顶中央黑色核心筒，东南/西南切角保持。
+ */
+function buildRawBuilding(): THREE.Group {
+  const group = new THREE.Group()
+  const rawGeos: THREE.BufferGeometry[] = []
+  const outlineGeos: THREE.BufferGeometry[] = []
+  floorGroups = []
+  floorInnerMats = []
+
+  const coreMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.8, metalness: 0.2 })
+  disposables.push(coreMat)
+
+  // 温湿度范围（温度固定 0~35，湿度按数据动态）—— 与 /building-viewer 一致
+  const [min, max] = envRange(floorEnv.value, metric.value)
+  const FALLBACK = '#8a8f93'
+
+  for (const floor of FLOORS) {
+    const yC = floorCenterY(floor.level)
+    const env = floorEnv.value[floor.level]
+    const value = metric.value === 'temperature' ? env?.temperature ?? null : env?.humidity ?? null
+    const color = envColorFor(metric.value, value, min, max)
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color ?? FALLBACK),
+      roughness: 0.6,
+      metalness: 0.05,
+      emissive: color ? new THREE.Color(color) : new THREE.Color(0x000000),
+      emissiveIntensity: 0.15,    // 颜色自发光提亮（与右下图例色一致）
+    })
+    disposables.push(floorMat)
+
+    let fminX = Infinity, fmaxX = -Infinity, fminZ = Infinity, fmaxZ = -Infinity
+    for (const c of floor.cells) {
+      const p = cellCenter(c.row, c.col)
+      fminX = Math.min(fminX, p.x); fmaxX = Math.max(fmaxX, p.x)
+      fminZ = Math.min(fminZ, p.z); fmaxZ = Math.max(fmaxZ, p.z)
+    }
+    const fcx = (fminX + fmaxX) / 2
+    const fcz = (fminZ + fmaxZ) / 2
+    const fcy = yC
+
+    const localGeos: THREE.BufferGeometry[] = []
+    // 原始状态格缝更明显（每格四周留 0.07 缝）
+    const gsz = Math.max(0.1, CELL_W - 0.07)
+    for (const cell of floor.cells) {
+      const { x, z } = cellCenter(cell.row, cell.col)
+      let geo: THREE.BufferGeometry
+      if (cell.shape === 'Rect') {
+        geo = new THREE.BoxGeometry(gsz, FLOOR_H, gsz)
+      } else {
+        geo = triangleGeometry(gsz, FLOOR_H)
+        if (cell.rotY > 0) geo.rotateY(TRI_ROT_Y)
+      }
+      geo.translate(x - fcx, 0, z - fcz)
+      localGeos.push(geo)
+      rawGeos.push(geo)
+      const absGeo = geo.clone().translate(fcx, 0, fcz)
+      outlineGeos.push(absGeo)
+    }
+
+    // 独立楼层 group（保留楼层凸出缩放能力）
+    const fg = new THREE.Group()
+    fg.position.set(fcx, fcy, fcz)
+    const fmesh = new THREE.Mesh(mergeCompat(localGeos), floorMat)
+    fmesh.castShadow = true
+    fmesh.receiveShadow = true
+    fg.add(fmesh)
+    disposables.push(fmesh.geometry)
+    group.add(fg)
+    floorGroups.push(fg)
+  }
+
+  // 核心筒（黑色方块，屋顶中央，与参考图一致）
+  const coreGeo = new THREE.BoxGeometry(CORE_W * 0.7, CORE_H, CORE_W * 0.7)
+  const core = new THREE.Mesh(coreGeo, coreMat)
+  core.position.set(CELL_SIZE * 2, CORE_H / 2, CELL_SIZE * 1)
+  group.add(core)
+  disposables.push(coreGeo)
+  outlineGeos.push(coreGeo.clone().translate(core.position.x, core.position.y, core.position.z))
+
+  // 木色线条（BIM 线框风格，可选）
+  const lineGeos: THREE.BufferGeometry[] = []
+  for (const g of outlineGeos) lineGeos.push(new THREE.EdgesGeometry(g, 15))
+  const mergedEdges = mergeCompat(lineGeos)
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x263241, transparent: true, opacity: 0.7 })
+  outlineLines = new THREE.LineSegments(mergedEdges, lineMat)
+  outlineLines.visible = showOutline.value
+  group.add(outlineLines)
+  disposables.push(mergedEdges, lineMat)
+
+  for (const g of rawGeos) g.dispose()
+  return group
+}
+
 function buildBuilding(): THREE.Group {
+  // 原始状态：复刻 /building-viewer 的独立格子体块（绿/灰分层、带格缝）
+  if (rawMode.value) return buildRawBuilding()
   const group = new THREE.Group()
 
   // 材质
@@ -683,9 +898,28 @@ function buildBuilding(): THREE.Group {
   const roofGeos: THREE.BufferGeometry[] = []
   const outlineGeos: THREE.BufferGeometry[] = []
   floorGroups = []
+  floorInnerMats = []
+
+  // 温湿度范围（温度固定 0~35，湿度按数据动态）——与 /building-viewer 一致
+  const [rawMin, rawMax] = envRange(floorEnv.value, metric.value)
+  const BASE_GRAY = 0x857c70
 
   for (const floor of FLOORS) {
     const yC = floorCenterY(floor.level)
+
+    // 本楼层温湿度着色（美化墙面保留混凝土质感，但颜色跟随温湿度；无数据回退米灰）
+    const env = floorEnv.value[floor.level]
+    const value = metric.value === 'temperature' ? env?.temperature ?? null : env?.humidity ?? null
+    const envColor = envColorFor(metric.value, value, rawMin, rawMax)
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: envColor ? new THREE.Color(envColor) : new THREE.Color(BASE_GRAY),
+      roughness: 0.8,
+      metalness: 0.02,
+      emissive: envColor ? new THREE.Color(envColor) : new THREE.Color(0x000000),
+      emissiveIntensity: 0.15,    // 颜色自发光提亮（与右下图例色一致，柔和清晰）
+    })
+    floorInnerMats.push(floorMat)
+    disposables.push(floorMat)
 
     // 计算本楼层中心（XZ 取格子中心范围中点，作为凸出缩放的原点）
     let fminX = Infinity, fmaxX = -Infinity, fminZ = Infinity, fmaxZ = -Infinity
@@ -748,7 +982,7 @@ function buildBuilding(): THREE.Group {
     }
 
     // 层内合并为少量 mesh（随楼层凸出一起缩放）
-    const fInnerMesh = new THREE.Mesh(mergeCompat(fInnerGeos), innerMat)
+    const fInnerMesh = new THREE.Mesh(mergeCompat(fInnerGeos), floorMat)
     fInnerMesh.castShadow = true
     fInnerMesh.receiveShadow = true
     floorGroup.add(fInnerMesh)
@@ -884,7 +1118,7 @@ function wallOutline(level: number): THREE.Vector2[] {
     if (key === startKey) break
     let nxt = nextMap.get(key)
     if (!nxt) {
-      let best: Edge | null = null
+      let best: Edge | undefined = undefined
       let bestD = 0.2
       for (const e of edges) {
         const d = Math.hypot(e.bx - cur.ex, e.bz - cur.ez)
@@ -1155,6 +1389,691 @@ function buildHoverHighlight() {
   disposables.push(geo, hoverHighlightMat)
 }
 
+/** 选中楼层高亮盒：盖住被选中楼层，金色半透明（常驻，供右侧设备面板联动） */
+function buildSelectedHighlight() {
+  selectedHighlightMat = new THREE.MeshBasicMaterial({
+    color: 0xc4a574,
+    transparent: true,
+    opacity: 0.34,
+    depthWrite: false,
+  })
+  const geo = new THREE.BoxGeometry(1, 1, 1)
+  selectedHighlight = new THREE.Mesh(geo, selectedHighlightMat)
+  selectedHighlight.visible = false
+  selectedHighlight.renderOrder = 19
+  disposables.push(geo, selectedHighlightMat)
+}
+
+/** 更新选中楼层高亮盒：匹配选中楼层的外包轮廓 */
+function updateSelectedHighlight(floor: number | null) {
+  if (!selectedHighlight) return
+  if (floor == null) {
+    selectedHighlight.visible = false
+    return
+  }
+  const { minX, maxX, minZ, maxZ } = floorFootprint(floor)
+  const y0 = (floor - 1) * SLAB
+  const y1 = floor === FLOOR_COUNT ? ROOF_Y : floor * SLAB
+  selectedHighlight.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
+  selectedHighlight.scale.set(maxX - minX, y1 - y0, maxZ - minZ)
+  selectedHighlight.visible = true
+}
+
+// ---- 格子编辑模式（整合自 /building-viewer 的 Building3D 编辑面板） ----
+
+/** 编辑模式下格子材质颜色：温湿度着色；无数据回退灰阶 */
+function floorColorFor(level: number, min: number, max: number, fallback: string): THREE.Color {
+  const env = floorEnv.value[level]
+  const value = metric.value === 'temperature' ? env?.temperature ?? null : env?.humidity ?? null
+  const color = envColorFor(metric.value, value, min, max)
+  if (color) return new THREE.Color(color)
+  const t = level / Math.max(1, FLOOR_COUNT - 1)
+  return new THREE.Color(fallback)
+}
+
+/** 编辑模式：hover/选中楼层时格子高亮、其余楼层变暗 */
+function updateFloorAppearance() {
+  const selected = props.selectedFloor ?? null
+  const hovered = hoveredFloor.value
+  for (const [level, meshes] of meshesByFloor) {
+    const isActive = selected === level || hovered === level
+    const dimmed = !!(selected && selected !== level && hovered !== level)
+    for (const mesh of meshes) {
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      if (!mesh.userData.customColor) {
+        const [min, max] = envRange(floorEnv.value, metric.value)
+        mat.color = floorColorFor(level, min, max, '#8a8f93')
+      }
+      mat.opacity = dimmed ? 0.28 : 0.95
+      mat.emissive = new THREE.Color(isActive ? 0xc4a574 : 0x000000)
+      mat.emissiveIntensity = hovered === level ? 0.4 : selected === level ? 0.22 : 0
+    }
+  }
+}
+
+/**
+ * 编辑模式建筑：按 DB building_cell（:cell-shapes）渲染独立格子，
+ * 无 DB 数据时回退到快照（轮廓 1:1）。每个格子可拾取（row/col/floor/floor_id）。
+ */
+function buildEditingBuilding(): THREE.Group {
+  const group = new THREE.Group()
+  floorMeshes = []
+  meshesByFloor.clear()
+  floorGroups = []
+  floorInnerMats = []
+  if (lastEditCellGeo) {
+    lastEditCellGeo.dispose()
+    lastEditCellGeo = null
+  }
+  editGeos = new Set()
+  if (hiddenCellGroup) {
+    scene?.remove(hiddenCellGroup)
+    hiddenCellGeos.forEach((g) => g.dispose())
+    hiddenCellMaterials.forEach((m) => m.dispose())
+    hiddenCellGeos = []
+    hiddenCellMaterials = []
+    hiddenCellGroup = null
+  }
+  hiddenCellMeshes = []
+
+  const cellSize = CELL_SIZE * 0.96
+  const cellGeo = new THREE.BoxGeometry(cellSize, FLOOR_H, cellSize) as THREE.BufferGeometry
+  lastEditCellGeo = cellGeo
+  editGeos.add(cellGeo)
+
+  const shapesByFloor = new Map<number, CellShapeConfig[]>()
+  const dbDriven = !!(props.cellShapes && props.cellShapes.length)
+  for (const s of props.cellShapes ?? []) {
+    if (s.floor < 1 || s.floor > FLOOR_COUNT) continue
+    if (isHiddenType(s.shape)) continue
+    const list = shapesByFloor.get(s.floor) ?? []
+    list.push(s)
+    shapesByFloor.set(s.floor, list)
+  }
+
+  const [min, max] = envRange(floorEnv.value, metric.value)
+  const FALLBACK = '#8a8f93'
+
+  for (let i = 0; i < FLOOR_COUNT; i++) {
+    const level = i + 1
+    const yBase = i * SLAB
+    const levelMeshes: THREE.Mesh[] = []
+
+    const renderCells: CellShapeConfig[] = []
+    if (dbDriven) {
+      for (const s of shapesByFloor.get(level) ?? []) renderCells.push(s)
+    } else {
+      const floor = FLOORS.find((f) => f.level === level)
+      for (const c of floor?.cells ?? []) {
+        renderCells.push({
+          row: c.row,
+          col: c.col,
+          floor: level,
+          shape: c.shape === 'Triangle' ? 'Triangle' : 'Rect',
+        })
+      }
+    }
+
+    for (const shapeConfig of renderCells) {
+      const shapeType: GridType = shapeConfig?.shape ?? 'Rect'
+      if (isHiddenType(shapeType)) continue
+      const customColor = shapeConfig?.color ?? null
+      const mat = new THREE.MeshStandardMaterial({
+        color: customColor ? new THREE.Color(customColor) : floorColorFor(level, min, max, FALLBACK),
+        metalness: 0.12,
+        roughness: 0.55,
+        transparent: true,
+        opacity: 0.95,
+      })
+      const cellHeight = shapeConfig?.height && shapeConfig.height > 0 ? shapeConfig.height : FLOOR_H
+      const geo = shapeType === 'Rect' && cellHeight === FLOOR_H
+        ? cellGeo
+        : createGeometryByType(shapeType, cellSize, cellHeight)
+      editGeos.add(geo)
+      const mesh = new THREE.Mesh(geo, mat)
+      const { x: wx, z: wz } = cellToWorld(shapeConfig.row, shapeConfig.col)
+      const hasDbPos = shapeConfig?.x != null && shapeConfig?.y != null && shapeConfig?.z != null
+      const px = hasDbPos ? shapeConfig.x! : wx
+      const py = hasDbPos ? shapeConfig.z! : yBase + FLOOR_H / 2
+      const pz = hasDbPos ? shapeConfig.y! : wz
+      mesh.position.set(px, py, pz)
+      if (shapeConfig?.rotation) mesh.rotation.copy(parseRotation(shapeConfig.rotation))
+      mesh.userData.floor = level
+      mesh.userData.row = shapeConfig.row
+      mesh.userData.col = shapeConfig.col
+      mesh.userData.floor_id = shapeConfig?.floor_id ?? null
+      mesh.userData.customColor = customColor
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+      group.add(mesh)
+      floorMeshes.push(mesh)
+      levelMeshes.push(mesh)
+    }
+    meshesByFloor.set(level, levelMeshes)
+  }
+
+  // 核心筒（与原始状态一致）
+  const coreMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.8, metalness: 0.2 })
+  disposables.push(coreMat)
+  const coreGeo = new THREE.BoxGeometry(CORE_W * 0.7, CORE_H, CORE_W * 0.7)
+  const core = new THREE.Mesh(coreGeo, coreMat)
+  core.position.set(CELL_SIZE * 2, CORE_H / 2, CELL_SIZE * 1)
+  group.add(core)
+  disposables.push(coreGeo)
+
+  updateFloorAppearance()
+  return group
+}
+
+/** 编辑模式：隐藏格子（is_active=0）以「透明填充 + 黑线边框」显示，可点击选中删除 */
+function buildHiddenCellOverlays() {
+  if (!scene) return
+  if (hiddenCellGroup) {
+    scene.remove(hiddenCellGroup)
+    hiddenCellGeos.forEach((g) => g.dispose())
+    hiddenCellMaterials.forEach((m) => m.dispose())
+    hiddenCellGeos = []
+    hiddenCellMaterials = []
+    hiddenCellGroup = null
+  }
+  hiddenCellMeshes = []
+  hiddenCellGroup = new THREE.Group()
+  const cellSize = CELL_SIZE * 0.96
+  const boxGeo = new THREE.BoxGeometry(cellSize, FLOOR_H, cellSize)
+  const edgeGeo = new THREE.EdgesGeometry(boxGeo)
+  const fillMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.14, depthWrite: false })
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x000000 })
+  hiddenCellGeos.push(boxGeo, edgeGeo)
+  hiddenCellMaterials.push(fillMat, edgeMat)
+
+  for (const s of props.cellShapes ?? []) {
+    if (!isHiddenType(s.shape)) continue
+    if (s.floor < 1 || s.floor > FLOOR_COUNT) continue
+    const level = s.floor
+    const yBase = (level - 1) * SLAB
+    const { x: wx, z: wz } = cellToWorld(s.row, s.col)
+    const hasDbPos = s.x != null && s.y != null && s.z != null
+    const px = hasDbPos ? s.x! : wx
+    const py = hasDbPos ? s.z! : yBase + FLOOR_H / 2
+    const pz = hasDbPos ? s.y! : wz
+
+    const fill = new THREE.Mesh(boxGeo, fillMat)
+    fill.position.set(px, py, pz)
+    fill.userData = {
+      row: s.row,
+      col: s.col,
+      floor: level,
+      floor_id: s.floor_id ?? null,
+      isHidden: true,
+    }
+    const edges = new THREE.LineSegments(edgeGeo, edgeMat)
+    edges.position.copy(fill.position)
+    if (s.rotation) {
+      fill.rotation.copy(parseRotation(s.rotation))
+      edges.rotation.copy(fill.rotation)
+    }
+    hiddenCellGroup.add(fill, edges)
+    hiddenCellMeshes.push(fill)
+  }
+  hiddenCellGroup.visible = editUnlocked.value
+  scene.add(hiddenCellGroup)
+}
+
+function updateHiddenOverlaysVisibility() {
+  if (!hiddenCellGroup) return
+  hiddenCellGroup.visible = editUnlocked.value
+}
+
+/** floor3d (1~11) → DB floor.id（优先从已有格子推断，其次查 floors 表，缓存结果） */
+const floorIdCache = new Map<number, number>()
+async function resolveFloorId(floor3d: number): Promise<number | null> {
+  const cached = floorIdCache.get(floor3d)
+  if (cached != null) return cached
+  const s = props.cellShapes?.find((x) => x.floor === floor3d && x.floor_id != null)
+  if (s?.floor_id != null) {
+    floorIdCache.set(floor3d, s.floor_id)
+    return s.floor_id
+  }
+  if (!props.buildingId) return null
+  try {
+    const { data } = await listBuildingFloors(props.buildingId)
+    const f = data?.find((x) => x.level_3d === floor3d)
+    if (f) {
+      floorIdCache.set(floor3d, f.id)
+      return f.id
+    }
+  } catch {
+    // ignore, fall through to null
+  }
+  return null
+}
+
+/** 切换编辑模式：进入时抓取格子快照（供放弃修改回滚），退出时有改动则弹确认框 */
+async function toggleEditMode() {
+  if (!editUnlocked.value) {
+    editUnlocked.value = true
+    editDirty.value = false
+    undoableOps.value = 0
+    editToolMode.value = 'none'
+    prevRawMode.value = rawMode.value
+    rawMode.value = true
+    hoveredFloor.value = null
+    toastVisible.value = false
+    updateSelectedHighlight(null)
+    if (props.buildingId) {
+      try {
+        const { data } = await listBuildingCellShapes(props.buildingId)
+        snapshotShapes.value = data ?? []
+      } catch {
+        snapshotShapes.value = []
+      }
+    } else {
+      snapshotShapes.value = []
+    }
+    editModeToast.value = true
+    if (editModeToastTimer) clearTimeout(editModeToastTimer)
+    editModeToastTimer = setTimeout(() => { editModeToast.value = false }, 1800)
+    scheduleRebuild()
+    return
+  }
+  if (editDirty.value) openExitConfirm()
+  else exitEditSession()
+}
+
+/** 统一退出编辑会话：清空快照、工具模式与改动标记，恢复外观 */
+function exitEditSession() {
+  editUnlocked.value = false
+  snapshotShapes.value = []
+  editDirty.value = false
+  undoableOps.value = 0
+  editToolMode.value = 'none'
+  hideDragTemplates()
+  rawMode.value = prevRawMode.value
+  updateHiddenOverlaysVisibility()
+  updateSelectedHighlight(props.selectedFloor ?? null)
+  scheduleRebuild()
+}
+
+function openExitConfirm() {
+  confirmOpen.value = true
+}
+
+function onDoneClick() {
+  if (editDirty.value) openExitConfirm()
+  else exitEditSession()
+}
+
+/** 完成编辑会话：save=true 保留改动；save=false 放弃并回滚到快照 */
+async function finishEditSession(save: boolean) {
+  confirmOpen.value = false
+  if (save) {
+    exitEditSession()
+    message.success('修改已保存')
+    return
+  }
+  await discardChanges()
+}
+
+/** 放弃本次修改：对快照与当前 DB 状态逆向恢复 */
+async function discardChanges() {
+  const buildingId = props.buildingId
+  if (!buildingId || !snapshotShapes.value.length) {
+    message.warning('已放弃本次修改')
+    exitEditSession()
+    return
+  }
+  try {
+    const { data: current } = await listBuildingCellShapes(buildingId)
+    const cur = current ?? []
+    const keyOf = (s: CellShapeConfig) => `${s.floor}-${s.row}-${s.col}`
+    const snapMap = new Map(snapshotShapes.value.map((s) => [keyOf(s), s]))
+    const curMap = new Map(cur.map((s) => [keyOf(s), s]))
+
+    for (const s of snapMap.values()) {
+      if (!curMap.has(keyOf(s)) && s.floor_id != null) {
+        await cellEdit({
+          building_id: buildingId,
+          row_no: s.row,
+          col_no: s.col,
+          action: 'add',
+          scope: 'single',
+          floor_id: s.floor_id,
+          shape: s.shape === 'Cylinder' || s.shape === 'Triangle' ? s.shape : 'Rect',
+        })
+      }
+    }
+    for (const c of curMap.values()) {
+      if (!snapMap.has(keyOf(c)) && c.floor_id != null) {
+        await cellEdit({
+          building_id: buildingId,
+          row_no: c.row,
+          col_no: c.col,
+          action: 'delete',
+          scope: 'single',
+          floor_id: c.floor_id,
+        })
+      }
+    }
+    for (const s of snapMap.values()) {
+      const c = curMap.get(keyOf(s))
+      if (c && c.floor_id != null && (c.rotation ?? null) !== (s.rotation ?? null)) {
+        await updateCellRotation({
+          floor_id: c.floor_id,
+          row_no: s.row,
+          col_no: s.col,
+          rotation_xyz: s.rotation ?? null,
+        })
+      }
+    }
+    message.success('已放弃本次修改')
+    emit('refreshShapes')
+    exitEditSession()
+  } catch {
+    message.error('还原失败，请重试')
+  }
+}
+
+/** 切换编辑工具模式（添加 / 删除互斥） */
+function toggleToolMode(mode: 'add' | 'delete') {
+  if (editToolMode.value === mode) {
+    editToolMode.value = 'none'
+    if (mode === 'add') hideDragTemplates()
+    return
+  }
+  editToolMode.value = mode
+  if (mode === 'add') {
+    spawnDragTemplates()
+  } else {
+    hideDragTemplates()
+  }
+}
+
+/** 射线与各层水平面求交，反算点击的网格行列（含该位置是否已有格子） */
+function pickGridCellFromRay(): { row: number; col: number; floor3d: number; exists: boolean } | null {
+  if (!raycaster) return null
+  let best: { row: number; col: number; floor3d: number; exists: boolean } | null = null
+  let bestDist = Infinity
+  const hit = new THREE.Vector3()
+  const plane = new THREE.Plane()
+  for (let level = 1; level <= FLOOR_COUNT; level++) {
+    plane.set(new THREE.Vector3(0, 1, 0), -((level - 1) * SLAB))
+    if (!raycaster.ray.intersectPlane(plane, hit)) continue
+    const dist = raycaster.ray.origin.distanceTo(hit)
+    if (dist >= bestDist) continue
+    const col = Math.round(hit.x / CELL_SIZE + 6.5)
+    const row = Math.round(hit.z / CELL_SIZE + 4.5)
+    if (row < 1 || row > 8 || col < 1 || col > 12) continue
+    const exists = props.cellShapes?.some(
+      (s) => s.floor === level && s.row === row && s.col === col && !isHiddenType(s.shape),
+    ) ?? false
+    best = { row, col, floor3d: level, exists }
+    bestDist = dist
+  }
+  return best
+}
+
+// ---- 拖拽添加格子：点击「添加」后楼宇旁出现模板格子（圆/方/三角）→ 拖到楼宇上放置 ----
+
+function buildDragSources() {
+  if (!scene) return
+  dragSourceGroup = new THREE.Group()
+  const mat = new THREE.MeshStandardMaterial({
+    color: DRAG_SOURCE_COLOR,
+    metalness: 0.1,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.65,
+  })
+  const size = CELL_SIZE * 0.96
+  const height = 0.5
+  for (let i = 0; i < DRAG_SHAPES.length; i++) {
+    const shape = DRAG_SHAPES[i]
+    const geo = createGeometryByType(shape, size, height)
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.position.set(-8.4, height / 2, (i - 1) * 1.8)
+    mesh.userData.isDragSource = true
+    mesh.userData.shape = shape
+    dragSourceGroup.add(mesh)
+    dragSourceMeshes.push(mesh)
+  }
+  dragSourceGroup.visible = false
+  scene.add(dragSourceGroup)
+}
+
+function hideDragTemplates() {
+  if (!dragSourceGroup) return
+  dragSourceGroup.visible = false
+}
+
+function spawnDragTemplates() {
+  if (!dragSourceGroup) return
+  for (const m of dragSourceMeshes) m.visible = true
+  dragSourceGroup.visible = true
+}
+
+function startDragCell(mesh: THREE.Mesh, ev: PointerEvent) {
+  if (!scene || !raycaster) return
+  activeDragSource = mesh
+  dragTarget = null
+  dragRotationDeg = 0
+  if (controls) controls.enabled = false
+  prevAutoRotate = autoRotate.value
+  autoRotate.value = false
+  if (host.value) host.value.style.cursor = 'grabbing'
+  const size = CELL_SIZE * 0.96
+  const shape = (mesh.userData.shape as 'Rect' | 'Cylinder' | 'Triangle') ?? 'Rect'
+  dragPreviewMat = new THREE.MeshStandardMaterial({
+    color: 0x4caf50,
+    metalness: 0.1,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.75,
+  })
+  dragPreviewMesh = new THREE.Mesh(createGeometryByType(shape, size, 0.5), dragPreviewMat)
+  dragPreviewMesh.visible = false
+  scene.add(dragPreviewMesh)
+  updateDragPreview()
+  document.addEventListener('pointermove', onDragMove)
+  document.addEventListener('pointerup', endDragCell)
+  document.addEventListener('wheel', onDragWheel, { passive: false })
+  document.addEventListener('keydown', onDragKeyDown)
+}
+
+function onDragMove(ev: PointerEvent) {
+  updatePointer(ev)
+  if (raycaster && camera) raycaster.setFromCamera(pointer, camera)
+  updateDragPreview()
+}
+
+function updateDragPreview() {
+  if (!raycaster || !dragPreviewMesh || !dragPreviewMat) return
+  const cell = pickGridCellFromRay()
+  dragTarget = cell
+    ? { ...cell, shape: (activeDragSource?.userData.shape as 'Rect' | 'Cylinder' | 'Triangle') ?? 'Rect' }
+    : null
+  if (!cell) {
+    dragPreviewMesh.visible = false
+    return
+  }
+  const { x, z } = cellToWorld(cell.row, cell.col)
+  const y = (cell.floor3d - 1) * SLAB + FLOOR_H + 0.9
+  dragPreviewMesh.position.set(x, y, z)
+  dragPreviewMesh.visible = true
+  applyDragPreviewRotation()
+  dragPreviewMat.color.set(cell.exists ? 0xe53935 : 0x4caf50)
+}
+
+async function endDragCell() {
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDragCell)
+  document.removeEventListener('wheel', onDragWheel)
+  document.removeEventListener('keydown', onDragKeyDown)
+  if (controls) controls.enabled = true
+  autoRotate.value = prevAutoRotate
+  if (host.value) host.value.style.cursor = 'grab'
+  if (scene && dragPreviewMesh) {
+    scene.remove(dragPreviewMesh)
+    dragPreviewMat?.dispose()
+    dragPreviewMesh = null
+    dragPreviewMat = null
+  }
+  const src = activeDragSource
+  const target = dragTarget
+  const placedRotationDeg = dragRotationDeg
+  dragTarget = null
+  activeDragSource = null
+  dragRotationDeg = 0
+  if (!src) return
+  if (!target || target.exists) return
+  if (!props.buildingId) {
+    message.warning('缺少楼栋 ID，无法添加格子')
+    return
+  }
+  const floorId = await resolveFloorId(target.floor3d)
+  if (!floorId) {
+    message.warning('无法找到楼层，添加失败')
+    return
+  }
+  try {
+    const res = await cellEdit({
+      building_id: props.buildingId,
+      row_no: target.row,
+      col_no: target.col,
+      action: 'add',
+      scope: 'single',
+      floor_id: floorId,
+      shape: target.shape,
+    })
+    const n = res?.data?.affected ?? 0
+    if (n > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
+      if (placedRotationDeg !== 0) {
+        const rad = `0,${(placedRotationDeg * Math.PI / 180).toFixed(4)},0`
+        try {
+          await updateCellRotation({
+            floor_id: floorId,
+            row_no: target.row,
+            col_no: target.col,
+            rotation_xyz: rad,
+          })
+        } catch {
+          // 旋轉寫入失敗不阻礙放置
+          console.warn('[BuildingFacade3D] Failed to write placed rotation:', placedRotationDeg)
+        }
+      }
+      message.success('已添加 1 个格子')
+    } else {
+      message.warning('添加失败或格子已存在')
+    }
+  } catch {
+    message.error('添加失败，请重试')
+  }
+  emit('refreshShapes')
+}
+
+function onDragWheel(ev: WheelEvent) {
+  if (!activeDragSource) return
+  ev.preventDefault()
+  dragRotationDeg = (dragRotationDeg + (ev.deltaY > 0 ? 15 : -15) + 360) % 360
+  applyDragPreviewRotation()
+}
+
+function onDragKeyDown(ev: KeyboardEvent) {
+  if (!activeDragSource) return
+  if (ev.key === 'r' || ev.key === 'R') {
+    ev.preventDefault()
+    dragRotationDeg = (dragRotationDeg + (ev.shiftKey ? -45 : 45) + 360) % 360
+    applyDragPreviewRotation()
+  }
+}
+
+function applyDragPreviewRotation() {
+  if (!dragPreviewMesh) return
+  dragPreviewMesh.rotation.y = (dragRotationDeg * Math.PI) / 180
+}
+
+/** 删除模式：删除指定格子（单格），可连续调用 */
+async function deleteCellAt(floor_id: number, row: number, col: number) {
+  if (!props.buildingId) return
+  try {
+    const res = await cellEdit({
+      building_id: props.buildingId,
+      row_no: row,
+      col_no: col,
+      action: 'delete',
+      scope: 'single',
+      floor_id,
+    })
+    const n = res?.data?.affected ?? 0
+    if (n > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
+      showFeedback(`已删除格子 (${row}, ${col})`)
+    } else {
+      showFeedback('无变化：没有可删除的格子')
+    }
+  } catch {
+    message.error('删除失败，请重试')
+  }
+  emit('refreshShapes')
+}
+
+async function handleUndo() {
+  const res = await undoEdit()
+  if (res && res.data && res.data.ok) {
+    if ((res.data.affected ?? 0) > 0) {
+      editDirty.value = true
+      undoableOps.value = Math.max(0, undoableOps.value - 1)
+    }
+    showFeedback(`已撤回 ${res.data.affected} 个格子`)
+    emit('refreshShapes')
+  } else if (undoableOps.value > 0) {
+    showFeedback('已超过撤回次数上限（10 次），无法撤回')
+  } else {
+    showFeedback('没有可撤回的操作')
+  }
+}
+
+function showFeedback(msg: string) {
+  editFeedback.value = msg
+  if (feedbackTimer) clearTimeout(feedbackTimer)
+  feedbackTimer = setTimeout(() => { editFeedback.value = '' }, 2500)
+}
+
+/** 编辑模式：pointerdown 处理添加（拖拽模板）/删除（点击格子）；none 模式无操作 */
+function onPointerDown(ev: PointerEvent) {
+  if (!camera || !raycaster || !editUnlocked.value) return
+  updatePointer(ev)
+  raycaster.setFromCamera(pointer, camera)
+  if (editToolMode.value === 'add') {
+    const srcHits = raycaster.intersectObjects(dragSourceMeshes, false)
+    if (srcHits.length) {
+      startDragCell(srcHits[0].object as THREE.Mesh, ev)
+      return
+    }
+    return
+  }
+  if (editToolMode.value === 'delete') {
+    const hiddenHits = raycaster.intersectObjects(hiddenCellMeshes, false)
+    if (hiddenHits.length) {
+      const ud = hiddenHits[0].object.userData
+      if (ud.floor_id != null) void deleteCellAt(ud.floor_id, ud.row, ud.col)
+      return
+    }
+    const hits = raycaster.intersectObjects(floorMeshes, false)
+    if (hits.length) {
+      const ud = hits[0].object.userData
+      const shape = props.cellShapes?.find(
+        (s) => s.row === ud.row && s.col === ud.col && s.floor === ud.floor,
+      )
+      if (shape?.floor_id != null) void deleteCellAt(shape.floor_id, ud.row, ud.col)
+      return
+    }
+    return
+  }
+}
+
 /** 更新高亮盒：匹配悬停楼层的外包轮廓，并标记凸出目标楼层 */
 function updateHoverHighlight(floor: number | null) {
   hoverScaleFloor = floor ?? 0
@@ -1286,6 +2205,11 @@ function floorLabel(level: number): string {
   return `${n}/F`
 }
 
+/** 指定楼层的真实设备数（无数据为 0） */
+function deviceCountFor(floor: number): number {
+  return floorEnv.value[floor]?.deviceCount ?? 0
+}
+
 function updatePointer(ev: PointerEvent) {
   if (!host.value) return
   const rect = host.value.getBoundingClientRect()
@@ -1308,6 +2232,42 @@ function onPointerMove(ev: PointerEvent) {
   if (ev.buttons !== 0) return
   updatePointer(ev)
   raycaster.setFromCamera(pointer, camera)
+
+  // 编辑模式：hover 模板 → 可拖拽光标；hover 格子 → 高亮楼层
+  if (editUnlocked.value) {
+    const srcHits = raycaster.intersectObjects(dragSourceMeshes, false)
+    if (srcHits.length) {
+      if (hoveredFloor.value != null) {
+        hoveredFloor.value = null
+        updateFloorAppearance()
+      }
+      toastVisible.value = false
+      host.value.style.cursor = 'copy'
+      debugVisible.value = false
+      return
+    }
+    const hits = raycaster.intersectObjects(floorMeshes, false)
+    if (hits.length) {
+      const floor = hits[0].object.userData.floor as number
+      if (hoveredFloor.value !== floor) {
+        hoveredFloor.value = floor
+        updateFloorAppearance()
+      }
+      toastVisible.value = true
+      placeToast(ev.clientX, ev.clientY, host.value.getBoundingClientRect())
+      host.value.style.cursor = 'pointer'
+    } else {
+      if (hoveredFloor.value != null) {
+        hoveredFloor.value = null
+        updateFloorAppearance()
+      }
+      toastVisible.value = false
+      host.value.style.cursor = 'grab'
+    }
+    debugVisible.value = false
+    return
+  }
+
   const hits = raycaster.intersectObjects(floorHits, false)
   if (hits.length) {
     const floor = hits[0].object.userData.floor as number
@@ -1322,13 +2282,13 @@ function onPointerMove(ev: PointerEvent) {
     clearHover()
   }
 
-  // 调试信息：射线与真实墙体相交（排除楼层命中盒/高亮盒/LOGO），转回建筑局部坐标判断面
-  if (buildingGroup) {
+  // 调试信息（控制面板「调试信息」开关开启时显示）：射线与真实墙体相交，转回建筑局部坐标判断面
+  if (debugEnabled.value && buildingGroup) {
     const wallRoot = buildingGroup.children[0]
     const buildHits = wallRoot ? raycaster.intersectObject(wallRoot, true) : []
     // 排除 LineSegments（BIM 线框无 face），取第一个实体 Mesh 命中
     const hit = buildHits.find((h) => h.object.type === 'Mesh')
-    if (hit) {
+    if (hit && hit.face) {
       // 建筑会自动旋转：命中点/法线先转回建筑局部坐标，方便对照快照格子
       const inv = buildingGroup.matrixWorld.clone().invert()
       const local = hit.point.clone().applyMatrix4(inv)
@@ -1355,6 +2315,8 @@ function onPointerMove(ev: PointerEvent) {
     } else {
       debugVisible.value = false
     }
+  } else {
+    debugVisible.value = false
   }
 }
 
@@ -1362,6 +2324,7 @@ function clearHover() {
   hoveredFloor.value = null
   toastVisible.value = false
   updateHoverHighlight(null)
+  updateFloorAppearance()
   debugVisible.value = false
   if (host.value) host.value.style.cursor = 'grab'
 }
@@ -1370,11 +2333,22 @@ function onPointerLeave() {
   clearHover()
 }
 
-/** 点击建筑表面 → 识别格子 → 开关窗户 */
+/** 点击建筑表面：编辑模式下由 pointerdown 处理；否则「点击创建窗户」开关开启时开关窗户，未开启时按楼层选中/进入 */
 function onPointerClick(ev: PointerEvent) {
   if (!host.value || !camera || !raycaster || !buildingGroup) return
+  // 编辑模式：格子交互由 pointerdown 处理，click 不再选楼层/开窗
+  if (editUnlocked.value) return
   updatePointer(ev)
   raycaster.setFromCamera(pointer, camera)
+
+  // 未开启「点击创建窗户」：点击楼层 → 选中/进入该楼层（与 /building-viewer 一致）
+  if (!cellClickEnabled.value) {
+    const hits = raycaster.intersectObjects(floorHits, false)
+    if (hits.length) {
+      emit('selectFloor', hits[0].object.userData.floor as number)
+    }
+    return
+  }
 
   // 射线与建筑本体相交（第一个子对象 = buildBuilding 返回的 group）
   const wallRoot = buildingGroup.children.find(
@@ -1410,6 +2384,96 @@ function onPointerClick(ev: PointerEvent) {
   cellWindows.value = next
 }
 
+// ---- 自动场景（按本地日出/日落时间切换 日间/黄昏/夜间） ----
+
+function dayOfYear(date: Date): number {
+  const start = new Date(date.getFullYear(), 0, 1)
+  return Math.floor((date.getTime() - start.getTime()) / 86400000)
+}
+
+/** NOAA 简化算法：计算当日日出/日落时间（UTC 小时，含小数）；极昼/极夜返回 null */
+function computeSunTimes(
+  date: Date,
+  lat: number,
+  lng: number,
+): { sunrise: number; sunset: number } | null {
+  const rad = Math.PI / 180
+  const zenith = 90.833 * rad
+  const lngHour = lng / 15
+  const N = dayOfYear(date)
+
+  const calc = (isSunset: boolean): number => {
+    const hour = isSunset ? 18 : 6
+    let t = N + (hour - lngHour) / 24
+    const M = (0.9856 * t - 3.289) * rad
+    let L = M + (1.916 * Math.sin(M)) * rad + (0.02 * Math.sin(2 * M)) * rad + 282.634 * rad
+    L = L % (2 * Math.PI)
+    if (L < 0) L += 2 * Math.PI
+    const RA = Math.atan(0.91764 * Math.tan(L))
+    const Lq = Math.floor(L / (Math.PI / 2)) * (Math.PI / 2)
+    const RAq = Math.floor(RA / (Math.PI / 2)) * (Math.PI / 2)
+    const RAn = RA + (Lq - RAq)
+    const sinDec = 0.39782 * Math.sin(L)
+    const cosDec = Math.cos(Math.asin(sinDec))
+    const cosH = (Math.cos(zenith) - sinDec * Math.sin(lat * rad)) / (cosDec * Math.cos(lat * rad))
+    if (cosH > 1 || cosH < -1) return -1
+    const H = (isSunset ? 1 : -1) * Math.acos(cosH)
+    let T = (H * 180) / Math.PI + (RAn * 180) / Math.PI - 0.06571 * t - 6.622
+    let UT = (T - lngHour) % 24
+    if (UT < 0) UT += 24
+    return UT
+  }
+
+  const sunrise = calc(false)
+  const sunset = calc(true)
+  if (sunrise < 0 || sunset < 0) return null
+  return { sunrise, sunset }
+}
+
+/** 按当前时刻计算应使用的场景预设，并应用到 preset */
+function updateAutoPreset() {
+  if (!autoPreset.value) return
+  const times = computeSunTimes(new Date(), SUN_LAT, SUN_LNG)
+  if (!times) {
+    if (preset.value !== 'day') preset.value = 'day'
+    return
+  }
+  const now = new Date()
+  const utcNow = now.getUTCHours() + now.getUTCMinutes() / 60
+  // 日出可能落在前一日 UTC（跨午夜）：用「当前时刻是否在日出~日落之间」判断白天
+  const dayActive = times.sunrise <= times.sunset
+    ? utcNow >= times.sunrise && utcNow < times.sunset
+    : utcNow >= times.sunrise || utcNow < times.sunset
+  // 当前时刻与日落的环形距离（小时，24 小时环）
+  const ringDist = (a: number, b: number) => {
+    const d = Math.abs(a - b) % 24
+    return d <= 12 ? d : 24 - d
+  }
+  const distToSunset = ringDist(utcNow, times.sunset)
+  let next: 'day' | 'dusk' | 'night'
+  if (distToSunset <= DUSK_WINDOW_H) {
+    next = 'dusk'
+  } else if (dayActive) {
+    next = 'day'
+  } else {
+    next = 'night'
+  }
+  if (preset.value !== next) preset.value = next
+}
+
+watch(autoPreset, (v) => {
+  if (v) {
+    updateAutoPreset()
+    autoSceneTimer = setInterval(updateAutoPreset, 60000)
+  } else {
+    if (autoSceneTimer) {
+      clearInterval(autoSceneTimer)
+      autoSceneTimer = undefined
+    }
+    preset.value = 'day'
+  }
+})
+
 // ---- 预设应用 ----
 
 function applyPreset(name: 'day' | 'dusk' | 'night') {
@@ -1427,7 +2491,16 @@ function applyPreset(name: 'day' | 'dusk' | 'night') {
   scene.backgroundIntensity = p.bgIntensity
   scene.fog = new THREE.Fog(new THREE.Color(p.fog).getHex(), 45, 140)
   scene.environmentIntensity = p.envIntensity
-  innerMat.emissiveIntensity = p.innerLight
+  // 楼层颜色：白天/黄昏用材质色自发光提亮（跟随右下图例色）；夜晚切换为内透暖光
+  for (const m of floorInnerMats) {
+    if (name === 'night') {
+      m.emissive.setHex(0xffb46b)
+      m.emissiveIntensity = p.innerLight
+    } else {
+      m.emissive.set(m.color)
+      m.emissiveIntensity = name === 'dusk' ? 0.2 : 0.15
+    }
+  }
   glassOpacity.value = p.glassOpacity
 }
 
@@ -1454,8 +2527,8 @@ function initThreeJS() {
       obj: h.object.type,
       name: h.object.name || '',
       matColor: (h.object as THREE.Mesh).material ? ((h.object as THREE.Mesh).material as THREE.MeshBasicMaterial).color?.getHexString?.() : undefined,
-      matTransparent: (h.object as THREE.Mesh).material?.transparent,
-      matVisible: (h.object as THREE.Mesh).material?.visible,
+      matTransparent: ((h.object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined)?.transparent,
+      matVisible: ((h.object as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined)?.visible,
       objVisible: h.object.visible,
       geo: (h.object as THREE.Mesh).geometry?.type,
       dist: +h.distance.toFixed(2),
@@ -1466,7 +2539,8 @@ function initThreeJS() {
   }
 
   camera = new THREE.PerspectiveCamera(42, w / Math.max(1, h), 0.1, 400)
-  camera.position.set(18, 13, 22)
+  // 初始视角：东南 45° 正对 LOGO 切角面（正面朝向观察者），默认不旋转
+  camera.position.set(15.5, 10.5, 15.5)
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -1508,13 +2582,20 @@ function initThreeJS() {
   buildingGroup.add(buildGround())
   buildFloorHits()
   buildHoverHighlight()
+  buildSelectedHighlight()
   for (const h of floorHits) buildingGroup.add(h)
   buildingGroup.add(hoverHighlight!)
-  buildingGroup.add(buildLogo())
+  buildingGroup.add(selectedHighlight!)
+  updateSelectedHighlight(props.selectedFloor ?? null)
+  logoMesh = buildLogo()
+  logoMesh.visible = !rawMode.value
+  buildingGroup.add(logoMesh)
   scene.add(buildingGroup)
 
   // 拾取
   raycaster = new THREE.Raycaster()
+  buildDragSources()
+  hideDragTemplates()
 
   // 控制器（参数与原 Building3D 一致）
   controls = new OrbitControls(camera, renderer.domElement)
@@ -1524,6 +2605,7 @@ function initThreeJS() {
   controls.minDistance = 8
   controls.maxDistance = 60
 
+  renderer.domElement.addEventListener('pointerdown', onPointerDown)
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('pointerleave', onPointerLeave)
   renderer.domElement.addEventListener('click', onPointerClick)
@@ -1536,6 +2618,10 @@ function animate() {
   animId = requestAnimationFrame(animate)
   if (buildingGroup && autoRotate.value) {
     buildingGroup.rotation.y += 0.004 * rotateSpeed.value
+  }
+  // 编辑模式：模板格子轻微上下浮动，提示「可拖拽」
+  if (dragSourceGroup && dragSourceGroup.visible && !activeDragSource) {
+    dragSourceGroup.position.y = Math.sin(Date.now() * 0.002) * 0.06
   }
   // 楼层悬停凸出动画：悬停层水平放大（Y 固定），其余层平滑缩回
   const TARGET_SCALE = 1.06
@@ -1565,10 +2651,18 @@ function onResize() {
 
 function resetView() {
   if (!camera || !controls) return
-  camera.position.set(18, 13, 22)
+  // 复位回到东南正面（LOGO 面）
+  camera.position.set(15.5, 10.5, 15.5)
   controls.target.set(0, (FLOOR_COUNT * SLAB) / 2, 0)
   controls.update()
 }
+
+/** 切换控制面板显隐（由父组件左上角提示文字连点 3 次触发） */
+function togglePanel() {
+  panelVisible.value = !panelVisible.value
+}
+
+defineExpose({ togglePanel })
 
 // ---- 控件联动 ----
 
@@ -1606,6 +2700,10 @@ watch(showColLines, () => {
   scheduleRebuild()
 })
 
+watch(rawMode, () => {
+  scheduleRebuild()
+})
+
 watch(cellWindows, () => {
   scheduleRebuild()
   persistConfig()
@@ -1616,16 +2714,27 @@ function rebuildBuilding() {
   // 移除旧建筑 mesh（保留 ground、floorHits、hoverHighlight、logo）
   const toRemove: THREE.Object3D[] = []
   for (const child of buildingGroup.children) {
-    if (child === hoverHighlight) continue
+    if (child === hoverHighlight || child === selectedHighlight) continue
     if (floorHits.includes(child as THREE.Mesh)) continue
     if ((child as any).__isGround || (child as any).__isLogo) continue
     toRemove.push(child)
   }
+  const editing = editUnlocked.value
   for (const obj of toRemove) {
     buildingGroup.remove(obj)
-    if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose()
+    // 编辑模式的格子几何来自共享缓存（editGeos），不能 dispose；美化/原始状态幕墙几何为新建，可 dispose
+    const geo = (obj as THREE.Mesh).geometry
+    if (!editing && geo && !editGeos.has(geo)) geo.dispose()
   }
-  buildingGroup.add(buildBuilding())
+  // 编辑模式：用 DB building_cell 渲染可编辑格子；否则用快照（美化/原始状态）
+  if (editing) {
+    buildingGroup.add(buildEditingBuilding())
+    buildHiddenCellOverlays()
+    if (logoMesh) logoMesh.visible = false
+  } else {
+    buildingGroup.add(buildBuilding())
+    if (logoMesh) logoMesh.visible = !rawMode.value
+  }
 }
 
 async function loadConfig() {
@@ -1640,8 +2749,7 @@ async function loadConfig() {
   } catch { /* 后端未启动时静默 */ }
 }
 
-async function persistConfig() {
-  try {
+async function persistConfig() {  try {
     await saveFacadeConfig({
       orientation: windowOrientation.value,
       widthRatio: windowWidthRatio.value,
@@ -1655,17 +2763,114 @@ function clearAllWindows() {
   cellWindows.value = {}
 }
 
-onMounted(() => {
-  if (!host.value) return
+/** 拉取各楼层温湿度（level 为 3D 层号 1..11），供原始状态着色 */
+async function fetchFloorEnv() {
+  try {
+    const { data } = await getFloorEnvironmentSummary()
+    const env: Record<number, FloorEnvValue> = {}
+    for (const row of data ?? []) {
+      if (row.level == null || row.level < 1 || row.level > FLOOR_COUNT) continue
+      env[row.level] = {
+        temperature: row.temperature,
+        humidity: row.humidity,
+        deviceCount: row.device_count,
+      }
+    }
+    floorEnv.value = env
+    // 数据到达后重建（美化 / 原始状态均按温湿度着色）
+    scheduleRebuild()
+  } catch { /* 未接入数据时保持空，回退灰色 */ }
+}
+
+watch(metric, (v) => {
+  emit('update:metric', v)
+  scheduleRebuild()
+})
+
+watch(
+  () => props.metric,
+  (v) => {
+    if (v && v !== metric.value) metric.value = v
+  },
+)
+
+watch(
+  () => props.selectedFloor,
+  (v) => updateSelectedHighlight(v ?? null),
+)
+
+// 编辑模式下 DB 格子设置变化（增/删/撤回后父组件刷新）→ 重建可编辑建筑
+watch(
+  () => props.cellShapes,
+  () => {
+    if (editUnlocked.value) {
+      scheduleRebuild()
+      buildHiddenCellOverlays()
+    }
+  },
+  { deep: true },
+)
+
+// ---- 温湿度图例（仿 /building-viewer 的 env-legend） ----
+const legendRange = computed(() => envRange(floorEnv.value, metric.value))
+const legendUnit = computed(() => (metric.value === 'humidity' ? '%RH' : '°C'))
+const legendLabel = computed(() =>
+  metric.value === 'humidity' ? '湿度' : '温度',
+)
+const LEGEND_BAND_COUNT = 4
+const LEGEND_CELLS = computed(() =>
+  metric.value === 'humidity' ? 10 : LEGEND_BAND_COUNT,
+)
+function legendCellColor(i: number) {
+  if (metric.value === 'humidity') {
+    const [min, max] = legendRange.value
+    const t = (i - 0.5) / 10
+    const value = min + t * (max - min)
+    return envColorFor('humidity', value, min, max) ?? '#d9d5cc'
+  }
+  return TEMPERATURE_BAND_COLORS[i - 1] ?? '#d9d5cc'
+}
+const legendGradientStyle = computed(() => {
+  if (metric.value === 'humidity') return ''
+  return `linear-gradient(90deg, ${TEMPERATURE_GRADIENT_STOPS.join(', ')})`
+})
+
+function startDemo() {
+  if (!host.value || scene) return
   initThreeJS()
   window.addEventListener('resize', onResize)
   loadConfig()
+  fetchFloorEnv()
+}
+
+onMounted(() => {
+  if (!host.value) return
+  if (props.loading) return
+  startDemo()
 })
+
+watch(
+  () => props.loading,
+  (v) => {
+    if (v === false) startDemo()
+  },
+)
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId)
   clearHover()
+  if (feedbackTimer) clearTimeout(feedbackTimer)
+  if (editModeToastTimer) clearTimeout(editModeToastTimer)
+  if (autoSceneTimer) {
+    clearInterval(autoSceneTimer)
+    autoSceneTimer = undefined
+  }
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDragCell)
+  document.removeEventListener('wheel', onDragWheel)
+  document.removeEventListener('keydown', onDragKeyDown)
+  renderer?.domElement.removeEventListener('pointerdown', onPointerDown)
   renderer?.domElement.removeEventListener('pointermove', onPointerMove)
   renderer?.domElement.removeEventListener('pointerleave', onPointerLeave)
   renderer?.domElement.removeEventListener('click', onPointerClick)
@@ -1675,6 +2880,30 @@ onBeforeUnmount(() => {
   if (renderer?.domElement.parentElement) {
     renderer.domElement.parentElement.removeChild(renderer.domElement)
   }
+  // 编辑模式隐藏格子占位资源
+  if (scene && hiddenCellGroup) {
+    scene.remove(hiddenCellGroup)
+    hiddenCellGeos.forEach((g) => g.dispose())
+    hiddenCellMaterials.forEach((m) => m.dispose())
+  }
+  // 编辑模式拖拽模板资源（geometry 来自共享缓存，不 dispose）
+  if (scene && dragSourceGroup) {
+    scene.remove(dragSourceGroup)
+    dragSourceGroup.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined
+      if (Array.isArray(m)) m.forEach((x) => x.dispose())
+      else if (m) m.dispose()
+    })
+  }
+  if (scene && dragPreviewMesh) {
+    scene.remove(dragPreviewMesh)
+    dragPreviewMat?.dispose()
+  }
+  if (lastEditCellGeo) {
+    lastEditCellGeo.dispose()
+    lastEditCellGeo = null
+  }
+  editGeos = new Set()
   for (const d of disposables) d.dispose()
   disposables.length = 0
   skyTextures.clear()
@@ -1686,6 +2915,13 @@ onBeforeUnmount(() => {
   pmrem = null
   raycaster = null
   floorGroups = []
+  floorInnerMats = []
+  floorMeshes = []
+  meshesByFloor.clear()
+  hiddenCellGeos = []
+  hiddenCellMaterials = []
+  hiddenCellMeshes = []
+  dragSourceMeshes = []
   hoverScaleFloor = 0
   innerMat = null
   windowGlassMat = null
@@ -1694,14 +2930,21 @@ onBeforeUnmount(() => {
   floorHits = []
   hoverHighlight = null
   hoverHighlightMat = null
+  selectedHighlight = null
+  selectedHighlightMat = null
 })
 </script>
 
 <template>
   <div ref="host" class="facade3d">
+    <!-- Loading overlay while data is being fetched -->
+    <div v-if="loading" class="loading-overlay">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">加载中...</div>
+    </div>
     <!-- 控制面板 -->
-    <div class="ctrl-panel">
-      <div class="ctrl-title">混凝土幕墙 DEMO</div>
+    <div v-show="panelVisible" class="ctrl-panel">
+      <div class="ctrl-title">3D图形控制面板</div>
       <div class="ctrl-row">
         <label class="ctrl-label">场景</label>
         <div class="seg-group">
@@ -1715,6 +2958,15 @@ onBeforeUnmount(() => {
             {{ p === 'day' ? '日间' : p === 'dusk' ? '黄昏' : '夜间' }}
           </button>
         </div>
+      </div>
+
+      <!-- 自动场景：按本地日出/日落时间自动切换；关闭后回到日间 -->
+      <div class="ctrl-row">
+        <label class="ctrl-check">
+          <input v-model="autoPreset" type="checkbox" />
+          <span class="check-box"></span>
+          <span class="check-text">自动场景</span>
+        </label>
       </div>
 
       <!-- 窗户方向 -->
@@ -1762,6 +3014,41 @@ onBeforeUnmount(() => {
         <span class="ctrl-value">{{ (windowHeightRatio * 100).toFixed(0) }}%</span>
       </div>
 
+      <!-- 原始状态 -->
+      <div class="ctrl-row">
+        <label class="ctrl-check">
+          <input v-model="rawMode" type="checkbox" />
+          <span class="check-box"></span>
+          <span class="check-text">原始状态</span>
+        </label>
+      </div>
+
+      <!-- 按温湿度着色（美化 / 原始状态通用） -->
+      <div class="ctrl-row">
+        <label class="ctrl-label">着色</label>
+        <div class="seg-group">
+          <button
+            class="seg-btn"
+            :class="{ active: metric === 'temperature' }"
+            @click="metric = 'temperature'"
+          >温度</button>
+          <button
+            class="seg-btn"
+            :class="{ active: metric === 'humidity' }"
+            @click="metric = 'humidity'"
+          >湿度</button>
+        </div>
+      </div>
+
+      <!-- 点击墙面创建窗户 开关 -->
+      <div class="ctrl-row">
+        <label class="ctrl-check">
+          <input v-model="cellClickEnabled" type="checkbox" />
+          <span class="check-box"></span>
+          <span class="check-text">点击创建窗户</span>
+        </label>
+      </div>
+
       <!-- 批量操作 -->
       <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: showFloorLines }" @click="showFloorLines = !showFloorLines">
@@ -1799,10 +3086,34 @@ onBeforeUnmount(() => {
         <span class="ctrl-value">{{ rotateSpeed.toFixed(1) }}×</span>
       </div>
       <div class="ctrl-hint">点击建筑表面可逐格开关窗户</div>
-    </div>
-    <!-- 左上角信息 -->
-    <div class="info-badge">
-      轮廓 1:1 还原自 /building-viewer（building_cell 快照）· 幕墙为 DEMO 美化层
+
+      <div class="ctrl-divider"></div>
+
+      <!-- 调试信息开关（控制左下角坐标信息） -->
+      <div class="ctrl-row">
+        <label class="ctrl-check">
+          <input v-model="debugEnabled" type="checkbox" />
+          <span class="check-box"></span>
+          <span class="check-text">调试信息</span>
+        </label>
+      </div>
+
+      <!-- 格子编辑（整合自 /building-viewer 编辑面板：添加 / 删除 / 撤回 / 完成） -->
+      <div class="ctrl-title edit-title">格子编辑</div>
+      <div class="ctrl-row">
+        <button type="button" class="ctrl-btn" :class="{ on: editUnlocked }" @click="toggleEditMode">
+          {{ editUnlocked ? '退出编辑' : '编辑格子' }}
+        </button>
+      </div>
+      <div v-if="editUnlocked" class="edit-actions">
+        <button type="button" class="edit-btn add" :class="{ active: editToolMode === 'add' }" @click="toggleToolMode('add')">添加</button>
+        <button type="button" class="edit-btn del" :class="{ active: editToolMode === 'delete' }" @click="toggleToolMode('delete')">删除</button>
+        <button type="button" class="edit-btn undo" @click="handleUndo">撤回</button>
+        <button type="button" class="edit-btn close" @click="onDoneClick">完成</button>
+      </div>
+      <div v-if="editUnlocked && editToolMode === 'add'" class="edit-hint">拖動模板放到樓宇上；滾輪 / R 鍵旋轉</div>
+      <div v-else-if="editUnlocked && editToolMode === 'delete'" class="edit-hint">點擊格子立即刪除，可連續點擊</div>
+      <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
     <!-- 楼层悬停提示 -->
     <div
@@ -1811,6 +3122,7 @@ onBeforeUnmount(() => {
       :style="toastStyle"
     >
       <div class="toast-level">{{ floorLabel(hoveredFloor ?? 0) }}</div>
+      <div class="toast-devices">{{ deviceCountFor(hoveredFloor ?? 0) }} 台设备</div>
     </div>
     <!-- 调试提示 -->
     <div
@@ -1819,6 +3131,56 @@ onBeforeUnmount(() => {
     >
       <pre>{{ debugInfo }}</pre>
     </div>
+    <!-- 温湿度图例（仿 /building-viewer 的 env-legend） -->
+    <div v-if="!editUnlocked" class="env-legend">
+      <div class="legend-head">
+        <span class="legend-title">{{ legendLabel }}</span>
+        <span class="legend-unit">{{ legendUnit }}</span>
+        <span class="legend-live" aria-hidden="true" />
+      </div>
+      <div
+        v-if="metric === 'temperature'"
+        class="legend-bar legend-bar-gradient"
+        role="img"
+        :style="{ background: legendGradientStyle }"
+      />
+      <div v-else class="legend-bar" role="img">
+        <span v-for="i in LEGEND_CELLS" :key="i" class="legend-cell" :style="{ background: legendCellColor(i) }" />
+      </div>
+      <div v-if="metric === 'temperature'" class="legend-scale" aria-hidden="true">
+        <span v-for="tick in TEMPERATURE_TICKS" :key="tick">{{ tick }}</span>
+      </div>
+      <div v-else class="legend-scale" aria-hidden="true">
+        <span>{{ legendRange[0] }}</span>
+        <span>{{ legendRange[1] }}</span>
+      </div>
+      <p class="legend-note">灰色 = 無資料</p>
+    </div>
+    <!-- 编辑模式提示 -->
+    <transition name="fade">
+      <div v-if="editModeToast" class="edit-mode-toast">
+        已開啟格子編輯模式 — 點擊格子即可編輯，或拖曳樓宇左側圓/方/三角模板到樓宇上放置
+      </div>
+    </transition>
+    <!-- 添加模式拖拽提示 -->
+    <div v-if="editUnlocked && editToolMode === 'add'" class="drag-source-toolbar">
+      <span class="drag-source-hint">点击「添加」后，拖动左侧圆/方/三角模板到楼宇上放置（绿色=可放置，红色=已有格子）</span>
+    </div>
+    <!-- 退出编辑确认框 -->
+    <a-modal
+      :open="confirmOpen"
+      title="是否保存本次修改？"
+      :footer="null"
+      width="460px"
+      @cancel="confirmOpen = false"
+    >
+      <p class="confirm-content">本次編輯已生效。保存將保留所有改動；放棄將回滾本次編輯的全部改動（編輯期間請勿刷新頁面）。</p>
+      <div class="confirm-actions">
+        <a-button @click="confirmOpen = false">繼續編輯</a-button>
+        <a-button danger @click="finishEditSession(false)">放棄修改</a-button>
+        <a-button type="primary" @click="finishEditSession(true)">保存</a-button>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -1849,6 +3211,8 @@ onBeforeUnmount(() => {
   right: 12px;
   z-index: 10;
   width: 252px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
   padding: 12px 14px;
   border-radius: 8px;
   background: rgba(13, 13, 13, 0.88);
@@ -1857,6 +3221,19 @@ onBeforeUnmount(() => {
   color: #fff;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
   user-select: none;
+}
+
+.ctrl-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ctrl-panel::-webkit-scrollbar-thumb {
+  background: rgba(196, 165, 116, 0.35);
+  border-radius: 3px;
+}
+
+.ctrl-panel::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .ctrl-title {
@@ -1881,6 +3258,57 @@ onBeforeUnmount(() => {
   flex: 0 0 70px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.78);
+}
+
+.ctrl-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ctrl-check input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.check-box {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(196, 165, 116, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  flex: 0 0 auto;
+  transition: background 0.15s;
+}
+
+.ctrl-check input:checked + .check-box {
+  background: #c4a574;
+}
+
+.ctrl-check input:checked + .check-box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #20201c;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.check-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.ctrl-check input:checked ~ .check-text {
+  color: #f5ead7;
 }
 
 .ctrl-slider {
@@ -1951,19 +3379,38 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.info-badge {
+/* 加载遮罩（等待父组件数据就绪后再初始化 3D） */
+.loading-overlay {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 10;
-  padding: 6px 12px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.92);
-  background: rgba(13, 13, 13, 0.62);
-  border: 1px solid rgba(196, 165, 116, 0.35);
-  border-radius: 4px;
-  backdrop-filter: blur(6px);
-  pointer-events: none;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #e9e5dc;
+  z-index: 100;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(196, 165, 116, 0.25);
+  border-top-color: #c4a574;
+  border-radius: 50%;
+  animation: facade-spin 1s linear infinite;
+}
+
+@keyframes facade-spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #6b6b6b;
 }
 
 /* 楼层悬停提示（参照 /building-viewer 的 .floor-toast） */
@@ -1987,6 +3434,12 @@ onBeforeUnmount(() => {
   color: #f5ead7;
 }
 
+.toast-devices {
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
 /* 调试提示 */
 .debug-tooltip {
   position: absolute;
@@ -2003,5 +3456,285 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   pointer-events: none;
   white-space: pre;
+}
+
+/* 控制面板分隔线与编辑区块 */
+.ctrl-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ctrl-title.edit-title {
+  margin-top: 10px;
+  color: #d4b88a;
+}
+
+.edit-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.edit-btn {
+  padding: 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.edit-btn.add {
+  background: rgba(76, 175, 80, 0.22);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #81c784;
+}
+
+.edit-btn.add:hover,
+.edit-btn.add.active {
+  background: rgba(76, 175, 80, 0.45);
+  border-color: #4caf50;
+  color: #fff;
+}
+
+.edit-btn.del {
+  background: rgba(244, 67, 54, 0.18);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #e57373;
+}
+
+.edit-btn.del:hover,
+.edit-btn.del.active {
+  background: rgba(244, 67, 54, 0.4);
+  border-color: #f44336;
+  color: #fff;
+}
+
+.edit-btn.undo {
+  background: rgba(156, 39, 176, 0.18);
+  border-color: rgba(156, 39, 176, 0.45);
+  color: #ce93d8;
+}
+
+.edit-btn.undo:hover {
+  background: rgba(156, 39, 176, 0.4);
+  border-color: #9c27b0;
+  color: #fff;
+}
+
+.edit-btn.close {
+  background: rgba(196, 165, 116, 0.22);
+  border-color: rgba(196, 165, 116, 0.55);
+  color: #f5ead7;
+}
+
+.edit-btn.close:hover {
+  background: rgba(196, 165, 116, 0.5);
+  border-color: #c4a574;
+  color: #fff;
+}
+
+.edit-hint {
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cfe9e9;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.edit-feedback {
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #81d4fa;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* 温湿度图例（仿 /building-viewer 的 env-legend） */
+.env-legend {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: 12px;
+  min-width: 150px;
+  padding: 10px 12px 9px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.72);
+  border: 1px solid rgba(196, 165, 116, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+  animation: legend-in 240ms ease-out;
+}
+
+.legend-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.legend-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+.legend-unit {
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: #d4b88a;
+}
+
+.legend-live {
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  align-self: center;
+  border-radius: 50%;
+  background: #c4a574;
+  box-shadow: 0 0 0 3px rgba(196, 165, 116, 0.22);
+  animation: legend-pulse 2.4s ease-in-out infinite;
+}
+
+.legend-bar {
+  display: flex;
+  height: 8px;
+  margin: 7px 0 5px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.legend-cell {
+  flex: 1;
+  height: 100%;
+}
+
+.legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.legend-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+@keyframes legend-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes legend-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(196, 165, 116, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(196, 165, 116, 0.1);
+  }
+}
+
+/* 编辑模式提示 */
+.edit-mode-toast {
+  position: absolute;
+  z-index: 8;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 18px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.78);
+  border: 1px solid rgba(196, 165, 116, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  color: #f5ead7;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 添加模式拖拽提示（左下角） */
+.drag-source-toolbar {
+  position: absolute;
+  z-index: 7;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.drag-source-hint {
+  max-width: 260px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(13, 13, 13, 0.72);
+  border: 1px solid rgba(95, 184, 184, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cfe9e9;
+}
+
+/* 退出编辑确认框 */
+.confirm-content {
+  margin: 0 0 4px;
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

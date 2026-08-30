@@ -60,6 +60,7 @@ const router = createRouter({
           path: 'building-facade-demo',
           name: 'building-facade-demo',
           component: () => import('@/demo/building-facade/FacadeDemoView.vue'),
+          meta: { titleKey: 'building.title' },
         },
         {
           path: 'devices',
