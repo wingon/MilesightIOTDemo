@@ -923,13 +923,21 @@ const yC = floorCenterY(floor.level) + UNDERGROUND_OFFSET
     // 本楼层温湿度着色（美化墙面保留混凝土质感，但颜色跟随温湿度；无数据回退米灰）
     const env = floorEnv.value[floor.level]
     const value = metric.value === 'temperature' ? env?.temperature ?? null : env?.humidity ?? null
-    const envColor = envColorFor(metric.value, value, rawMin, rawMax)
+    let envColor = envColorFor(metric.value, value, rawMin, rawMax)
+    // 弱化切角处连续大色块：把着色颜色向混凝土米灰靠拢（保留可辨识的温湿度倾向，但不再浓烈扎眼），
+    // 并显著降低自发光，避免同色楼层在切角凹槽处连成一片刺眼的黄绿色块。
+    if (envColor) {
+      const c = new THREE.Color(envColor)
+      const gray = new THREE.Color(BASE_GRAY)
+      c.lerp(gray, 0.55)
+      envColor = `#${c.getHexString()}`
+    }
     const floorMat = new THREE.MeshStandardMaterial({
       color: envColor ? new THREE.Color(envColor) : new THREE.Color(BASE_GRAY),
       roughness: 0.8,
       metalness: 0.02,
       emissive: envColor ? new THREE.Color(envColor) : new THREE.Color(0x000000),
-      emissiveIntensity: 0.15,    // 颜色自发光提亮（与右下图例色一致，柔和清晰）
+      emissiveIntensity: 0.05,    // 颜色自发光提亮（与右下图例色一致，柔和清晰）
     })
     floorInnerMats.push(floorMat)
     disposables.push(floorMat)
@@ -2094,20 +2102,11 @@ function onPointerDown(ev: PointerEvent) {
 }
 
 /** 更新高亮盒：匹配悬停楼层的外包轮廓，并标记凸出目标楼层 */
-function updateHoverHighlight(floor: number | null) {
-  hoverScaleFloor = floor ?? 0
-  if (!hoverHighlight) return
-  if (floor == null) {
-    hoverHighlight.visible = false
-    return
-  }
-  const { minX, maxX, minZ, maxZ } = floorFootprint(floor)
-  const y0 = (floor - 3) * SLAB
-  const y1 = floor === FLOOR_COUNT ? ROOF_Y : (floor - 3) * SLAB + SLAB
-  hoverHighlight.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
-  // 略大于楼层轮廓，形成"鼓起"的金色光晕
-  hoverHighlight.scale.set((maxX - minX) * 1.05, (y1 - y0) * 1.01, (maxZ - minZ) * 1.05)
-  hoverHighlight.visible = true
+function updateHoverHighlight(_floor: number | null) {
+  // 只在选中时凸出：去掉鼠标悬停的即时凸出（楼层不再缩放放大、不再显示金色高亮盒）。
+  // 悬停仍保留楼层提示 toast 与指针变化，但建筑本体保持静止。
+  hoverScaleFloor = 0
+  if (hoverHighlight) hoverHighlight.visible = false
 }
 
 /**
