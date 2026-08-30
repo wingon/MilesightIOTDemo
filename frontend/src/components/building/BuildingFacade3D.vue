@@ -114,8 +114,8 @@ const emit = defineEmits<{
 }>()
 
 // ---- 控件状态 ----
-/** 大屏展示模式（html.ls-on）默认自动旋转；普通模式保持关闭，由控制面板手动开启 */
-const autoRotate = ref(document.documentElement.classList.contains('ls-on'))
+/** 默认不自动旋转；需要时由控制面板手动开启（大屏模式不再默认旋转） */
+const autoRotate = ref(false)
 /** 控制面板显示状态（左上角提示文字连点 3 次弹出/收起） */
 const panelVisible = ref(false)
 const rotateSpeed = ref(1)
