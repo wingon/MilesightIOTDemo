@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -17,7 +18,7 @@ import {
   floorCenterY,
   floorName,
   type SnapCell,
-} from './facadeSnapshot'
+} from '@/utils/facadeSnapshot'
 import { getFacadeConfig, saveFacadeConfig, type FacadeConfig } from '../../api/facade'
 import { getFloorEnvironmentSummary } from '../../api/environment'
 import {
@@ -49,6 +50,8 @@ import {
   type FloorEnvValue,
 } from '../../utils/envColor'
 
+const { t } = useI18n()
+
 /*
  * 楼宇幕墙美化 DEMO（参考 thingraph/bim-viewer 的外观风格）
  *
@@ -70,6 +73,11 @@ import {
 /** 格子边长 = CELL_SIZE * 0.96（同原组件 cellSize） */
 const CELL_W = CELL_SIZE * 0.96
 const HALF = CELL_W / 2
+/**
+ * 地下层下沉量：G/F（3D level 3）对齐地面 y=0，B2/B1 为负楼层。
+ * 所有楼层 Y 统一加该偏移（B2 底 ≈ -1.68、B1 底 ≈ -0.84、G 底 = 0）。
+ */
+const UNDERGROUND_OFFSET = -2 * SLAB
 /** 幕墙外表面外凸量（防 z-fighting，视觉可忽略） */
 const PROUD = 0.012
 /** 竖向分隔框截面深（LOGO 定位用） */
@@ -77,9 +85,13 @@ const MULLION_D = 0.075
 /** 核心筒尺寸/位置（与原 Building3D 的 Visual core 一致） */
 const CORE_W = CELL_SIZE * 1.6
 const CORE_H = FLOOR_COUNT * SLAB
-const CORE_POS = new THREE.Vector3(CELL_SIZE * 2, CORE_H / 2 - FLOOR_GAP / 2, CELL_SIZE * 1)
-/** 建筑总高（不含核心筒凸出） */
-const ROOF_Y = (FLOOR_COUNT - 1) * SLAB + FLOOR_H
+const CORE_POS = new THREE.Vector3(
+  CELL_SIZE * 2,
+  CORE_H / 2 - FLOOR_GAP / 2 + UNDERGROUND_OFFSET,
+  CELL_SIZE * 1,
+)
+/** 建筑总高（不含核心筒凸出），G/F 对齐地面 y=0 起算 */
+const ROOF_Y = (FLOOR_COUNT - 3) * SLAB + FLOOR_H
 
 // ---- 父组件接口（与 /building-viewer 的 Building3D 对齐：选中楼层 / 着色指标 / 加载态 / 编辑数据） ----
 const props = defineProps<{
@@ -102,7 +114,8 @@ const emit = defineEmits<{
 }>()
 
 // ---- 控件状态 ----
-const autoRotate = ref(false)
+/** 大屏展示模式（html.ls-on）默认自动旋转；普通模式保持关闭，由控制面板手动开启 */
+const autoRotate = ref(document.documentElement.classList.contains('ls-on'))
 /** 控制面板显示状态（左上角提示文字连点 3 次弹出/收起） */
 const panelVisible = ref(false)
 const rotateSpeed = ref(1)
@@ -773,7 +786,7 @@ function buildRawBuilding(): THREE.Group {
   const FALLBACK = '#8a8f93'
 
   for (const floor of FLOORS) {
-    const yC = floorCenterY(floor.level)
+    const yC = floorCenterY(floor.level) + UNDERGROUND_OFFSET
     const env = floorEnv.value[floor.level]
     const value = metric.value === 'temperature' ? env?.temperature ?? null : env?.humidity ?? null
     const color = envColorFor(metric.value, value, min, max)
@@ -830,7 +843,7 @@ function buildRawBuilding(): THREE.Group {
   // 核心筒（黑色方块，屋顶中央，与参考图一致）
   const coreGeo = new THREE.BoxGeometry(CORE_W * 0.7, CORE_H, CORE_W * 0.7)
   const core = new THREE.Mesh(coreGeo, coreMat)
-  core.position.set(CELL_SIZE * 2, CORE_H / 2, CELL_SIZE * 1)
+  core.position.set(CELL_SIZE * 2, CORE_H / 2 + UNDERGROUND_OFFSET, CELL_SIZE * 1)
   group.add(core)
   disposables.push(coreGeo)
   outlineGeos.push(coreGeo.clone().translate(core.position.x, core.position.y, core.position.z))
@@ -905,7 +918,7 @@ function buildBuilding(): THREE.Group {
   const BASE_GRAY = 0x857c70
 
   for (const floor of FLOORS) {
-    const yC = floorCenterY(floor.level)
+const yC = floorCenterY(floor.level) + UNDERGROUND_OFFSET
 
     // 本楼层温湿度着色（美化墙面保留混凝土质感，但颜色跟随温湿度；无数据回退米灰）
     const env = floorEnv.value[floor.level]
@@ -1228,7 +1241,13 @@ function buildGround(): THREE.Group {
   const group = new THREE.Group()
   ;(group as any).__isGround = true
   const groundGeo = new THREE.CircleGeometry(32, 64)
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x7f8769, roughness: 0.95, metalness: 0, envMapIntensity: 0.1 })
+  // 不透明浅白色地坪（行人道色）：G/F 对齐地面，地面不可看穿；地下层从侧面低角度可见
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: 0xefede6,
+    roughness: 0.9,
+    metalness: 0,
+    envMapIntensity: 0.12,
+  })
   const ground = new THREE.Mesh(groundGeo, groundMat)
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -0.05
@@ -1362,8 +1381,8 @@ function buildFloorHits() {
   floorHits = []
   for (let level = 1; level <= FLOOR_COUNT; level++) {
     const { minX, maxX, minZ, maxZ } = floorFootprint(level)
-    const y0 = (level - 1) * SLAB
-    const y1 = level === FLOOR_COUNT ? ROOF_Y : level * SLAB
+    const y0 = (level - 3) * SLAB
+    const y1 = level === FLOOR_COUNT ? ROOF_Y : (level - 3) * SLAB + SLAB
     const geo = new THREE.BoxGeometry(maxX - minX, y1 - y0, maxZ - minZ)
     const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ visible: false }))
     mesh.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
@@ -1412,8 +1431,8 @@ function updateSelectedHighlight(floor: number | null) {
     return
   }
   const { minX, maxX, minZ, maxZ } = floorFootprint(floor)
-  const y0 = (floor - 1) * SLAB
-  const y1 = floor === FLOOR_COUNT ? ROOF_Y : floor * SLAB
+  const y0 = (floor - 3) * SLAB
+  const y1 = floor === FLOOR_COUNT ? ROOF_Y : (floor - 3) * SLAB + SLAB
   selectedHighlight.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
   selectedHighlight.scale.set(maxX - minX, y1 - y0, maxZ - minZ)
   selectedHighlight.visible = true
@@ -1496,7 +1515,7 @@ function buildEditingBuilding(): THREE.Group {
 
   for (let i = 0; i < FLOOR_COUNT; i++) {
     const level = i + 1
-    const yBase = i * SLAB
+    const yBase = (i - 2) * SLAB
     const levelMeshes: THREE.Mesh[] = []
 
     const renderCells: CellShapeConfig[] = []
@@ -1534,7 +1553,7 @@ function buildEditingBuilding(): THREE.Group {
       const { x: wx, z: wz } = cellToWorld(shapeConfig.row, shapeConfig.col)
       const hasDbPos = shapeConfig?.x != null && shapeConfig?.y != null && shapeConfig?.z != null
       const px = hasDbPos ? shapeConfig.x! : wx
-      const py = hasDbPos ? shapeConfig.z! : yBase + FLOOR_H / 2
+      const py = hasDbPos ? shapeConfig.z! + UNDERGROUND_OFFSET : yBase + FLOOR_H / 2
       const pz = hasDbPos ? shapeConfig.y! : wz
       mesh.position.set(px, py, pz)
       if (shapeConfig?.rotation) mesh.rotation.copy(parseRotation(shapeConfig.rotation))
@@ -1557,7 +1576,7 @@ function buildEditingBuilding(): THREE.Group {
   disposables.push(coreMat)
   const coreGeo = new THREE.BoxGeometry(CORE_W * 0.7, CORE_H, CORE_W * 0.7)
   const core = new THREE.Mesh(coreGeo, coreMat)
-  core.position.set(CELL_SIZE * 2, CORE_H / 2, CELL_SIZE * 1)
+  core.position.set(CELL_SIZE * 2, CORE_H / 2 + UNDERGROUND_OFFSET, CELL_SIZE * 1)
   group.add(core)
   disposables.push(coreGeo)
 
@@ -1590,11 +1609,11 @@ function buildHiddenCellOverlays() {
     if (!isHiddenType(s.shape)) continue
     if (s.floor < 1 || s.floor > FLOOR_COUNT) continue
     const level = s.floor
-    const yBase = (level - 1) * SLAB
+    const yBase = (level - 3) * SLAB
     const { x: wx, z: wz } = cellToWorld(s.row, s.col)
     const hasDbPos = s.x != null && s.y != null && s.z != null
     const px = hasDbPos ? s.x! : wx
-    const py = hasDbPos ? s.z! : yBase + FLOOR_H / 2
+    const py = hasDbPos ? s.z! + UNDERGROUND_OFFSET : yBase + FLOOR_H / 2
     const pz = hasDbPos ? s.y! : wz
 
     const fill = new THREE.Mesh(boxGeo, fillMat)
@@ -1708,7 +1727,7 @@ async function finishEditSession(save: boolean) {
   confirmOpen.value = false
   if (save) {
     exitEditSession()
-    message.success('修改已保存')
+    message.success(t('building.savedSuccess'))
     return
   }
   await discardChanges()
@@ -1718,7 +1737,7 @@ async function finishEditSession(save: boolean) {
 async function discardChanges() {
   const buildingId = props.buildingId
   if (!buildingId || !snapshotShapes.value.length) {
-    message.warning('已放弃本次修改')
+    message.warning(t('building.changesDiscarded'))
     exitEditSession()
     return
   }
@@ -1765,11 +1784,11 @@ async function discardChanges() {
         })
       }
     }
-    message.success('已放弃本次修改')
+    message.success(t('building.changesDiscarded'))
     emit('refreshShapes')
     exitEditSession()
   } catch {
-    message.error('还原失败，请重试')
+    message.error(t('building.discardFailed'))
   }
 }
 
@@ -1796,7 +1815,7 @@ function pickGridCellFromRay(): { row: number; col: number; floor3d: number; exi
   const hit = new THREE.Vector3()
   const plane = new THREE.Plane()
   for (let level = 1; level <= FLOOR_COUNT; level++) {
-    plane.set(new THREE.Vector3(0, 1, 0), -((level - 1) * SLAB))
+    plane.set(new THREE.Vector3(0, 1, 0), -((level - 3) * SLAB))
     if (!raycaster.ray.intersectPlane(plane, hit)) continue
     const dist = raycaster.ray.origin.distanceTo(hit)
     if (dist >= bestDist) continue
@@ -1896,7 +1915,7 @@ function updateDragPreview() {
     return
   }
   const { x, z } = cellToWorld(cell.row, cell.col)
-  const y = (cell.floor3d - 1) * SLAB + FLOOR_H + 0.9
+  const y = (cell.floor3d - 3) * SLAB + FLOOR_H + 0.9
   dragPreviewMesh.position.set(x, y, z)
   dragPreviewMesh.visible = true
   applyDragPreviewRotation()
@@ -1926,12 +1945,12 @@ async function endDragCell() {
   if (!src) return
   if (!target || target.exists) return
   if (!props.buildingId) {
-    message.warning('缺少楼栋 ID，无法添加格子')
+    message.warning(t('building.missingBuildingId'))
     return
   }
   const floorId = await resolveFloorId(target.floor3d)
   if (!floorId) {
-    message.warning('无法找到楼层，添加失败')
+    message.warning(t('building.addCellFloorNotFound'))
     return
   }
   try {
@@ -1962,12 +1981,12 @@ async function endDragCell() {
           console.warn('[BuildingFacade3D] Failed to write placed rotation:', placedRotationDeg)
         }
       }
-      message.success('已添加 1 个格子')
+      message.success(t('building.addCellSuccess'))
     } else {
-      message.warning('添加失败或格子已存在')
+      message.warning(t('building.addCellExists'))
     }
   } catch {
-    message.error('添加失败，请重试')
+    message.error(t('building.addCellFailed'))
   }
   emit('refreshShapes')
 }
@@ -2009,12 +2028,12 @@ async function deleteCellAt(floor_id: number, row: number, col: number) {
     if (n > 0) {
       editDirty.value = true
       undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
-      showFeedback(`已删除格子 (${row}, ${col})`)
+      showFeedback(t('building.cellDeleted', { row, col }))
     } else {
-      showFeedback('无变化：没有可删除的格子')
+      showFeedback(t('building.noDeleteChange'))
     }
   } catch {
-    message.error('删除失败，请重试')
+    message.error(t('building.deleteFailed'))
   }
   emit('refreshShapes')
 }
@@ -2026,12 +2045,12 @@ async function handleUndo() {
       editDirty.value = true
       undoableOps.value = Math.max(0, undoableOps.value - 1)
     }
-    showFeedback(`已撤回 ${res.data.affected} 个格子`)
+    showFeedback(t('building.undone', { n: res.data.affected }))
     emit('refreshShapes')
   } else if (undoableOps.value > 0) {
-    showFeedback('已超过撤回次数上限（10 次），无法撤回')
+    showFeedback(t('building.undoLimitReached'))
   } else {
-    showFeedback('没有可撤回的操作')
+    showFeedback(t('building.noUndo'))
   }
 }
 
@@ -2083,8 +2102,8 @@ function updateHoverHighlight(floor: number | null) {
     return
   }
   const { minX, maxX, minZ, maxZ } = floorFootprint(floor)
-  const y0 = (floor - 1) * SLAB
-  const y1 = floor === FLOOR_COUNT ? ROOF_Y : floor * SLAB
+  const y0 = (floor - 3) * SLAB
+  const y1 = floor === FLOOR_COUNT ? ROOF_Y : (floor - 3) * SLAB + SLAB
   hoverHighlight.position.set((minX + maxX) / 2, (y0 + y1) / 2, (minZ + maxZ) / 2)
   // 略大于楼层轮廓，形成"鼓起"的金色光晕
   hoverHighlight.scale.set((maxX - minX) * 1.05, (y1 - y0) * 1.01, (maxZ - minZ) * 1.05)
@@ -2134,8 +2153,8 @@ function buildLogo() {
   const cz = swZ + u * sz + proud * nz
   // 高度精确覆盖 1F+2F 两层（含层缝 2×SLAB），宽按图片比例 289/267 保持不变形
   const L1F = 4
-  const y0 = (L1F - 1) * SLAB // 1F 底
-  const y1 = L1F * SLAB + SLAB // 2F 顶
+  const y0 = (L1F - 1) * SLAB + UNDERGROUND_OFFSET // 1F 底（含地下偏移）
+  const y1 = L1F * SLAB + SLAB + UNDERGROUND_OFFSET // 2F 顶（含地下偏移）
   const yCenter = (y0 + y1) / 2
   const h = y1 - y0
   const w = h * (289 / 267)
@@ -2296,21 +2315,21 @@ function onPointerMove(ev: PointerEvent) {
         .clone()
         .transformDirection(hit.object.matrixWorld)
         .transformDirection(inv)
-      let face = 'unknown'
+      let face = t('building.faceUnknown')
       const ax = Math.abs(wn.x)
       const az = Math.abs(wn.z)
       if (Math.abs(wn.y) > 0.7) {
-        face = '屋顶面'
+        face = t('building.faceRoof')
       } else if (ax > 0.45 && az > 0.45) {
-        face = '斜面 (切角)'
+        face = t('building.faceSlope')
       } else if (ax > az) {
-        face = wn.x > 0 ? '东面 (+X)' : '西面 (-X)'
+        face = wn.x > 0 ? t('building.faceEast') : t('building.faceWest')
       } else {
-        face = wn.z > 0 ? '南面 (+Z)' : '北面 (-Z)'
+        face = wn.z > 0 ? t('building.faceSouth') : t('building.faceNorth')
       }
-      const level = Math.floor(local.y / SLAB) + 1
+      const level = Math.floor(local.y / SLAB) + 3
       const fName = floorName(level)
-      debugInfo.value = `面: ${face}\n坐标: x=${local.x.toFixed(2)}, z=${local.z.toFixed(2)}\n高度: y=${local.y.toFixed(2)} (约${fName})\n法线: (${wn.x.toFixed(2)}, ${wn.z.toFixed(2)})`
+      debugInfo.value = `${t('building.debugFace')}: ${face}\n${t('building.debugCoord')}: x=${local.x.toFixed(2)}, z=${local.z.toFixed(2)}\n${t('building.debugHeight')}: y=${local.y.toFixed(2)} (${t('building.debugApprox')}${fName})\n${t('building.debugNormal')}: (${wn.x.toFixed(2)}, ${wn.z.toFixed(2)})`
       debugVisible.value = true
     } else {
       debugVisible.value = false
@@ -2371,8 +2390,8 @@ function onPointerClick(ev: PointerEvent) {
   const cc = Math.min(12, Math.max(1, col))
   if ((cr < 1 || cr > 7 || cc < 1 || cc > 12)) return
 
-  // 反推 3D 楼层：floorCenterY = (level-1)*SLAB + FLOOR_H/2
-  const level = Math.min(FLOOR_COUNT, Math.max(1, Math.round((local.y - FLOOR_H / 2) / SLAB) + 1))
+  // 反推 3D 楼层：G/F(level3) 对齐地面 y=0，地下层为负
+  const level = Math.min(FLOOR_COUNT, Math.max(1, Math.round((local.y - FLOOR_H / 2) / SLAB) + 3))
 
   const key = `${level},${cr},${cc}`
   const next = { ...cellWindows.value }
@@ -2600,8 +2619,8 @@ function initThreeJS() {
   // 控制器（参数与原 Building3D 一致）
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
-  controls.target.set(0, (FLOOR_COUNT * SLAB) / 2, 0)
-  controls.maxPolarAngle = Math.PI * 0.48
+  controls.target.set(0, (FLOOR_COUNT - 5) * SLAB / 2 + FLOOR_H / 2, 0)
+  controls.maxPolarAngle = Math.PI * 0.6
   controls.minDistance = 8
   controls.maxDistance = 60
 
@@ -2651,9 +2670,9 @@ function onResize() {
 
 function resetView() {
   if (!camera || !controls) return
-  // 复位回到东南正面（LOGO 面）
+  // 复位回到东南正面（LOGO 面），目标点对准建筑中心（含地下层）
   camera.position.set(15.5, 10.5, 15.5)
-  controls.target.set(0, (FLOOR_COUNT * SLAB) / 2, 0)
+  controls.target.set(0, (FLOOR_COUNT - 5) * SLAB / 2 + FLOOR_H / 2, 0)
   controls.update()
 }
 
@@ -2663,6 +2682,95 @@ function togglePanel() {
 }
 
 defineExpose({ togglePanel })
+
+// ---- 控制面板状态跨页面同步（PC 端 ↔ 大屏 ?ls=） ----
+/** localStorage 键：控制面板所有功能状态，供大屏实时同步 */
+const FACADE_STATE_KEY = '333-iot-console-facade-state'
+
+interface FacadeState {
+  autoRotate: boolean
+  rotateSpeed: number
+  glassOpacity: number
+  showOutline: boolean
+  preset: 'day' | 'dusk' | 'night'
+  autoPreset: boolean
+  windowOrientation: 'vertical' | 'horizontal'
+  windowWidthRatio: number
+  windowHeightRatio: number
+  cellWindows: Record<string, boolean>
+  showFloorLines: boolean
+  showColLines: boolean
+  rawMode: boolean
+  metric: EnvMetric
+  cellClickEnabled: boolean
+  debugEnabled: boolean
+}
+
+function persistFacadeState() {
+  try {
+    const s: FacadeState = {
+      autoRotate: autoRotate.value,
+      rotateSpeed: rotateSpeed.value,
+      glassOpacity: glassOpacity.value,
+      showOutline: showOutline.value,
+      preset: preset.value,
+      autoPreset: autoPreset.value,
+      windowOrientation: windowOrientation.value,
+      windowWidthRatio: windowWidthRatio.value,
+      windowHeightRatio: windowHeightRatio.value,
+      cellWindows: cellWindows.value,
+      showFloorLines: showFloorLines.value,
+      showColLines: showColLines.value,
+      rawMode: rawMode.value,
+      metric: metric.value,
+      cellClickEnabled: cellClickEnabled.value,
+      debugEnabled: debugEnabled.value,
+    }
+    localStorage.setItem(FACADE_STATE_KEY, JSON.stringify(s))
+  } catch { /* 静默 */ }
+}
+
+function applyFacadeState(s: Partial<FacadeState>) {
+  if (typeof s.autoRotate === 'boolean') autoRotate.value = s.autoRotate
+  if (typeof s.rotateSpeed === 'number') rotateSpeed.value = s.rotateSpeed
+  if (typeof s.glassOpacity === 'number') glassOpacity.value = s.glassOpacity
+  if (typeof s.showOutline === 'boolean') showOutline.value = s.showOutline
+  if (s.preset === 'day' || s.preset === 'dusk' || s.preset === 'night') preset.value = s.preset
+  if (typeof s.autoPreset === 'boolean') autoPreset.value = s.autoPreset
+  if (s.windowOrientation === 'vertical' || s.windowOrientation === 'horizontal') windowOrientation.value = s.windowOrientation
+  if (typeof s.windowWidthRatio === 'number') windowWidthRatio.value = s.windowWidthRatio
+  if (typeof s.windowHeightRatio === 'number') windowHeightRatio.value = s.windowHeightRatio
+  if (s.cellWindows && typeof s.cellWindows === 'object') cellWindows.value = { ...s.cellWindows }
+  if (typeof s.showFloorLines === 'boolean') showFloorLines.value = s.showFloorLines
+  if (typeof s.showColLines === 'boolean') showColLines.value = s.showColLines
+  if (typeof s.rawMode === 'boolean') rawMode.value = s.rawMode
+  if (s.metric === 'temperature' || s.metric === 'humidity') metric.value = s.metric
+  if (typeof s.cellClickEnabled === 'boolean') cellClickEnabled.value = s.cellClickEnabled
+  if (typeof s.debugEnabled === 'boolean') debugEnabled.value = s.debugEnabled
+}
+
+function loadFacadeState() {
+  try {
+    const raw = localStorage.getItem(FACADE_STATE_KEY)
+    if (!raw) return
+    applyFacadeState(JSON.parse(raw))
+  } catch { /* 静默 */ }
+}
+
+/** 大屏 / 另一标签页修改控制面板状态时实时同步 */
+function onFacadeStorage(e: StorageEvent) {
+  if (e.key !== FACADE_STATE_KEY || e.newValue == null) return
+  try {
+    applyFacadeState(JSON.parse(e.newValue))
+  } catch { /* 静默 */ }
+}
+
+// 控制面板任意功能变化都持久化，供大屏同步
+watch(
+  [autoRotate, rotateSpeed, glassOpacity, showOutline, preset, autoPreset, windowOrientation, windowWidthRatio, windowHeightRatio, showFloorLines, showColLines, rawMode, metric, cellClickEnabled, debugEnabled],
+  () => persistFacadeState(),
+)
+watch(cellWindows, () => persistFacadeState(), { deep: true })
 
 // ---- 控件联动 ----
 
@@ -2815,7 +2923,7 @@ watch(
 const legendRange = computed(() => envRange(floorEnv.value, metric.value))
 const legendUnit = computed(() => (metric.value === 'humidity' ? '%RH' : '°C'))
 const legendLabel = computed(() =>
-  metric.value === 'humidity' ? '湿度' : '温度',
+  metric.value === 'humidity' ? t('building.metricHumidity') : t('building.metricTemperature'),
 )
 const LEGEND_BAND_COUNT = 4
 const LEGEND_CELLS = computed(() =>
@@ -2837,6 +2945,7 @@ const legendGradientStyle = computed(() => {
 
 function startDemo() {
   if (!host.value || scene) return
+  loadFacadeState()
   initThreeJS()
   window.addEventListener('resize', onResize)
   loadConfig()
@@ -2845,6 +2954,8 @@ function startDemo() {
 
 onMounted(() => {
   if (!host.value) return
+  // 跨页面状态同步（PC 端 ↔ 大屏）：另一页面修改控制面板状态时实时应用
+  window.addEventListener('storage', onFacadeStorage)
   if (props.loading) return
   startDemo()
 })
@@ -2857,6 +2968,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  window.removeEventListener('storage', onFacadeStorage)
   cancelAnimationFrame(animId)
   clearHover()
   if (feedbackTimer) clearTimeout(feedbackTimer)
@@ -2940,13 +3052,13 @@ onBeforeUnmount(() => {
     <!-- Loading overlay while data is being fetched -->
     <div v-if="loading" class="loading-overlay">
       <div class="loading-spinner"></div>
-      <div class="loading-text">加载中...</div>
+      <div class="loading-text">{{ t('building.loading') }}</div>
     </div>
     <!-- 控制面板 -->
     <div v-show="panelVisible" class="ctrl-panel">
-      <div class="ctrl-title">3D图形控制面板</div>
+      <div class="ctrl-title">{{ t('building.panelTitle') }}</div>
       <div class="ctrl-row">
-        <label class="ctrl-label">场景</label>
+        <label class="ctrl-label">{{ t('building.scene') }}</label>
         <div class="seg-group">
           <button
             v-for="p in (['day', 'dusk', 'night'] as const)"
@@ -2955,7 +3067,7 @@ onBeforeUnmount(() => {
             :class="{ active: preset === p }"
             @click="preset = p"
           >
-            {{ p === 'day' ? '日间' : p === 'dusk' ? '黄昏' : '夜间' }}
+            {{ p === 'day' ? t('building.sceneDay') : p === 'dusk' ? t('building.sceneDusk') : t('building.sceneNight') }}
           </button>
         </div>
       </div>
@@ -2965,30 +3077,30 @@ onBeforeUnmount(() => {
         <label class="ctrl-check">
           <input v-model="autoPreset" type="checkbox" />
           <span class="check-box"></span>
-          <span class="check-text">自动场景</span>
+          <span class="check-text">{{ t('building.autoScene') }}</span>
         </label>
       </div>
 
       <!-- 窗户方向 -->
       <div class="ctrl-row">
-        <label class="ctrl-label">窗户方向</label>
+        <label class="ctrl-label">{{ t('building.windowDirection') }}</label>
         <div class="seg-group">
           <button
             class="seg-btn"
             :class="{ active: windowOrientation === 'vertical' }"
             @click="windowOrientation = 'vertical'"
-          >竖向</button>
+          >{{ t('building.windowVertical') }}</button>
           <button
             class="seg-btn"
             :class="{ active: windowOrientation === 'horizontal' }"
             @click="windowOrientation = 'horizontal'"
-          >横向</button>
+          >{{ t('building.windowHorizontal') }}</button>
         </div>
       </div>
 
       <!-- 窗户宽度 -->
       <div class="ctrl-row">
-        <label class="ctrl-label">窗户宽度</label>
+        <label class="ctrl-label">{{ t('building.windowWidth') }}</label>
         <input
           v-model.number="windowWidthRatio"
           class="ctrl-slider"
@@ -3002,7 +3114,7 @@ onBeforeUnmount(() => {
 
       <!-- 窗户高度 -->
       <div class="ctrl-row">
-        <label class="ctrl-label">窗户高度</label>
+        <label class="ctrl-label">{{ t('building.windowHeight') }}</label>
         <input
           v-model.number="windowHeightRatio"
           class="ctrl-slider"
@@ -3019,24 +3131,24 @@ onBeforeUnmount(() => {
         <label class="ctrl-check">
           <input v-model="rawMode" type="checkbox" />
           <span class="check-box"></span>
-          <span class="check-text">原始状态</span>
+          <span class="check-text">{{ t('building.rawMode') }}</span>
         </label>
       </div>
 
       <!-- 按温湿度着色（美化 / 原始状态通用） -->
       <div class="ctrl-row">
-        <label class="ctrl-label">着色</label>
+        <label class="ctrl-label">{{ t('building.coloring') }}</label>
         <div class="seg-group">
           <button
             class="seg-btn"
             :class="{ active: metric === 'temperature' }"
             @click="metric = 'temperature'"
-          >温度</button>
+          >{{ t('building.metricTemperature') }}</button>
           <button
             class="seg-btn"
             :class="{ active: metric === 'humidity' }"
             @click="metric = 'humidity'"
-          >湿度</button>
+          >{{ t('building.metricHumidity') }}</button>
         </div>
       </div>
 
@@ -3045,36 +3157,36 @@ onBeforeUnmount(() => {
         <label class="ctrl-check">
           <input v-model="cellClickEnabled" type="checkbox" />
           <span class="check-box"></span>
-          <span class="check-text">点击创建窗户</span>
+          <span class="check-text">{{ t('building.clickCreateWindows') }}</span>
         </label>
       </div>
 
       <!-- 批量操作 -->
       <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: showFloorLines }" @click="showFloorLines = !showFloorLines">
-          {{ showFloorLines ? '隐藏横线' : '显示横线' }}
+          {{ showFloorLines ? t('building.hideFloorLines') : t('building.showFloorLines') }}
         </button>
         <button type="button" class="ctrl-btn" :class="{ on: showColLines }" @click="showColLines = !showColLines">
-          {{ showColLines ? '隐藏竖线' : '显示竖线' }}
+          {{ showColLines ? t('building.hideColLines') : t('building.showColLines') }}
         </button>
       </div>
       <div class="ctrl-row">
-        <button type="button" class="ctrl-btn" @click="clearAllWindows">全部清除</button>
+        <button type="button" class="ctrl-btn" @click="clearAllWindows">{{ t('building.clearAll') }}</button>
       </div>
 
       <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: showOutline }" @click="showOutline = !showOutline">
-          {{ showOutline ? '关闭线框' : 'BIM 线框' }}
+          {{ showOutline ? t('building.outlineOff') : t('building.outlineOn') }}
         </button>
         <button type="button" class="ctrl-btn" :class="{ on: autoRotate }" @click="autoRotate = !autoRotate">
-          {{ autoRotate ? '暂停旋转' : '自动旋转' }}
+          {{ autoRotate ? t('building.rotatePause') : t('building.rotatePlay') }}
         </button>
       </div>
       <div class="ctrl-row">
-        <button type="button" class="ctrl-btn" @click="resetView">复位视角</button>
+        <button type="button" class="ctrl-btn" @click="resetView">{{ t('building.resetView') }}</button>
       </div>
       <div v-if="autoRotate" class="ctrl-row">
-        <label class="ctrl-label">旋转速度</label>
+        <label class="ctrl-label">{{ t('building.rotateSpeed') }}</label>
         <input
           v-model.number="rotateSpeed"
           class="ctrl-slider"
@@ -3085,7 +3197,7 @@ onBeforeUnmount(() => {
         />
         <span class="ctrl-value">{{ rotateSpeed.toFixed(1) }}×</span>
       </div>
-      <div class="ctrl-hint">点击建筑表面可逐格开关窗户</div>
+      <div class="ctrl-hint">{{ t('building.clickFloorHint') }}</div>
 
       <div class="ctrl-divider"></div>
 
@@ -3094,25 +3206,25 @@ onBeforeUnmount(() => {
         <label class="ctrl-check">
           <input v-model="debugEnabled" type="checkbox" />
           <span class="check-box"></span>
-          <span class="check-text">调试信息</span>
+          <span class="check-text">{{ t('building.debugInfo') }}</span>
         </label>
       </div>
 
       <!-- 格子编辑（整合自 /building-viewer 编辑面板：添加 / 删除 / 撤回 / 完成） -->
-      <div class="ctrl-title edit-title">格子编辑</div>
+      <div class="ctrl-title edit-title">{{ t('building.cellEditor') }}</div>
       <div class="ctrl-row">
         <button type="button" class="ctrl-btn" :class="{ on: editUnlocked }" @click="toggleEditMode">
-          {{ editUnlocked ? '退出编辑' : '编辑格子' }}
+          {{ editUnlocked ? t('building.exitEdit') : t('building.editCells') }}
         </button>
       </div>
       <div v-if="editUnlocked" class="edit-actions">
-        <button type="button" class="edit-btn add" :class="{ active: editToolMode === 'add' }" @click="toggleToolMode('add')">添加</button>
-        <button type="button" class="edit-btn del" :class="{ active: editToolMode === 'delete' }" @click="toggleToolMode('delete')">删除</button>
-        <button type="button" class="edit-btn undo" @click="handleUndo">撤回</button>
-        <button type="button" class="edit-btn close" @click="onDoneClick">完成</button>
+        <button type="button" class="edit-btn add" :class="{ active: editToolMode === 'add' }" @click="toggleToolMode('add')">{{ t('building.addBtn') }}</button>
+        <button type="button" class="edit-btn del" :class="{ active: editToolMode === 'delete' }" @click="toggleToolMode('delete')">{{ t('building.deleteBtn') }}</button>
+        <button type="button" class="edit-btn undo" @click="handleUndo">{{ t('building.undoBtn') }}</button>
+        <button type="button" class="edit-btn close" @click="onDoneClick">{{ t('building.doneBtn') }}</button>
       </div>
-      <div v-if="editUnlocked && editToolMode === 'add'" class="edit-hint">拖動模板放到樓宇上；滾輪 / R 鍵旋轉</div>
-      <div v-else-if="editUnlocked && editToolMode === 'delete'" class="edit-hint">點擊格子立即刪除，可連續點擊</div>
+      <div v-if="editUnlocked && editToolMode === 'add'" class="edit-hint">{{ t('building.editAddHint') }}</div>
+      <div v-else-if="editUnlocked && editToolMode === 'delete'" class="edit-hint">{{ t('building.editDeleteHint') }}</div>
       <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
     <!-- 楼层悬停提示 -->
@@ -3122,7 +3234,7 @@ onBeforeUnmount(() => {
       :style="toastStyle"
     >
       <div class="toast-level">{{ floorLabel(hoveredFloor ?? 0) }}</div>
-      <div class="toast-devices">{{ deviceCountFor(hoveredFloor ?? 0) }} 台设备</div>
+      <div class="toast-devices">{{ t('building.toastDevices', { n: deviceCountFor(hoveredFloor ?? 0) }) }}</div>
     </div>
     <!-- 调试提示 -->
     <div
@@ -3154,31 +3266,31 @@ onBeforeUnmount(() => {
         <span>{{ legendRange[0] }}</span>
         <span>{{ legendRange[1] }}</span>
       </div>
-      <p class="legend-note">灰色 = 無資料</p>
+      <p class="legend-note">{{ t('building.envNoData') }}</p>
     </div>
     <!-- 编辑模式提示 -->
     <transition name="fade">
       <div v-if="editModeToast" class="edit-mode-toast">
-        已開啟格子編輯模式 — 點擊格子即可編輯，或拖曳樓宇左側圓/方/三角模板到樓宇上放置
+        {{ t('building.editModeOn') }}
       </div>
     </transition>
     <!-- 添加模式拖拽提示 -->
     <div v-if="editUnlocked && editToolMode === 'add'" class="drag-source-toolbar">
-      <span class="drag-source-hint">点击「添加」后，拖动左侧圆/方/三角模板到楼宇上放置（绿色=可放置，红色=已有格子）</span>
+      <span class="drag-source-hint">{{ t('building.dragSourceHint') }}</span>
     </div>
     <!-- 退出编辑确认框 -->
     <a-modal
       :open="confirmOpen"
-      title="是否保存本次修改？"
+      :title="t('building.saveChangesTitle')"
       :footer="null"
       width="460px"
       @cancel="confirmOpen = false"
     >
-      <p class="confirm-content">本次編輯已生效。保存將保留所有改動；放棄將回滾本次編輯的全部改動（編輯期間請勿刷新頁面）。</p>
+      <p class="confirm-content">{{ t('building.saveChangesContent') }}</p>
       <div class="confirm-actions">
-        <a-button @click="confirmOpen = false">繼續編輯</a-button>
-        <a-button danger @click="finishEditSession(false)">放棄修改</a-button>
-        <a-button type="primary" @click="finishEditSession(true)">保存</a-button>
+        <a-button @click="confirmOpen = false">{{ t('building.saveChangesKeep') }}</a-button>
+        <a-button danger @click="finishEditSession(false)">{{ t('building.saveChangesDiscard') }}</a-button>
+        <a-button type="primary" @click="finishEditSession(true)">{{ t('building.saveChangesOk') }}</a-button>
       </div>
     </a-modal>
   </div>

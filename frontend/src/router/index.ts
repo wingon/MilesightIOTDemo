@@ -44,6 +44,13 @@ const router = createRouter({
           meta: { titleKey: 'menu.buildingViewer' },
         },
         {
+          // 旧版楼宇检视（格子化外观），保留以利将来切换回来
+          path: 'building-viewer-old',
+          name: 'building-viewer-old',
+          component: () => import('@/views/BuildingViewerOldView.vue'),
+          meta: { titleKey: 'menu.buildingViewer' },
+        },
+        {
           path: 'people-count',
           name: 'people-count',
           component: () => import('@/views/PeopleCountListView.vue'),
@@ -56,11 +63,9 @@ const router = createRouter({
           meta: { titleKey: 'building.floorRouteTitle' },
         },
         {
-          // 楼宇外观美化 DEMO（轮廓 1:1 还原 building-viewer，幕墙美化参考 bim-viewer）
+          // 旧版地址兼容重定向
           path: 'building-facade-demo',
-          name: 'building-facade-demo',
-          component: () => import('@/demo/building-facade/FacadeDemoView.vue'),
-          meta: { titleKey: 'building.title' },
+          redirect: '/building-viewer',
         },
         {
           path: 'devices',

@@ -55,6 +55,14 @@ export const useAppStore = defineStore('app', () => {
     setLocale(locale.value)
   }
 
+  // 跨页面语言同步：PC 端切换语言后，大屏（?ls=）无需手动刷新即自动跟随
+  window.addEventListener('storage', (e) => {
+    if (e.key === LOCALE_STORAGE_KEY && e.newValue) {
+      const v = e.newValue as AppLocale
+      if (v === 'en' || v === 'zh-TW') setLocale(v)
+    }
+  })
+
   return {
     sidebarCollapsed,
     locale,

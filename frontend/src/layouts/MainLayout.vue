@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -84,6 +84,11 @@ const menuItems = computed(() =>
 const pageTitle = computed(() => {
   const key = route.meta.titleKey as string | undefined
   return key ? t(key) : t('common.brand')
+})
+
+// 语言跨页面同步（PC 端切换后大屏自动跟随）时，同步刷新页面标题
+watch(pageTitle, (title) => {
+  document.title = `${title} · ${t('common.brand')}`
 })
 
 const localeOptions = computed(() => [

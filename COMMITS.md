@@ -242,3 +242,37 @@ feat: 人數計數功能擴充與圖表展示
 
 
 
+
+
+## 2026-08-30 10:30
+refactor: 外觀組件遷移、地下層對齊與 i18n 控制面板
+
+### 組件遷移與路由重整
+- BuildingFacade3D 從 demo/building-facade/ 遷移至 components/building/，導入 vue-i18n
+- FacadeDemoView 重命名為 BuildingViewerOldView（舊版保留供日後切換）
+- facadeSnapshot.ts 遷移至 utils/；demo/rendering.png 刪除
+- router 新增 building-viewer-old 路由，building-facade-demo 重定向至 /building-viewer
+
+### 地下層與視覺調整
+- 新增 UNDERGROUND_OFFSET = -2*SLAB，B2/B1/G 樓層 Y 坐標對齊地面 y=0
+- 地面材質改為淺白色（行人道色），地下層從側面可見
+- ROOF_Y 改為 (FLOOR_COUNT-3)*SLAB + FLOOR_H 計算
+- core 位置與所有樓層座標均加入 UNDERGROUND_OFFSET 偏移
+
+### 語言與跨頁同步
+- MainLayout：watch pageTitle → document.title 即時同步（切換語言後頁面標題即時更新）
+- stores/app.ts：新增 storage 事件監聽，PC 端切換語言後大屏自動跟隨（跨分頁同步）
+- BuildingViewerView：改用 @/components/building/BuildingFacade3D，標題改為 i18n
+
+### 控制面板 i18n（~50 組新文案）
+- en.ts / zh-TW.ts：新增 panelTitle/scene/windowDirection/windowWidth/windowHeight/rawMode/coloring/clickCreateWindows/hideFloorLines/showFloorLines/hideColLines/showColLines/clearAll/outlineOn/outlineOff/resetView/clickFloorHint/debugInfo/cellEditor/exitEdit/addBtn/deleteBtn/undoBtn/doneBtn/editAddHint/editDeleteHint/loading/missingBuildingId/deleteFailed/cellDeleted/noDeleteChange/noUndo/undone/debugFace/debugCoord/debugHeight/debugNormal/debugApprox/faceUnknown/faceRoof/faceSlope/faceEast/faceWest/faceSouth/faceNorth
+
+### 小調整
+- 部分硬編碼訊息改為 i18n（savedSuccess/changesDiscarded）
+- autoRotate 預設值：大屏模式（ls-on）預設開啟，普通模式關閉
+
+### 注意
+- db_backup/ 目錄不應提交（包含 SQL 備份檔案）
+
+## 2026-08-30 10:30
+refactor: 外觀組件遷移、地下層對齊與 i18n 控制面板

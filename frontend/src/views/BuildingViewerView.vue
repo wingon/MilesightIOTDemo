@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import Building3D from '@/components/building/Building3D.vue'
+import BuildingFacade3D from '@/components/building/BuildingFacade3D.vue'
 import BuildingDashboardPanel from '@/components/building/BuildingDashboardPanel.vue'
 import DeviceDetailPanel from '@/components/building/DeviceDetailPanel.vue'
 import { useBuildingStore } from '@/stores/building'
@@ -17,23 +17,25 @@ const router = useRouter()
 const store = useBuildingStore()
 
 const selectedFloor = ref<number | null>(null)
-/** 3D 樓棟當前著色指標（溫度/濕度） */
+/** 3D 着色指标（温度/湿度），与 BuildingFacade3D 控制面板双向同步 */
 const metric = ref<EnvMetric>('temperature')
-/** 編輯模式開關（由左上角提示文字框連點 3 次觸發，無任何介面提示） */
-const building3dRef = ref<InstanceType<typeof Building3D>>()
 /** Loading state - wait for all data before rendering 3D */
 const loading3D = ref(true)
+/** 格子设置（building_cell，DB 驱动；供 3D 编辑模式使用） */
+const cellShapes = ref<CellShapeConfig[]>([])
+/** 3D 组件实例（用于左上角提示文字连点 3 次弹出控制面板） */
+const buildingFacadeRef = ref<InstanceType<typeof BuildingFacade3D>>()
 
 /**
- * 左上角提示文字框「連點 3 次」計數（3 秒內累計，超時重置）。
- * 觸發後切換 Building3D 的編輯模式（進入編輯模式後點擊格子即彈出編輯框）。
+ * 左上角提示文字「连点 3 次」（3 秒内累计，超时重置）。
+ * 触发后弹出/收起 3D 图形控制面板。
  */
 const EDIT_HINT_REQUIRED = 3
 const EDIT_HINT_WINDOW_MS = 3000
 const editHintCount = ref(0)
 let lastEditHintAt = 0
 let editHintTimer: ReturnType<typeof setTimeout> | undefined
-/** 輕量反饋：進入編輯模式時左上角文字短暫高亮（0.5 秒後消失） */
+/** 轻量反馈：连点达标时提示文字短促高亮 */
 const editHintFlash = ref(false)
 let flashTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -53,30 +55,24 @@ function onEditHintClick() {
 
   if (editHintCount.value >= EDIT_HINT_REQUIRED) {
     editHintCount.value = 0
-    void building3dRef.value?.toggleEditMode()
-    // 極簡反饋：文字短暫高亮一次
+    void buildingFacadeRef.value?.togglePanel()
     editHintFlash.value = true
     if (flashTimer) clearTimeout(flashTimer)
     flashTimer = setTimeout(() => { editHintFlash.value = false }, 500)
   }
 }
 
-/**
- * Cell shape settings list
- *
- * Driven by the DB (building_cell table), fetched via GET /api/v1/building/cell-shapes,
- * replacing the old building_cell_shape table and frontend hard-coded settings.
- * Passed to Building3D via the :cell-shapes prop (one entry per cell: row/col/floor/shape/rotation/color/height).
- */
-const cellShapes = ref<CellShapeConfig[]>([])
+onBeforeUnmount(() => {
+  if (editHintTimer) clearTimeout(editHintTimer)
+  if (flashTimer) clearTimeout(flashTimer)
+})
 
-/** Fetch cell shape settings from the DB; keep empty on failure (fall back to frontend hard-coded rectangles) */
 async function fetchCellShapes(): Promise<void> {
   try {
     const { data } = await listBuildingCellShapes()
     cellShapes.value = data ?? []
   } catch (err) {
-    console.warn('[BuildingViewer] Failed to load cell shape settings (building_cell):', err)
+    console.warn('[BuildingViewer] Failed to load cell shapes (building_cell):', err)
     cellShapes.value = []
   }
 }
@@ -84,24 +80,18 @@ async function fetchCellShapes(): Promise<void> {
 onMounted(async () => {
   // Warm inventory for dashboard metrics
   for (let i = 1; i <= FLOOR_COUNT; i++) store.ensureFloor(i)
-  // Fetch all critical data in parallel before rendering 3D
+  // Fetch all critical data in parallel before rendering 3D（列表数据来自 WingOnIOT 数据库）
   await Promise.all([
     store.fetchFloorEnv(),
     store.fetchEnvDevices(),
     store.fetchBuildingStructure(),
     fetchCellShapes(),
   ])
-  // All data ready - enable 3D rendering
   loading3D.value = false
   const q = Number(route.query.floor)
   if (Number.isInteger(q) && q >= 1 && q <= FLOOR_COUNT) {
     onSelectFloor(q)
   }
-})
-
-onBeforeUnmount(() => {
-  if (editHintTimer) clearTimeout(editHintTimer)
-  if (flashTimer) clearTimeout(flashTimer)
 })
 
 function onSelectFloor(floor: number) {
@@ -124,7 +114,7 @@ function enterFloor() {
   router.push({ name: 'floor-viewer', params: { floor: String(selectedFloor.value) } })
 }
 
-/** Per-floor metrics 列表点击楼层行：直接跳转到对应楼层 */
+/** 各楼层指标列表点击楼层行：直接跳转到对应楼层 */
 function onDashboardEnterFloor(floor: number) {
   store.ensureFloor(floor)
   router.push({ name: 'floor-viewer', params: { floor: String(floor) } })
@@ -185,15 +175,18 @@ const panelEnvDevices = computed(() => {
     <div class="workspace">
       <div class="left">
         <div class="pane-3d">
-          <div class="pane-label" :class="{ flash: editHintFlash }" @click="onEditHintClick">{{ t('building.modelHint') }}</div>
-          <Building3D
-            ref="building3dRef"
+          <div
+            class="pane-label"
+            :class="{ flash: editHintFlash }"
+            @click="onEditHintClick"
+          >{{ t('building.modelHint') }}</div>
+          <BuildingFacade3D
+            ref="buildingFacadeRef"
             :selected-floor="selectedFloor"
-            :floor-env="store.floorEnv"
-            :metric="metric"
+            v-model:metric="metric"
+            :loading="loading3D"
             :cell-shapes="cellShapes"
             :building-id="store.buildings[0]?.id"
-            :loading="loading3D"
             @select-floor="onSelectFloor"
             @refresh-shapes="fetchCellShapes"
           />
@@ -273,6 +266,7 @@ const panelEnvDevices = computed(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .workspace {
