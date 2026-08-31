@@ -181,6 +181,11 @@ html.ls-on .intro-actions {
   display: none;
 }
 
+/* Show back-to-building button in floor viewer (large screen mode) */
+html.ls-on .floor-viewer .intro-actions {
+  display: flex;
+}
+
 /* Hide 3D viewport hint label */
 html.ls-on .pane-label {
   display: none;
@@ -371,6 +376,49 @@ html.ls-on .building-viewer .dash .head {
 
 html.ls-on .building-viewer .block.health {
   display: none;
+}
+
+/* ── Floor viewer styles (large screen mode) ── */
+html.ls-on .floor-viewer {
+  gap: 8px;
+  padding: 8px;
+}
+
+html.ls-on .floor-viewer .page-intro {
+  background: linear-gradient(135deg, #fff 0%, #faf8f5 100%);
+  border-radius: 12px;
+  padding: 14px 20px;
+  border: 1px solid #e6e2da;
+  border-bottom: 2px solid #c4a574;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  align-items: center;
+}
+
+html.ls-on .floor-viewer .page-intro h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0d0d0d;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+html.ls-on .floor-viewer .page-intro p {
+  font-size: 15px;
+  color: #6b6b6b;
+  margin: 2px 0 0;
+}
+
+html.ls-on .floor-viewer .intro-actions .ant-btn {
+  background: #c4a574;
+  border-color: #c4a574;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+html.ls-on .floor-viewer .intro-actions .ant-btn:hover {
+  background: #b8963a;
+  border-color: #b8963a;
 }
 
 /* ── Dashboard panel styles ── */
