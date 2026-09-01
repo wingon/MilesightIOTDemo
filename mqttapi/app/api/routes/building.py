@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.db import Database
 
 router = APIRouter(prefix="/api/v1", tags=["building"])
@@ -48,11 +48,16 @@ def list_floor_rooms(floor_id: int, db: Database = Depends(get_db)) -> list[dict
 
 
 @router.delete("/building/rooms/{room_id}")
-def delete_room(room_id: str, db: Database = Depends(get_db)) -> dict[str, Any]:
-    """物理删除房间：房间占用格子由外键级联清空，其上设备变回大厅设备。
+def delete_room(
+    room_id: str,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Physically delete a room: occupied cells are released by foreign-key cascade and
+        its devices fall back to lobby devices.
 
-    不可恢复（房间=格子集合，可重建）。确认后再删。
-    """
+        Non-recoverable (a room is just a cell set and can be rebuilt). Confirm before deleting.
+        """
     ok = db.delete_room(room_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -70,8 +75,9 @@ def assign_room_cell(
     room_id: str,
     body: AssignRoomCellRequest,
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """原子切换房间↔格子占用（一格一房；已占用则移除）。"""
+    """Atomically switch room↔cell occupancy (one room per cell; removes existing)."""
     result = db.assign_room_cell(room_id, body.floor_id, body.row_no, body.col_no)
     if result == "invalid":
         raise HTTPException(status_code=404, detail="Room or cell not found")
@@ -86,7 +92,11 @@ class RotationUpdate(BaseModel):
 
 
 @router.patch("/building/cell-rotation")
-def update_cell_rotation(body: RotationUpdate, db: Database = Depends(get_db)):
+def update_cell_rotation(
+    body: RotationUpdate,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Update a single cell's rotation (rotation_xyz)."""
     ok = db.update_cell_rotation(body.floor_id, body.row_no, body.col_no, body.rotation_xyz)
     if not ok:
@@ -100,7 +110,11 @@ class AllRotationUpdate(BaseModel):
 
 
 @router.patch("/building/cell-rotation-all")
-def update_all_cells_rotation(body: AllRotationUpdate, db: Database = Depends(get_db)):
+def update_all_cells_rotation(
+    body: AllRotationUpdate,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Apply the same rotation to all cells of a building."""
     count = db.update_all_cells_rotation(body.building_id, body.rotation_xyz)
     return {"ok": True, "updated": count}
@@ -113,7 +127,11 @@ class RowRotationUpdate(BaseModel):
 
 
 @router.patch("/building/cell-rotation-row")
-def update_col_cells_rotation(body: RowRotationUpdate, db: Database = Depends(get_db)):
+def update_col_cells_rotation(
+    body: RowRotationUpdate,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Apply the same rotation to all cells of a column."""
     count = db.update_col_cells_rotation(body.building_id, body.col_no, body.rotation_xyz)
     return {"ok": True, "updated": count}
@@ -126,7 +144,7 @@ class CellEditRequest(BaseModel):
     action: str          # "add" | "delete"
     scope: str           # "single" | "row" | "col" | "append_row" | "append_col"
     floor_id: int | None = None  # required when scope=single
-    shape: str | None = None     # "Rect" | "Cylinder" | "Triangle"（add 时指定新格子的形状，默认 Rect）
+    shape: str | None = None     # "Rect" | "Cylinder" | "Triangle" (shape for new cells on add; default Rect)
 
 
 class SaveFloorLayoutRequest(BaseModel):
@@ -139,7 +157,11 @@ class ResetGridExtrasRequest(BaseModel):
 
 
 @router.post("/building/cell-edit")
-def cell_edit(body: CellEditRequest, db: Database = Depends(get_db)):
+def cell_edit(
+    body: CellEditRequest,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Add or delete cells (single / row / column)."""
     return db.cell_edit(
         building_id=body.building_id,
@@ -153,19 +175,30 @@ def cell_edit(body: CellEditRequest, db: Database = Depends(get_db)):
 
 
 @router.patch("/building/undo-edit")
-def undo_edit(db: Database = Depends(get_db)):
+def undo_edit(
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Undo the previous cell edit operation."""
     return db.undo_last_edit()
 
 
 @router.post("/building/save-floor-layout")
-def save_floor_layout(body: SaveFloorLayoutRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
-    """批量保存楼层房间↔格子布局（原子替换整层楼的 room_cell）。"""
+def save_floor_layout(
+    body: SaveFloorLayoutRequest,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Batch save floor room↔cell layout (atomically replaces the whole floor's room_cell)."""
     inserted = db.save_floor_layout(body.floor_id, body.layout)
     return {"ok": True, "inserted": inserted}
 
 
 @router.post("/building/reset-grid-extras")
-def reset_grid_extras(body: ResetGridExtrasRequest, db: Database = Depends(get_db)):
+def reset_grid_extras(
+    body: ResetGridExtrasRequest,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
     """Delete all appended cells beyond the 8x12 grid, restoring the original grid."""
     return db.reset_grid_extras(building_id=body.building_id)

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.db import Database
 
 router = APIRouter(prefix="/api/v1", tags=["ug65"])
@@ -39,7 +39,10 @@ def _resolve_window(
 
 
 @router.get("/ug65/devices")
-def list_ug65_devices(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
+def list_ug65_devices(
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> list[dict[str, Any]]:
     return db.list_ug65_devices()
 
 
@@ -63,6 +66,7 @@ def list_ug65(
     ),
     offset: int = Query(default=0, ge=0),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     latest_received_at = (
         db.latest_ug65_received_at(dev_eui=dev_eui, gateway_model=gateway_model)
@@ -89,7 +93,11 @@ def list_ug65(
 
 
 @router.get("/ug65/{row_id}")
-def get_ug65(row_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
+def get_ug65(
+    row_id: int,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     row = db.get_ug65(row_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"ug65 id={row_id} not found")

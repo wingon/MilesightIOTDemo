@@ -267,7 +267,7 @@ function onDetailPick(floor: number) {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
 }
 
@@ -521,7 +521,7 @@ function onDetailPick(floor: number) {
 
 .filter {
   border: 1px solid #e6e2da;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   font-size: 11px;
   padding: 2px 8px;
   cursor: pointer;
@@ -624,7 +624,7 @@ function onDetailPick(floor: number) {
   font-size: 10px;
   color: #6b6b6b;
   border-bottom: 1px solid #eeeae3;
-  background: #fff;
+  background: var(--brand-surface, #fff);
 
   span {
     text-align: right;
@@ -645,7 +645,7 @@ function onDetailPick(floor: number) {
   width: 100%;
   border: 1px solid transparent;
   border-bottom-color: #eeeae3;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   cursor: pointer;
   text-align: left;
 
@@ -692,7 +692,7 @@ function onDetailPick(floor: number) {
 
 .list-groups .sticky,
 .list-legend .sticky {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   z-index: 2;
 }
 

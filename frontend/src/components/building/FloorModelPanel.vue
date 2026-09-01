@@ -232,7 +232,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #fff;
+  background: var(--brand-surface, #fff);
 }
 
 .toolbar {
@@ -273,20 +273,20 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
   grid-template-columns: minmax(0, 1fr) 168px;
   gap: 10px;
   padding: 12px;
-  background: #f0eee9;
+  background: var(--brand-canvas, #f0eee9);
 }
 
 .viewport {
   min-height: 320px;
   height: 100%;
   border: 1px solid #e6e2da;
-  background: #f0eee9;
+  background: var(--brand-canvas, #f0eee9);
   overflow: hidden;
 }
 
 .legend {
   overflow: auto;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
   padding: 8px;
   display: flex;
@@ -316,7 +316,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
 
   &:hover,
   &.active {
-    background: #f7f7f5;
+    background: var(--brand-canvas, #f7f7f5);
   }
 
   &.active {
@@ -361,7 +361,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
 
 .wall-divider {
   height: 1px;
-  background: #e6e2da;
+  background: var(--brand-line, #e6e2da);
   margin: 6px 0;
 }
 
@@ -375,11 +375,11 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
   color: #0d0d0d;
   border: 1px dashed #c4a574;
   border-radius: 4px;
-  background: #faf8f5;
+  background: var(--brand-canvas, #f7f7f5);
 }
 
 .wall-item:hover {
-  background: #f0eee9;
+  background: var(--brand-canvas, #f0eee9);
 }
 
 .wall-hint {

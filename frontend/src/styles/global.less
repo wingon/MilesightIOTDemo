@@ -7,12 +7,497 @@
   --brand-ink: #0d0d0d;
   --brand-charcoal: #1a1a1a;
   --brand-canvas: #f7f7f5;
+  --brand-surface: #ffffff;
   --brand-line: #e6e2da;
   --brand-muted: #6b6b6b;
   /* 大屏模式缩放比例（由 ?ls=<scale> 注入，普通模式为 1） */
   --ls-scale: 1;
   /* 普通模式内容区相对视口的高度偏移（header 64px + content 上下 margin 32px） */
   --ls-content-offset: 96px;
+
+  /* ── 状态标签（tag-*）颜色 ── */
+  --tag-ok-bg: #edf4ee;
+  --tag-ok-color: #2f7d4f;
+  --tag-ok-border: #c9e0cf;
+  --tag-no-bg: #fbedea;
+  --tag-no-color: #b4473c;
+  --tag-no-border: #f0ccc7;
+  --tag-front-bg: #ebf2fa;
+  --tag-front-color: #2c6cb3;
+  --tag-front-border: #c3d8ee;
+  --tag-api-bg: #f3effb;
+  --tag-api-color: #6d4fa8;
+  --tag-api-border: #d6c9ee;
+  --tag-m-bg: #f4f0e8;
+  --tag-m-color: #8a6d3b;
+  --tag-m-border: #decfb2;
+  --tag-c-bg: #edf4ee;
+  --tag-c-color: #2f7d4f;
+  --tag-c-border: #c9e0cf;
+  --tag-f-bg: #fbf3e7;
+  --tag-f-color: #9a6a24;
+  --tag-f-border: #efd9b8;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   深色主題
+   ══════════════════════════════════════════════════════════════ */
+html.theme-dark {
+  --brand-ink: #e6e2da;
+  --brand-canvas: #141414;
+  --brand-surface: #1f1f1f;
+  --brand-surface-soft: #262626;
+  --brand-line: #303030;
+  --brand-muted: #9b968e;
+
+  /* 状态标签深色版 */
+  --tag-ok-bg: #172b1e;
+  --tag-ok-color: #7fc397;
+  --tag-ok-border: #2c4a38;
+  --tag-no-bg: #331e1b;
+  --tag-no-color: #e29085;
+  --tag-no-border: #52302c;
+  --tag-front-bg: #1a2836;
+  --tag-front-color: #7fa6d6;
+  --tag-front-border: #2c4056;
+  --tag-api-bg: #261f33;
+  --tag-api-color: #b29bd6;
+  --tag-api-border: #413456;
+  --tag-m-bg: #2a241a;
+  --tag-m-color: #c6a668;
+  --tag-m-border: #443a28;
+  --tag-c-bg: #172b1e;
+  --tag-c-color: #7fc397;
+  --tag-c-border: #2c4a38;
+  --tag-f-bg: #2e2515;
+  --tag-f-color: #d3a55c;
+  --tag-f-border: #4a3a1f;
+
+  background: #141414;
+  color: #e6e2da;
+
+  body, #app {
+    background: #141414;
+    color: #e6e2da;
+  }
+
+  /* ── Ant Design 深色適配 ── */
+  /* 表格容器透明，背景由卡片统一控制，避免分块色差 */
+  .ant-table-wrapper .ant-table,
+  .ant-table-wrapper .ant-table-container,
+  .ant-table-wrapper .ant-table-content {
+    background: transparent !important;
+  }
+
+  /* 表格：表头 + 行 hover + 固定列 + 展开行（统一背景，消除阴阳） */
+  .ant-table-thead > tr > th,
+  .ant-table-thead > tr > th.ant-table-cell-fix-left,
+  .ant-table-thead > tr > th.ant-table-cell-fix-right {
+    background: #262626 !important;
+    color: #cfc9bd;
+    border-bottom-color: #303030 !important;
+  }
+
+  .ant-table-tbody > tr > td {
+    border-bottom-color: #2a2a2a !important;
+    background: transparent !important;
+  }
+
+  .ant-table-tbody > tr:hover > td {
+    background: #2a2a2a !important;
+  }
+
+  /* 固定列（操作列）：背景与数据区一致（#1f1f1f），避免阴阳色 */
+  .ant-table-tbody > tr > td.ant-table-cell-fix-left,
+  .ant-table-tbody > tr > td.ant-table-cell-fix-right {
+    background: #1f1f1f !important;
+  }
+
+  .ant-table-tbody > tr:hover > td.ant-table-cell-fix-left,
+  .ant-table-tbody > tr:hover > td.ant-table-cell-fix-right {
+    background: #2a2a2a !important;
+  }
+
+  /* 固定列分隔线：品牌淡金细线，替代深色重阴影 */
+  .ant-table-cell-fix-right {
+    box-shadow: inset -1px 0 0 rgba(196, 165, 116, 0.22) !important;
+  }
+
+  .ant-table-cell-fix-left {
+    box-shadow: inset 1px 0 0 rgba(196, 165, 116, 0.22) !important;
+  }
+
+  .ant-table-expanded-row > td {
+    background: #191919 !important;
+  }
+
+  .ant-table-selection-column .ant-checkbox-wrapper:hover .ant-checkbox-inner,
+  .ant-table-tbody .ant-checkbox-wrapper:hover .ant-checkbox-inner {
+    border-color: #c4a574;
+  }
+
+  /* 卡片 */
+  .ant-card {
+    border-color: #303030;
+    background: #1f1f1f;
+  }
+
+  .ant-card-head {
+    border-bottom-color: #303030;
+    color: #e6e2da;
+  }
+
+  .ant-statistic-content-value {
+    color: #c4a574;
+  }
+
+  .ant-statistic-content-suffix {
+    color: #999;
+  }
+
+  .ant-tag {
+    border-color: #303030;
+  }
+
+  /* 弹窗 / 抽屉 */
+  .ant-modal-content {
+    background: #1f1f1f;
+  }
+
+  .ant-modal-header {
+    background: #1f1f1f;
+    border-bottom-color: #303030;
+
+    .ant-modal-title {
+      color: #e6e2da;
+    }
+  }
+
+  .ant-modal-footer {
+    border-top-color: #303030;
+  }
+
+  .ant-drawer-content {
+    background: #1f1f1f;
+  }
+
+  .ant-drawer-header {
+    background: #1f1f1f;
+    border-bottom-color: #303030;
+
+    .ant-drawer-title {
+      color: #e6e2da;
+    }
+  }
+
+  .ant-drawer-footer {
+    border-top-color: #303030;
+  }
+
+  /* 下拉 / 菜单 */
+  .ant-select-dropdown,
+  .ant-dropdown-menu,
+  .ant-menu {
+    background: #1f1f1f;
+  }
+
+  .ant-select-dropdown {
+    border-color: #303030;
+
+    .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+      background: #2a2a2a;
+    }
+
+    .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+      background: rgba(196, 165, 116, 0.12);
+      color: #c4a574;
+    }
+  }
+
+  /* 表单 */
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-number,
+  .ant-picker,
+  .ant-select-selector {
+    background-color: #262626 !important;
+    border-color: #3a3a3a !important;
+    color: #e6e2da !important;
+  }
+
+  .ant-input::placeholder,
+  .ant-input-number-input::placeholder,
+  .ant-picker-input > input::placeholder {
+    color: #6f6a62;
+  }
+
+  .ant-input:hover,
+  .ant-input-affix-wrapper:hover,
+  .ant-input-number:hover,
+  .ant-picker:hover,
+  .ant-select-selector:hover {
+    border-color: rgba(196, 165, 116, 0.55) !important;
+  }
+
+  .ant-input:focus,
+  .ant-input-focused,
+  .ant-input-number-focused,
+  .ant-picker-focused,
+  .ant-select-focused .ant-select-selector {
+    border-color: #c4a574 !important;
+    box-shadow: 0 0 0 2px rgba(196, 165, 116, 0.18) !important;
+  }
+
+  .ant-form-item-label > label {
+    color: #cfc9bd;
+  }
+
+  /* 描述列表（操作日志详情） */
+  .ant-descriptions {
+    .ant-descriptions-item-label {
+      background: #222222;
+      color: #cfc9bd;
+    }
+
+    .ant-descriptions-item-content {
+      background: #1f1f1f;
+      border-color: #303030;
+      color: #e6e2da;
+    }
+  }
+
+  /* 树（权限树 / 部门树） */
+  .ant-tree {
+    background: transparent;
+    color: #d9d2c2;
+  }
+
+  .ant-tree .ant-tree-node-content-wrapper:hover {
+    background: #2a2a2a;
+  }
+
+  .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+    background: rgba(196, 165, 116, 0.14);
+    color: #c4a574;
+  }
+
+  .ant-tree-checkbox-checked .ant-tree-checkbox-inner {
+    background-color: #c4a574;
+    border-color: #c4a574;
+  }
+
+  .ant-tree-checkbox-indeterminate .ant-tree-checkbox-inner {
+    background-color: #c4a574;
+    border-color: #c4a574;
+  }
+
+  /* 分页 */
+  .ant-pagination .ant-pagination-item {
+    background: transparent;
+    border-color: #3a3a3a;
+
+    a {
+      color: #b8b2a8;
+    }
+
+    &:hover {
+      border-color: #c4a574;
+
+      a {
+        color: #c4a574;
+      }
+    }
+  }
+
+  .ant-pagination .ant-pagination-item-active {
+    border-color: #c4a574;
+    background: rgba(196, 165, 116, 0.12);
+
+    a {
+      color: #c4a574;
+    }
+  }
+
+  .ant-pagination .ant-pagination-prev button,
+  .ant-pagination .ant-pagination-next button,
+  .ant-pagination .ant-pagination-jump-prev button,
+  .ant-pagination .ant-pagination-jump-next button {
+    color: #b8b2a8;
+
+    &:hover {
+      color: #c4a574;
+    }
+  }
+
+  .ant-pagination-options-quick-jumper {
+    color: #b8b2a8;
+  }
+
+  /* 空状态 / 分割线 / 提示 */
+  .ant-empty-description {
+    color: #9b968e;
+  }
+
+  .ant-divider {
+    border-color: #303030;
+  }
+
+  .ant-alert-info {
+    background: rgba(196, 165, 116, 0.08);
+    border-color: rgba(196, 165, 116, 0.25);
+
+    .ant-alert-message,
+    .ant-alert-icon {
+      color: #c4a574;
+    }
+  }
+
+  /* 系统管理页公共类（scoped 变量接管） */
+  .row-selected > td {
+    background: rgba(196, 165, 116, 0.1) !important;
+  }
+
+  .detail-pre {
+    color: #cfc9bd;
+  }
+
+  .detail-pre.err {
+    color: #e29085;
+  }
+
+  .tree-border {
+    border-color: #303030;
+  }
+
+  .range-sep {
+    color: #6f6a62;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   淺色主題（預設）
+   ══════════════════════════════════════════════════════════════ */
+html.theme-light {
+  background: #f7f7f5;
+  color: #0d0d0d;
+
+  body, #app {
+    background: #f7f7f5;
+    color: #0d0d0d;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   状态标签（系统管理页统一）：胶囊形，颜色由 CSS 变量驱动，
+   深色模式（html.theme-dark）自动切换
+   ══════════════════════════════════════════════════════════════ */
+.tag-ok,
+.tag-no,
+.tag-front,
+.tag-api,
+.tag-M,
+.tag-C,
+.tag-F {
+  display: inline-block;
+  padding: 1px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.tag-ok {
+  color: var(--tag-ok-color, #2f7d4f);
+  background: var(--tag-ok-bg, #edf4ee);
+  border-color: var(--tag-ok-border, #c9e0cf);
+}
+
+.tag-no {
+  color: var(--tag-no-color, #b4473c);
+  background: var(--tag-no-bg, #fbedea);
+  border-color: var(--tag-no-border, #f0ccc7);
+}
+
+.tag-front {
+  color: var(--tag-front-color, #2c6cb3);
+  background: var(--tag-front-bg, #ebf2fa);
+  border-color: var(--tag-front-border, #c3d8ee);
+}
+
+.tag-api {
+  color: var(--tag-api-color, #6d4fa8);
+  background: var(--tag-api-bg, #f3effb);
+  border-color: var(--tag-api-border, #d6c9ee);
+}
+
+.tag-M {
+  color: var(--tag-m-color, #8a6d3b);
+  background: var(--tag-m-bg, #f4f0e8);
+  border-color: var(--tag-m-border, #decfb2);
+}
+
+.tag-C {
+  color: var(--tag-c-color, #2f7d4f);
+  background: var(--tag-c-bg, #edf4ee);
+  border-color: var(--tag-c-border, #c9e0cf);
+}
+
+.tag-F {
+  color: var(--tag-f-color, #9a6a24);
+  background: var(--tag-f-bg, #fbf3e7);
+  border-color: var(--tag-f-border, #efd9b8);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   系统管理页公共类（配合 scoped 变量，深色自动适配）
+   ══════════════════════════════════════════════════════════════ */
+.row-selected > td {
+  background: #f7f3ea !important;
+}
+
+.detail-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+  color: #0d0d0d;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.detail-pre.err {
+  color: #cf1322;
+}
+
+.tree-border {
+  border: 1px solid var(--brand-line, #e6e2da);
+}
+
+.range-sep {
+  color: var(--brand-muted, #8a8a82);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   系统管理表格操作列：统一为品牌金色（删除操作保留警示红），
+   使「新增 / 編輯 / 刪除 / 更多」在用户、角色、菜單等页面一致
+   ══════════════════════════════════════════════════════════════ */
+.ant-table .ant-btn-link:not(.ant-btn-dangerous) {
+  color: var(--brand-primary, #c4a574);
+
+  &:hover {
+    color: var(--brand-primary, #b8963a);
+  }
+}
+
+.ant-table .ant-btn-link.ant-btn-dangerous {
+  color: var(--brand-error, #d93026);
+
+  &:hover {
+    color: #c0261c;
+  }
 }
 
 /* 大屏（iframe 嵌入）模式：整页 zoom 放大，字号/布局随分辨率等比放大 */
@@ -142,5 +627,26 @@ html:not(.ls-on) {
   /* ── 报表页 badge：统一圆角 ── */
   .badge {
     border-radius: 4px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   深色主题 × PC 精修冲突修正
+   html:not(.ls-on) PC 精修块声明在后，会覆盖深色主题表头 / KPI 色，
+   这里用更高特异性选择器重新声明深色版本（须置于文件末尾生效）
+   ══════════════════════════════════════════════════════════════ */
+html.theme-dark:not(.ls-on) {
+  .ant-table-thead > tr > th {
+    background: #262626 !important;
+    color: #cfc9bd;
+  }
+
+  .ant-statistic-content-value {
+    color: #c4a574;
+  }
+
+  .ant-card:hover {
+    border-color: rgba(196, 165, 116, 0.6);
+    box-shadow: 0 4px 14px rgba(196, 165, 116, 0.12);
   }
 }

@@ -187,7 +187,7 @@ function mqttTag(ok: boolean | null) {
 }
 
 .card {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
   padding: 16px 18px;
 }

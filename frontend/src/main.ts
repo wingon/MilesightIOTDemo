@@ -6,6 +6,7 @@ import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
 import { useAppStore } from './stores/app'
+import { permission } from './utils/permission'
 import './styles/global.less'
 import './styles/largeScreen.less'
 
@@ -15,6 +16,7 @@ app.use(createPinia())
 app.use(router)
 app.use(i18n)
 app.use(Antd)
+app.directive('permission', permission)
 
 // 在挂载前应用大屏模式入口（URL ?ls=<scale>），避免页面闪烁
 useAppStore().applyLargeScreenMode()

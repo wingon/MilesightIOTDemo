@@ -34,7 +34,7 @@ watch(
   floor,
   (n) => {
     if (!floorValid.value) {
-      router.replace({ name: 'building-viewer' })
+      router.replace('/building-viewer')
       return
     }
     store.ensureFloor(n)
@@ -316,13 +316,13 @@ function onRequestExitEdit() {
     cancelText: t('building.saveChangesCancel'),
     async onOk() {
       // 保存布局到后端数据库
-      const saving = message.loading(t('building.savingLayout') || '保存中...', 0)
+      const saving = message.loading(t('building.savingLayout'), 0)
       try {
         const ok = await store.saveFloorLayoutToDb(floor.value)
         if (ok) {
           message.success(t('building.savedSuccess'))
         } else {
-          message.error(t('building.saveFailed') || '保存失败')
+          message.error(t('building.saveFailed'))
         }
       } finally {
         saving()
@@ -339,7 +339,7 @@ function onRequestExitEdit() {
 }
 
 function backToBuilding() {
-  router.push({ name: 'building-viewer', query: { floor: String(floor.value) } })
+  router.push({ path: '/building-viewer', query: { floor: String(floor.value) } })
 }
 
 const roomLabel = computed(() => {
@@ -464,7 +464,7 @@ const roomLabel = computed(() => {
   min-width: 0;
   height: 100%;
   border: 1px solid #e6e2da;
-  background: #fff;
+  background: var(--brand-surface, #fff);
 }
 
 @media (max-width: 1100px) {

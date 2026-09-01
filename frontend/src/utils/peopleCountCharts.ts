@@ -200,11 +200,11 @@ export function buildDailyTrendOption(
  */
 export function buildChannelBarOption(
   rows: PeopleCountStatsRow[],
-  labels: { enter: string; exit: string },
+  labels: { enter: string; exit: string; unknownChannel?: string },
 ): EChartsCoreOption {
   const sorted = rows
     .map((row) => ({
-      name: row.channel_name || '未知',
+      name: row.channel_name || labels.unknownChannel || 'Unknown',
       enter: Number(row.enter_count),
       exit: Number(row.exit_count),
     }))

@@ -467,7 +467,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
 }
 
@@ -507,12 +507,12 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   font-weight: 400;
   color: #6b6b6b;
   border-color: #e6e2da;
-  background: #fff;
+  background: var(--brand-surface, #fff);
 
   &:hover {
     color: #0d0d0d !important;
     border-color: #cfc9be !important;
-    background: #fafaf8 !important;
+    background: var(--brand-canvas, #fafaf8) !important;
   }
 }
 
@@ -547,7 +547,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid #e6e2da;
-  background: #fafaf8;
+  background: var(--brand-canvas, #fafaf8);
   flex-shrink: 0;
 }
 
@@ -580,7 +580,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   border-right: 1px solid #e6e2da;
   overflow: auto;
   padding: 10px 8px;
-  background: #fafaf8;
+  background: var(--brand-canvas, #fafaf8);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -615,11 +615,11 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   color: #0d0d0d;
 
   &:hover {
-    background: #fff;
+    background: var(--brand-surface, #fff);
   }
 
   &.active {
-    background: #fff;
+    background: var(--brand-surface, #fff);
     border-color: #c4a574;
     box-shadow: inset 3px 0 0 #c4a574;
   }
@@ -663,7 +663,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
 
 .nav-bind {
   border: 1px solid #cfc9be;
-  background: #fff;
+  background: var(--brand-surface, #fff);
   color: #6b6b6b;
   cursor: pointer;
   padding: 4px 6px;
@@ -730,7 +730,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
 .device-card {
   border: 1px solid #e6e2da;
   padding: 12px;
-  background: #fafaf8;
+  background: var(--brand-canvas, #fafaf8);
   scroll-margin-top: 8px;
 
   &.active {
@@ -772,7 +772,7 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
 }
 
 .metric {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
   padding: 8px 10px;
   display: flex;

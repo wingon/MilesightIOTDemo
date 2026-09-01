@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.db import Database
 
 router = APIRouter(prefix="/api/v1", tags=["people-count"])
@@ -31,6 +31,7 @@ def list_people_count_hourly(
     limit: int = Query(default=20, ge=1, le=500, description="Page size"),
     offset: int = Query(default=0, ge=0, description="Row offset"),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Paginated people_count_hourly rows with index-backed filters.
 
@@ -50,7 +51,10 @@ def list_people_count_hourly(
 
 
 @router.get("/people-count/channels")
-def list_people_count_channels(db: Database = Depends(get_db)) -> list[str]:
+def list_people_count_channels(
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> list[str]:
     """Distinct channel_name values used to build the filter dropdown."""
     return db.list_people_count_channels()
 
@@ -63,8 +67,9 @@ def people_count_hourly_stats(
     ip_address: str | None = Query(default=None),
     channel_name: str | None = Query(default=None),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """按小时聚合进出人数（图表用）。"""
+    """Hourly enter/exit aggregation (for charts)."""
     return db.people_count_hourly_stats(
         date_from=date_from,
         date_to=date_to,
@@ -82,8 +87,9 @@ def people_count_daily_stats(
     ip_address: str | None = Query(default=None),
     channel_name: str | None = Query(default=None),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """按日期聚合进出人数（图表用）。"""
+    """Daily enter/exit aggregation (for charts)."""
     return db.people_count_daily_stats(
         date_from=date_from,
         date_to=date_to,
@@ -101,8 +107,9 @@ def people_count_channel_stats(
     ip_address: str | None = Query(default=None),
     channel_name: str | None = Query(default=None),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """按通道聚合进出人数（图表用）。"""
+    """Channel enter/exit aggregation (for charts)."""
     return db.people_count_channel_stats(
         date_from=date_from,
         date_to=date_to,

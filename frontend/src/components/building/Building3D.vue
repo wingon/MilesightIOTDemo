@@ -994,9 +994,9 @@ async function deleteCellAt(floor_id: number, row: number, col: number) {
     if (n > 0) {
       editDirty.value = true
       undoableOps.value = Math.min(undoableOps.value + 1, UNDO_LIMIT)
-      showFeedback(`已删除格子 (${row}, ${col})`)
+      showFeedback(t('building.cellDeleted', { row, col }))
     } else {
-      showFeedback('无变化：没有可删除的格子')
+      showFeedback(t('building.noDeleteChange'))
     }
   } catch {
     message.error(t('building.addCellFailed'))
@@ -1021,13 +1021,13 @@ async function handleUndo() {
       editDirty.value = true
       undoableOps.value = Math.max(0, undoableOps.value - 1)
     }
-    showFeedback(`已撤回 ${res.data.affected} 个格子`)
+    showFeedback(t('building.undone', { n: res.data.affected }))
     emit('refreshShapes')
   } else if (undoableOps.value > 0) {
     // 本會話有過操作但後端已無可撤回內容 → 達到撤回上限
     showFeedback(t('building.undoLimitReached'))
   } else {
-    showFeedback('没有可撤回的操作')
+    showFeedback(t('building.noUndo'))
   }
 }
 
@@ -1262,7 +1262,7 @@ onBeforeUnmount(() => {
         :title="t('building.panelDragHint')"
         @pointerdown="startDragPanel"
       >
-        <span class="edit-tool-title">編輯工具</span>
+        <span class="edit-tool-title">{{ t('building.cellEditor') }}</span>
       </div>
       <div class="edit-tool-actions">
         <button
@@ -1270,23 +1270,23 @@ onBeforeUnmount(() => {
           :class="{ active: editToolMode === 'add' }"
           @click="toggleToolMode('add')"
         >
-          添加
+          {{ t('building.addBtn') }}
         </button>
         <button
           class="edit-tool-btn edit-tool-btn-del"
           :class="{ active: editToolMode === 'delete' }"
           @click="toggleToolMode('delete')"
         >
-          删除
+          {{ t('building.deleteBtn') }}
         </button>
-        <button class="edit-tool-btn edit-tool-btn-undo" @click="handleUndo">撤回</button>
-        <button class="edit-tool-btn edit-tool-btn-close" @click="onDoneClick">关闭</button>
+        <button class="edit-tool-btn edit-tool-btn-undo" @click="handleUndo">{{ t('building.undoBtn') }}</button>
+        <button class="edit-tool-btn edit-tool-btn-close" @click="onDoneClick">{{ t('building.doneBtn') }}</button>
       </div>
       <div v-if="editToolMode === 'add'" class="edit-tool-hint">
-        拖動模板放到樓宇上；滾輪 / R 鍵旋轉；模板可無限使用
+        {{ t('building.editAddHint') }}
       </div>
       <div v-else-if="editToolMode === 'delete'" class="edit-tool-hint">
-        點擊格子立即刪除，可連續刪除多個
+        {{ t('building.editDeleteHint') }}
       </div>
       <div v-if="editFeedback" class="edit-feedback">{{ editFeedback }}</div>
     </div>
@@ -1382,7 +1382,7 @@ onBeforeUnmount(() => {
   min-height: 320px;
   border-radius: 2px;
   overflow: hidden;
-  background: #f7f7f5;
+  background: var(--brand-canvas, #f7f7f5);
   cursor: grab;
 }
 
@@ -1406,7 +1406,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #f7f7f5;
+  background: var(--brand-canvas, #f7f7f5);
   z-index: 100;
 }
 

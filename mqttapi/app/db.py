@@ -62,7 +62,7 @@ class Database:
 
     @contextmanager
     def wingon_connection(self):
-        """WingOnIOT 环境监测库连接（同一 MySQL 实例的另一个库）。"""
+        """WingOnIOT environment-monitoring DB connection (another database on the same MySQL instance)."""
         conn = pymysql.connect(
             host=self.settings.wingon_db_host,
             port=self.settings.wingon_db_port,
@@ -533,21 +533,21 @@ class Database:
         return result
 
     # ------------------------------------------------------------------
-    # WingOnIOT 环境监测（Environment_Device / Environmental_Monitoring）
+    # WingOnIOT environment monitoring (Environment_Device / Environmental_Monitoring)
     # ------------------------------------------------------------------
 
-    #: 当前建筑最大地下层编号（如 B2/F 为最深 → 2）。
-    #: 3D 层号自下而上：B2/F→1、B1/F→2、G/F→3、1/F→4 … 7/F→10（剖面图：地下 2 层 + 地上 8 层）
+    #: Deepest basement floor index of the current building (e.g. B2/F is the deepest -> 2).
+    #: 3D level goes bottom-up: B2/F->1, B1/F->2, G/F->3, 1/F->4 ... 7/F->10 (section view: 2 basement + 8 above-ground)
     B_FLOOR_BASE = 2
 
     @staticmethod
     def floor_to_level(floor: str | None) -> int | None:
-        """把 WingOnIOT 楼层字符串映射为 3D 楼栋层号。
+        """Map a WingOnIOT floor string to a 3D building level.
 
-        - 'B1/F'、'B2/F' → 2、1（地下层从下往上压到楼栋底部）
-        - 'G/F' → 3（地面层）
-        - '4/F'、'5/F' → 7、8（地上 n/F → n + 3，即 地下2层 + 地面层 之上）
-        - 无法解析返回 None
+        - 'B1/F', 'B2/F' -> 2, 1 (basement floors stacked at the bottom)
+        - 'G/F' -> 3 (ground floor)
+        - '4/F', '5/F' -> 7, 8 (above-ground n/F -> n + 3, i.e. above 2 basements + ground floor)
+        - None if the floor cannot be parsed
         """
         if not floor:
             return None
@@ -566,14 +566,15 @@ class Database:
             return None
 
     def list_environment_devices(self) -> list[dict[str, Any]]:
-        """WingOnIOT 环境设备列表，附每台设备最新一条监测（中位温湿度）与 3D 层号。
+        """WingOnIOT environment device list, with each device's latest reading (median temp/humidity) and 3D level.
 
-        - 无监测记录的设备 latest 字段为 null（LEFT JOIN）
-        - level 由 floor 解析（B2/F→1、B1/F→2、G/F→3、4/F→7 …）
-        - cell：设备绑定的格子（device_cell→building_cell）；null = 未绑定（含大厅设备）
-        - cell_lost：设备在 device_cell 留有绑定但目标格子已软删/不存在（残留绑定）。
-          此时 cell 一定为 null（格子无效无法定位），cell_lost=True 可用于 UI 提示并触发清理。
-        - room_id：格子所属房间（room_cell 反查，room_id 业务键）；null = 大厅/走廊格子
+        - Devices without any reading have latest = null (LEFT JOIN)
+        - level is parsed from floor (B2/F->1, B1/F->2, G/F->3, 4/F->7 ...)
+        - cell: the cell the device is bound to (device_cell->building_cell); null = unbound (incl. lobby devices)
+        - cell_lost: the device still has a binding in device_cell but the target cell is soft-deleted/missing
+          (leftover binding). Then cell is always null (the cell cannot be located), and cell_lost=True
+          lets the UI prompt and trigger cleanup.
+        - room_id: the room the cell belongs to (reverse lookup via room_cell, room_id business key); null = lobby/corridor cell
         """
         sql = """
             SELECT d.sn, d.name, d.deviceName, d.model, d.floor, d.location, d.macAddress,
@@ -632,11 +633,11 @@ class Database:
                 item.pop("cell_x", None)
                 item.pop("cell_z", None)
                 item["cell"] = None
-            # cell_lost: 设备在 device_cell 里留有绑定，但目标格子已软删/不存在（残留绑定）
+            # cell_lost: the device still has a binding in device_cell but the target cell is soft-deleted/missing (leftover binding)
             item["cell_lost"] = cell_lost
             item["room_id"] = item.pop("room_id", None)
             result.append(item)
-        # 按 3D 层号排序（无层号排最后），同层按名称 —— 避免字符串排序把 B 层排乱
+        # Sort by 3D level (no level last), same level by name — avoid string sorting scrambling B floors
         result.sort(
             key=lambda x: (
                 x.get("level") is None,
@@ -687,7 +688,7 @@ class Database:
         cell = self.find_cell_by_row_col(floor_id, row_no, col_no)
         if cell is None:
             return "cell_not_found"
-        # 楼层一致性校验：设备所在楼层与目标格子所在楼层必须一致（仅两侧均可解析时强制）
+        # Floor consistency check: the device's floor and the target cell's floor must match (only enforced when both are resolvable)
         if self._device_floor_matches_cell(sn, floor_id) is False:
             return "floor_mismatch"
         with self.wingon_connection() as conn:
@@ -738,7 +739,7 @@ class Database:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Environmental_Monitoring 分页列表（最新写入在前）。"""
+        """Paginated Environmental_Monitoring list (newest writes first)."""
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) AS cnt FROM Environmental_Monitoring")
@@ -852,7 +853,7 @@ class Database:
         ip_address: str | None = None,
         channel_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """按小时聚合进出人数（图表用）。"""
+        """Hourly enter/exit aggregation (for charts)."""
         where = ["1=1"]
         params: dict[str, Any] = {}
         if date_from is not None:
@@ -895,7 +896,7 @@ class Database:
         ip_address: str | None = None,
         channel_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """按日期聚合进出人数（图表用）。"""
+        """Daily enter/exit aggregation (for charts)."""
         where = ["1=1"]
         params: dict[str, Any] = {}
         if date_from is not None:
@@ -938,7 +939,7 @@ class Database:
         ip_address: str | None = None,
         channel_name: str | None = None,
     ) -> list[dict[str, Any]]:
-        """按通道聚合进出人数（图表用）。"""
+        """Channel enter/exit aggregation (for charts)."""
         where = ["1=1"]
         params: dict[str, Any] = {}
         if date_from is not None:
@@ -973,7 +974,7 @@ class Database:
         return [dict(r) for r in rows]
 
     def floor_environment_summary(self) -> list[dict[str, Any]]:
-        """按楼层聚合：每台设备取最新一条监测记录，楼层温度/湿度为该层设备中位值均值。"""
+        """Per-floor aggregation: take each device's latest reading; floor temp/humidity is the median of that floor's devices."""
         sql = """
             SELECT d.floor AS floor,
                    COUNT(DISTINCT d.sn) AS device_count,
@@ -1003,7 +1004,7 @@ class Database:
             item = self._parse_json_fields(dict(row), ())
             item["level"] = self.floor_to_level(item.get("floor"))
             result.append(item)
-        # 按 3D 层号排序（无层号排最后）—— 避免字符串排序把 B 层排乱
+        # Sort by 3D level (no level last) — avoid string sorting scrambling B floors
         result.sort(
             key=lambda x: (
                 x.get("level") is None,
@@ -1193,10 +1194,10 @@ class Database:
         return rooms
 
     def delete_room(self, room_id: str) -> bool:
-        """物理删除房间：room_cell 由外键级联清空，其上设备归属自动变回大厅。
+        """Physically delete a room: room_cell is cleared by foreign-key cascade and its devices revert to the lobby.
 
-        房间 = 格子集合，可重建，因此不做软删（不留伪删除脏数据）。
-        不可恢复，删除前请确认。返回是否命中房间。
+        A room is just a cell set and can be rebuilt, so no soft-delete is used (no leftover dirty rows).
+        Non-recoverable; confirm before deleting. Returns whether the room was found.
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
@@ -1211,12 +1212,12 @@ class Database:
         return True
 
     def assign_room_cell(self, room_id: str, floor_id: int, row_no: int, col_no: int) -> str:
-        """原子切换房间↔格子占用（R3 修复的后端支撑）。
+        """Atomically switch room↔cell occupancy (backend support for the R3 fix).
 
-        - 目标格子已被该房间占用 → 移除该绑定，返回 'removed'
-        - 目标格子被其他房间占用 → 先物理释放再占给当前房间，返回 'added'
-        - 目标格子空闲 → 占用，返回 'added'
-        - 房间/格子无效（不存在或已软删）→ 返回 'invalid'
+        - Target cell already occupied by this room -> remove the binding, return 'removed'
+        - Target cell occupied by another room -> physically release it first, then occupy for this room, return 'added'
+        - Target cell free -> occupy it, return 'added'
+        - Room/cell invalid (missing or soft-deleted) -> return 'invalid'
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
@@ -1246,7 +1247,7 @@ class Database:
                 if existing is not None:
                     cur.execute("DELETE FROM room_cell WHERE id = %s", (int(existing["id"]),))
                     return "removed"
-                # 释放其他有效房间对该格子的占用（物理删，避免一格多房）
+                # Release other valid rooms' occupancy of this cell (physical delete, avoids one cell in multiple rooms)
                 cur.execute(
                     """DELETE FROM room_cell
                        WHERE floor_id = %s AND cell_id = %s AND room_ref_id <> %s AND is_deleted = 0""",
@@ -1259,34 +1260,34 @@ class Database:
         return "added"
 
     def save_floor_layout(self, floor_id: int, layout: dict[str, list[tuple[int, int]]]) -> int:
-        """批量保存楼层房间↔格子布局（原子替换）。
+        """Batch save the floor room↔cell layout (atomic replacement).
 
         layout: { room_id: [(row_no, col_no), ...], ... }
-        1. 物理删除该楼层所有 room_cell 记录
-        2. 批量插入新的 room_cell 记录
-        3. 返回插入的记录数
+        1. Physically delete all room_cell rows of this floor
+        2. Batch insert the new room_cell rows
+        3. Return the number of inserted rows
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
-                # 获取该楼层所有有效房间的 id 映射
+                # Get the id mapping of all valid rooms on this floor
                 cur.execute(
                     "SELECT id, room_id FROM room WHERE floor_id = %s AND is_deleted = 0",
                     (floor_id,),
                 )
                 room_map = {r["room_id"]: int(r["id"]) for r in cur.fetchall()}
 
-                # 获取该楼层所有有效格子的 id 映射
+                # Get the id mapping of all valid cells on this floor
                 cur.execute(
                     "SELECT id, row_no, col_no FROM building_cell WHERE floor_id = %s AND is_deleted = 0",
                     (floor_id,),
                 )
                 cell_map = {(int(c["row_no"]), int(c["col_no"])): int(c["id"]) for c in cur.fetchall()}
 
-                # 物理删除该楼层所有 room_cell 记录
+                # Physically delete all room_cell rows of this floor
                 cur.execute("DELETE FROM room_cell WHERE floor_id = %s", (floor_id,))
                 deleted = cur.rowcount
 
-                # 批量插入新的 room_cell 记录
+                # Batch insert the new room_cell rows
                 inserted = 0
                 for room_id, cells in layout.items():
                     rid = room_map.get(room_id)
@@ -1424,7 +1425,7 @@ class Database:
                             "is_active": int(s.get("is_active", 1)),
                         })
                         cell_ids.append(int(s["id"]))
-                    # 联动清理关联绑定（R1/R2）：room_cell 软删、device_cell 物理删，并记录 undo 以便恢复
+                    # Cascading cleanup of related bindings (R1/R2): soft-delete room_cell, physically delete device_cell, and record undo for recovery
                     if cell_ids:
                         placeholders = ",".join(["%s"] * len(cell_ids))
                         cur.execute(
@@ -1619,7 +1620,7 @@ class Database:
                         )
                         affected += cur.rowcount
                     elif op["action"] == "restore_room_cell":
-                        # 恢复被联动软删的房间↔格子绑定；若该格已被重新分配给同房间则跳过
+                        # Restore room↔cell bindings soft-deleted by the cascade; skip if the cell was reassigned to the same room
                         cur.execute(
                             """SELECT id FROM room_cell
                                WHERE room_ref_id = %(room_ref_id)s AND floor_id = %(floor_id)s
@@ -1635,7 +1636,7 @@ class Database:
                             )
                             affected += cur.rowcount
                     elif op["action"] == "restore_device_cell":
-                        # 恢复被联动物理删除的设备↔格子绑定；若设备已重新绑定则跳过
+                        # Restore device↔cell bindings physically deleted by the cascade; skip if the device was rebound
                         cur.execute(
                             "SELECT id FROM device_cell WHERE sn = %s",
                             (op["sn"],),
@@ -1701,10 +1702,10 @@ class Database:
                 })
                 return cur.rowcount
 
-    # ── 幕墙外观配置 ─────────────────────────────────────────────
+    # -- Facade appearance configuration ---------------------------------------------
 
     def get_facade_config(self) -> dict[str, Any] | None:
-        """获取幕墙配置（单行），无记录返回 None。"""
+        """Get the facade config (single row); None if no record exists."""
         sql = "SELECT id, config_json FROM building_facade_config ORDER BY id ASC LIMIT 1"
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
@@ -1719,7 +1720,7 @@ class Database:
         return d
 
     def save_facade_config(self, config: dict[str, Any]) -> int:
-        """保存幕墙配置（UPSERT 单行），返回 id。"""
+        """Save the facade config (UPSERT single row), returning its id."""
         import json
         payload = json.dumps(config, ensure_ascii=False)
         sql_check = "SELECT id FROM building_facade_config ORDER BY id ASC LIMIT 1"
@@ -1739,3 +1740,1415 @@ class Database:
                         (payload,),
                     )
                     return cur.lastrowid
+
+    # ------------------------------------------------------------------
+    # Permission module (sys_user / sys_role / sys_menu / sys_oper_log)
+    # Follows RuoYi-Vue RBAC: user-role-menu, where menu.permission is the button-level permission marker
+    # ------------------------------------------------------------------
+
+    SUPER_ADMIN_ROLE_KEY = "admin"
+
+    # ---- Auth & current user ----
+
+    def get_sys_user_by_username(self, username: str) -> dict[str, Any] | None:
+        """Look up a user by login name (includes the password hash)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM sys_user WHERE username = %s",
+                    (username,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_sys_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+        """Look up a user by ID (without the password hash)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT u.id, u.dept_id, d.dept_name, u.username, u.nickname,
+                              u.email, u.phone, u.avatar, u.status, u.remark,
+                              u.created_at, u.updated_at
+                       FROM sys_user u
+                       LEFT JOIN sys_dept d ON d.dept_id = u.dept_id
+                       WHERE u.id = %s""",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+        return self._parse_json_fields(dict(row), ()) if row else None
+
+    def get_user_role_keys(self, user_id: int) -> list[str]:
+        """All role keys (role_key) of the user."""
+        sql = """
+            SELECT r.role_key
+            FROM sys_role r
+            JOIN sys_user_role ur ON ur.role_id = r.id
+            WHERE ur.user_id = %(user_id)s AND r.status = 1
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"user_id": user_id})
+                rows = cur.fetchall() or []
+        return [str(r["role_key"]) for r in rows]
+
+    def is_super_admin(self, user_id: int) -> bool:
+        """Whether the user has the super-admin role (admin); super-admin skips all permission checks."""
+        return self.SUPER_ADMIN_ROLE_KEY in self.get_user_role_keys(user_id)
+
+    def get_user_permissions(self, user_id: int) -> list[str]:
+        """Merged permission markers across all roles of the user (incl. button-level F).
+
+        Super-admin returns ['*:*:*'] to mean full permissions.
+        """
+        if self.is_super_admin(user_id):
+            return ["*:*:*"]
+        sql = """
+            SELECT DISTINCT m.permission
+            FROM sys_menu m
+            JOIN sys_role_menu rm ON rm.menu_id = m.id
+            JOIN sys_user_role ur ON ur.role_id = rm.role_id
+            JOIN sys_role r ON r.id = ur.role_id
+            WHERE ur.user_id = %(user_id)s
+              AND r.status = 1 AND m.status = 1
+              AND m.permission IS NOT NULL AND m.permission <> ''
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"user_id": user_id})
+                rows = cur.fetchall() or []
+        return [str(r["permission"]) for r in rows]
+
+    @staticmethod
+    def build_menu_tree(menus: list[dict[str, Any]], parent_id: int = 0) -> list[dict[str, Any]]:
+        """Build a tree from a flat menu list (sorted by sort asc, id asc)."""
+        children = [m for m in menus if int(m.get("parent_id", 0)) == parent_id]
+        for m in children:
+            m["children"] = Database.build_menu_tree(menus, int(m["id"]))
+        children.sort(key=lambda x: (x.get("sort") or 0, x.get("id") or 0))
+        return children
+
+    def get_user_menu_tree(self, user_id: int) -> list[dict[str, Any]]:
+        """Menu tree visible to the current user (only directories M / menus C, for frontend dynamic routes and sidebar)."""
+        if self.is_super_admin(user_id):
+            clause = ""
+            params: dict[str, Any] = {}
+        else:
+            clause = """AND m.id IN (
+                SELECT rm.menu_id FROM sys_role_menu rm
+                JOIN sys_user_role ur ON ur.role_id = rm.role_id
+                JOIN sys_role r ON r.id = ur.role_id
+                WHERE ur.user_id = %(user_id)s AND r.status = 1
+            )"""
+            params = {"user_id": user_id}
+        sql = f"""
+            SELECT m.id, m.parent_id, m.menu_name, m.i18n_key, m.path, m.component,
+                   m.menu_type, m.permission, m.icon, m.sort, m.visible, m.status
+            FROM sys_menu m
+            WHERE m.menu_type IN ('M', 'C')
+              AND m.visible = 1 AND m.status = 1
+              {clause}
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        menus = [self._parse_json_fields(dict(r), ()) for r in rows]
+        return self.build_menu_tree(menus)
+
+    # ---- User management ----
+
+    def list_sys_users(
+        self,
+        *,
+        keyword: str | None = None,
+        status: int | None = None,
+        dept_id: int | None = None,
+        scope_user_id: int | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated user query, each row with role names (comma-joined) and dept name.
+
+        dept_id accepts a dept-tree node and includes users under all its descendant departments (RuoYi behavior).
+        When scope_user_id (the current logged-in user ID) is provided, visible scope is filtered by the
+        user's role data_scope.
+        """
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if keyword:
+            where.append("(u.username LIKE %(kw)s OR u.nickname LIKE %(kw)s OR u.phone LIKE %(kw)s)")
+            params["kw"] = f"%{keyword}%"
+        if status is not None:
+            where.append("u.status = %(status)s")
+            params["status"] = status
+        if dept_id:
+            where.append(
+                """(u.dept_id = %(dept_id)s OR u.dept_id IN (
+                       SELECT dept_id FROM sys_dept
+                       WHERE del_flag = '0'
+                         AND FIND_IN_SET(%(dept_id)s, ancestors)
+                   ))"""
+            )
+            params["dept_id"] = dept_id
+        if scope_user_id is not None:
+            scope_sql, scope_params = self.get_user_data_scope_clause(
+                scope_user_id, alias="u", dept_col="dept_id", user_col="id"
+            )
+            if scope_sql:
+                where.append(scope_sql)
+                params.update(scope_params)
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        sql = f"""
+            SELECT u.id, u.dept_id, d.dept_name, u.username, u.nickname, u.email, u.phone, u.status,
+                   u.remark, u.created_at, u.updated_at,
+                   (SELECT GROUP_CONCAT(r.role_name SEPARATOR ', ')
+                    FROM sys_user_role ur
+                    JOIN sys_role r ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id) AS roles,
+                   (SELECT GROUP_CONCAT(r.role_key SEPARATOR ',')
+                    FROM sys_user_role ur
+                    JOIN sys_role r ON r.id = ur.role_id
+                    WHERE ur.user_id = u.id) AS role_keys
+            FROM sys_user u
+            LEFT JOIN sys_dept d ON d.dept_id = u.dept_id
+            WHERE {clause}
+            ORDER BY u.id ASC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_user u WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def create_sys_user(self, data: dict[str, Any]) -> int:
+        """Create a user, returning the new user ID."""
+        sql = """
+            INSERT INTO sys_user (username, password, nickname, email, phone, dept_id, status, remark)
+            VALUES (%(username)s, %(password)s, %(nickname)s, %(email)s, %(phone)s, %(dept_id)s, %(status)s, %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "username": data["username"],
+                    "password": data["password"],
+                    "nickname": data.get("nickname"),
+                    "email": data.get("email"),
+                    "phone": data.get("phone"),
+                    "dept_id": data.get("dept_id"),
+                    "status": int(data.get("status", 1)),
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_sys_user(self, user_id: int, data: dict[str, Any]) -> bool:
+        """Update user profile (without password); returns whether a row was matched."""
+        fields = []
+        params: dict[str, Any] = {"id": user_id}
+        for key in ("nickname", "email", "phone", "status", "remark", "dept_id", "sex", "avatar"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if not fields:
+            return False
+        sql = f"UPDATE sys_user SET {', '.join(fields)} WHERE id = %(id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def reset_sys_user_password(self, user_id: int, new_password_hash: str) -> bool:
+        """Reset the user's password (accepts a bcrypt hash)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE sys_user SET password = %s WHERE id = %s",
+                    (new_password_hash, user_id),
+                )
+                return cur.rowcount > 0
+
+    def delete_sys_user(self, user_id: int) -> bool:
+        """Delete a user and clean up their role/post associations. Returns whether a row was matched."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_user_role WHERE user_id = %s", (user_id,))
+                cur.execute("DELETE FROM sys_user_post WHERE user_id = %s", (user_id,))
+                cur.execute("DELETE FROM sys_user WHERE id = %s", (user_id,))
+                return cur.rowcount > 0
+
+    def get_user_role_ids(self, user_id: int) -> list[int]:
+        """User's role ID list (for selection echo)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT role_id FROM sys_user_role WHERE user_id = %s",
+                    (user_id,),
+                )
+                rows = cur.fetchall() or []
+        return [int(r["role_id"]) for r in rows]
+
+    def set_user_roles(self, user_id: int, role_ids: list[int]) -> None:
+        """Replace all role bindings of the user."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_user_role WHERE user_id = %s", (user_id,))
+                for rid in role_ids:
+                    cur.execute(
+                        "INSERT INTO sys_user_role (user_id, role_id) VALUES (%s, %s)",
+                        (user_id, int(rid)),
+                    )
+
+    # ---- Role management ----
+
+    def list_sys_roles(
+        self,
+        *,
+        role_name: str | None = None,
+        role_key: str | None = None,
+        status: int | None = None,
+        begin: str | None = None,
+        end: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated role query (RuoYi query conditions: role name / permission key / status / created time)."""
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if role_name:
+            where.append("role_name LIKE %(role_name)s")
+            params["role_name"] = f"%{role_name}%"
+        if role_key:
+            where.append("role_key LIKE %(role_key)s")
+            params["role_key"] = f"%{role_key}%"
+        if status is not None:
+            where.append("status = %(status)s")
+            params["status"] = status
+        if begin:
+            where.append("DATE(created_at) >= %(begin)s")
+            params["begin"] = begin
+        if end:
+            where.append("DATE(created_at) <= %(end)s")
+            params["end"] = end
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_role WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT id, role_name, role_key, sort, status, data_scope, remark, created_at, updated_at
+                        FROM sys_role WHERE {clause} ORDER BY sort ASC, id ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def list_all_roles(self) -> list[dict[str, Any]]:
+        """All enabled roles (for dropdowns / assignment)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, role_name, role_key, sort, status, remark
+                       FROM sys_role WHERE status = 1 ORDER BY sort ASC, id ASC"""
+                )
+                rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+    def get_sys_role(self, role_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM sys_role WHERE id = %s",
+                    (role_id,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_sys_role_by_key(self, role_key: str) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM sys_role WHERE role_key = %s",
+                    (role_key,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_sys_role(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_role (role_name, role_key, sort, status, data_scope, remark)
+            VALUES (%(role_name)s, %(role_key)s, %(sort)s, %(status)s, %(data_scope)s, %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "role_name": data["role_name"],
+                    "role_key": data["role_key"],
+                    "sort": int(data.get("sort", 0)),
+                    "status": int(data.get("status", 1)),
+                    "data_scope": str(data.get("data_scope", "1")),
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_sys_role(self, role_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"id": role_id}
+        for key in ("role_name", "role_key", "sort", "status", "remark", "data_scope"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if not fields:
+            return False
+        sql = f"UPDATE sys_role SET {', '.join(fields)} WHERE id = %(id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_sys_role(self, role_id: int) -> bool:
+        """Delete a role and clean up its associations (user-role, role-menu, role-dept data permission)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_role_menu WHERE role_id = %s", (role_id,))
+                cur.execute("DELETE FROM sys_user_role WHERE role_id = %s", (role_id,))
+                cur.execute("DELETE FROM sys_role_dept WHERE role_id = %s", (role_id,))
+                cur.execute("DELETE FROM sys_role WHERE id = %s", (role_id,))
+                return cur.rowcount > 0
+
+    def get_role_menu_ids(self, role_id: int) -> list[int]:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT menu_id FROM sys_role_menu WHERE role_id = %s",
+                    (role_id,),
+                )
+                rows = cur.fetchall() or []
+        return [int(r["menu_id"]) for r in rows]
+
+    def set_role_menus(self, role_id: int, menu_ids: list[int]) -> None:
+        """Replace all menu grants of the role."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_role_menu WHERE role_id = %s", (role_id,))
+                for mid in menu_ids:
+                    cur.execute(
+                        "INSERT INTO sys_role_menu (role_id, menu_id) VALUES (%s, %s)",
+                        (role_id, int(mid)),
+                    )
+
+    # ---- Role data permission (data_scope / sys_role_dept) ----
+
+    def get_role_dept_ids(self, role_id: int) -> list[int]:
+        """Dept ID list selected by the role's custom data permission."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT dept_id FROM sys_role_dept WHERE role_id = %s",
+                    (role_id,),
+                )
+                rows = cur.fetchall() or []
+        return [int(r["dept_id"]) for r in rows]
+
+    def set_role_depts(self, role_id: int, dept_ids: list[int]) -> None:
+        """Replace the dept set of the role's custom data permission."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_role_dept WHERE role_id = %s", (role_id,))
+                for did in dept_ids:
+                    cur.execute(
+                        "INSERT INTO sys_role_dept (role_id, dept_id) VALUES (%s, %s)",
+                        (role_id, int(did)),
+                    )
+
+    def delete_role_depts(self, role_id: int) -> None:
+        """Clean up the role's dept data-permission associations when the role is deleted."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_role_dept WHERE role_id = %s", (role_id,))
+
+    def get_user_role_data_scopes(self, user_id: int) -> list[dict[str, Any]]:
+        """All (role_id, data_scope) of the user's enabled roles."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT r.id AS role_id, r.data_scope
+                       FROM sys_user_role ur
+                       JOIN sys_role r ON r.id = ur.role_id
+                       WHERE ur.user_id = %(user_id)s AND r.status = 1""",
+                    {"user_id": user_id},
+                )
+                rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+    def get_user_data_scope_clause(
+        self,
+        user_id: int,
+        *,
+        alias: str = "u",
+        dept_col: str = "dept_id",
+        user_col: str = "id",
+    ) -> tuple[str, dict[str, Any]]:
+        """Generate the WHERE fragment and params for data permission (data_scope).
+
+        Multi-role merge (RuoYi behavior): if any role is "all" (1), no filter is applied;
+        otherwise the constraints of each role are OR-merged. Super-admin or no-role users
+        are not filtered.
+
+        Returns ("", {}) to mean no filtering; otherwise a ("(...)", params) fragment that
+        the caller appends to the AND condition list (table alias via `alias`).
+        """
+        if self.is_super_admin(user_id):
+            return "", {}
+        scopes = self.get_user_role_data_scopes(user_id)
+        if not scopes:
+            return "", {}
+        if any(s["data_scope"] == "1" for s in scopes):
+            return "", {}
+        user = self.get_sys_user_by_id(user_id)
+        user_dept_id = int(user["dept_id"]) if user and user.get("dept_id") else None
+
+        or_parts: list[str] = []
+        params: dict[str, Any] = {}
+        for i, s in enumerate(scopes):
+            scope = s["data_scope"]
+            role_id = s["role_id"]
+            if scope == "2":
+                or_parts.append(
+                    f"{alias}.{dept_col} IN "
+                    f"(SELECT dept_id FROM sys_role_dept WHERE role_id = %(scope_role_{i})s)"
+                )
+                params[f"scope_role_{i}"] = role_id
+            elif scope == "3":
+                if user_dept_id is not None:
+                    or_parts.append(f"{alias}.{dept_col} = %(scope_dept)s")
+                    params["scope_dept"] = user_dept_id
+            elif scope == "4":
+                if user_dept_id is not None:
+                    or_parts.append(
+                        f"({alias}.{dept_col} = %(scope_dept)s OR {alias}.{dept_col} IN ("
+                        f"SELECT dept_id FROM sys_dept WHERE del_flag = '0' "
+                        f"AND FIND_IN_SET(%(scope_dept)s, ancestors)))"
+                    )
+                    params["scope_dept"] = user_dept_id
+            elif scope == "5":
+                or_parts.append(f"{alias}.{user_col} = %(scope_user)s")
+                params["scope_user"] = user_id
+        if not or_parts:
+            return "", {}
+        return "(" + " OR ".join(or_parts) + ")", params
+
+    # ---- Menu management ----
+
+    def list_all_menus(self) -> list[dict[str, Any]]:
+        """All menus (incl. buttons), returned as a tree."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, parent_id, menu_name, i18n_key, path, component,
+                              menu_type, permission, icon, sort, visible, status,
+                              remark, created_at, updated_at
+                       FROM sys_menu ORDER BY sort ASC, id ASC"""
+                )
+                rows = cur.fetchall() or []
+        menus = [self._parse_json_fields(dict(r), ()) for r in rows]
+        return self.build_menu_tree(menus)
+
+    def get_sys_menu(self, menu_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_menu WHERE id = %s", (menu_id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def count_sys_menu_children(self, menu_id: int) -> int:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM sys_menu WHERE parent_id = %s",
+                    (menu_id,),
+                )
+                return int((cur.fetchone() or {}).get("cnt") or 0)
+
+    def create_sys_menu(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_menu (parent_id, menu_name, i18n_key, path, component,
+                                  menu_type, permission, icon, sort, visible, status, remark)
+            VALUES (%(parent_id)s, %(menu_name)s, %(i18n_key)s, %(path)s, %(component)s,
+                    %(menu_type)s, %(permission)s, %(icon)s, %(sort)s, %(visible)s, %(status)s, %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "parent_id": int(data.get("parent_id", 0)),
+                    "menu_name": data["menu_name"],
+                    "i18n_key": data.get("i18n_key"),
+                    "path": data.get("path"),
+                    "component": data.get("component"),
+                    "menu_type": data.get("menu_type", "C"),
+                    "permission": data.get("permission"),
+                    "icon": data.get("icon"),
+                    "sort": int(data.get("sort", 0)),
+                    "visible": int(data.get("visible", 1)),
+                    "status": int(data.get("status", 1)),
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_sys_menu(self, menu_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"id": menu_id}
+        for key in ("parent_id", "menu_name", "i18n_key", "path", "component",
+                    "menu_type", "permission", "icon", "sort", "visible", "status", "remark"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if not fields:
+            return False
+        sql = f"UPDATE sys_menu SET {', '.join(fields)} WHERE id = %(id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_sys_menu(self, menu_id: int) -> bool:
+        """Delete a menu and clean up role authorization references. Returns whether a row was matched."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_role_menu WHERE menu_id = %s", (menu_id,))
+                cur.execute("DELETE FROM sys_menu WHERE id = %s", (menu_id,))
+                return cur.rowcount > 0
+
+    # ---- Operation logs ----
+
+    def insert_oper_log(self, entry: dict[str, Any]) -> None:
+        sql = """
+            INSERT INTO sys_oper_log (title, business_type, method, request_method,
+                                      oper_url, oper_ip, oper_name, oper_param,
+                                      json_result, status, error_msg)
+            VALUES (%(title)s, %(business_type)s, %(method)s, %(request_method)s,
+                    %(oper_url)s, %(oper_ip)s, %(oper_name)s, %(oper_param)s,
+                    %(json_result)s, %(status)s, %(error_msg)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "title": entry.get("title") or "",
+                    "business_type": int(entry.get("business_type", 0)),
+                    "method": entry.get("method") or "",
+                    "request_method": entry.get("request_method") or "",
+                    "oper_url": entry.get("oper_url") or "",
+                    "oper_ip": entry.get("oper_ip") or "",
+                    "oper_name": entry.get("oper_name") or "",
+                    "oper_param": entry.get("oper_param") or "",
+                    "json_result": entry.get("json_result") or "",
+                    "status": int(entry.get("status", 1)),
+                    "error_msg": entry.get("error_msg") or "",
+                })
+
+    def list_oper_logs(
+        self,
+        *,
+        title: str | None = None,
+        oper_name: str | None = None,
+        business_type: int | None = None,
+        status: int | None = None,
+        begin: str | None = None,
+        end: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if title:
+            where.append("title LIKE %(title)s")
+            params["title"] = f"%{title}%"
+        if oper_name:
+            where.append("oper_name LIKE %(oper_name)s")
+            params["oper_name"] = f"%{oper_name}%"
+        if status is not None:
+            where.append("status = %(status)s")
+            params["status"] = status
+        if business_type is not None:
+            where.append("business_type = %(business_type)s")
+            params["business_type"] = business_type
+        if begin:
+            where.append("oper_time >= %(begin)s")
+            params["begin"] = begin
+        if end:
+            where.append("oper_time <= %(end)s")
+            params["end"] = end
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_oper_log WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT * FROM sys_oper_log WHERE {clause}
+                        ORDER BY oper_time DESC, id DESC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def delete_oper_logs(self, ids: list[int]) -> int:
+        if not ids:
+            return 0
+        marks = ", ".join(["%s"] * len(ids))
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM sys_oper_log WHERE id IN ({marks})", ids)
+                return cur.rowcount
+
+    def clean_oper_logs(self) -> int:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_oper_log")
+                return cur.rowcount
+
+    # ------------------------------------------------------------------
+    # Dept management (sys_dept, RuoYi standard fields)
+    # ------------------------------------------------------------------
+
+    def list_depts(self) -> list[dict[str, Any]]:
+        """Full dept list (undeleted); the frontend builds the tree from it."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT dept_id, parent_id, ancestors, dept_name, order_num,
+                              leader, phone, email, status, del_flag,
+                              create_time, update_time
+                       FROM sys_dept WHERE del_flag = '0'
+                       ORDER BY parent_id ASC, order_num ASC, dept_id ASC"""
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows]
+
+    @staticmethod
+    def build_dept_tree(depts: list[dict[str, Any]], parent_id: int = 0) -> list[dict[str, Any]]:
+        """Build a tree from a flat dept list (RuoYi deptTreeselect format)."""
+        children = [d for d in depts if int(d.get("parent_id", 0)) == parent_id]
+        for d in children:
+            d["children"] = Database.build_dept_tree(depts, int(d["dept_id"]))
+        children.sort(key=lambda x: (x.get("order_num") or 0, x.get("dept_id") or 0))
+        return children
+
+    def get_dept_tree(self) -> list[dict[str, Any]]:
+        """Full dept tree (for the data-permission dept tree selection)."""
+        return self.build_dept_tree(self.list_depts())
+
+    def get_dept_by_id(self, dept_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM sys_dept WHERE dept_id = %s AND del_flag = '0'",
+                    (dept_id,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def _dept_ancestors(self, parent_id: int) -> str:
+        """Compute the ancestors list from the parent dept ID."""
+        if not parent_id or parent_id <= 0:
+            return "0"
+        parent = self.get_dept_by_id(parent_id)
+        if not parent:
+            return "0"
+        return f"{parent.get('ancestors') or '0'},{parent_id}"
+
+    def create_dept(self, data: dict[str, Any]) -> int:
+        parent_id = int(data.get("parent_id") or 0)
+        sql = """
+            INSERT INTO sys_dept (parent_id, ancestors, dept_name, order_num, leader,
+                                  phone, email, status, create_by, create_time)
+            VALUES (%(parent_id)s, %(ancestors)s, %(dept_name)s, %(order_num)s,
+                    %(leader)s, %(phone)s, %(email)s, %(status)s, %(create_by)s, NOW())
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "parent_id": parent_id,
+                    "ancestors": self._dept_ancestors(parent_id),
+                    "dept_name": data.get("dept_name"),
+                    "order_num": int(data.get("order_num") or 0),
+                    "leader": data.get("leader"),
+                    "phone": data.get("phone"),
+                    "email": data.get("email"),
+                    "status": data.get("status", "0"),
+                    "create_by": data.get("create_by") or "",
+                })
+                return int(cur.lastrowid)
+
+    def update_dept(self, dept_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"dept_id": dept_id}
+        for key in ("dept_name", "order_num", "leader", "phone", "email", "status"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = int(data[key]) if key == "order_num" else data[key]
+        if "update_by" in data:
+            fields.append("update_by = %(update_by)s")
+            params["update_by"] = data["update_by"]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_dept SET {', '.join(fields)} WHERE dept_id = %(dept_id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def has_children_dept(self, dept_id: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM sys_dept WHERE parent_id = %s AND del_flag = '0'",
+                    (dept_id,),
+                )
+                return int((cur.fetchone() or {}).get("cnt") or 0) > 0
+
+    def dept_has_users(self, dept_id: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM sys_user WHERE dept_id = %s",
+                    (dept_id,),
+                )
+                return int((cur.fetchone() or {}).get("cnt") or 0) > 0
+
+    def delete_dept(self, dept_id: int) -> bool:
+        """Soft-delete a dept (del_flag='2'). Returns False if it has child depts or users."""
+        if self.has_children_dept(dept_id) or self.dept_has_users(dept_id):
+            return False
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE sys_dept SET del_flag = '2' WHERE dept_id = %s",
+                    (dept_id,),
+                )
+                return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Post management (sys_post, RuoYi standard fields)
+    # ------------------------------------------------------------------
+
+    def list_posts(
+        self,
+        *,
+        keyword: str | None = None,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if keyword:
+            where.append("(post_code LIKE %(kw)s OR post_name LIKE %(kw)s)")
+            params["kw"] = f"%{keyword}%"
+        if status is not None and status != "":
+            where.append("status = %(status)s")
+            params["status"] = status
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_post WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT post_id, post_code, post_name, post_sort, status,
+                               create_time, remark
+                        FROM sys_post WHERE {clause}
+                        ORDER BY post_sort ASC, post_id ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def get_post_by_id(self, post_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_post WHERE post_id = %s", (post_id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_post_by_code(self, post_code: str) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_post WHERE post_code = %s", (post_code,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_post(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_post (post_code, post_name, post_sort, status, create_by, create_time, remark)
+            VALUES (%(post_code)s, %(post_name)s, %(post_sort)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "post_code": data["post_code"],
+                    "post_name": data["post_name"],
+                    "post_sort": int(data.get("post_sort") or 0),
+                    "status": data.get("status", "0"),
+                    "create_by": data.get("create_by") or "",
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_post(self, post_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"post_id": post_id}
+        for key in ("post_code", "post_name", "post_sort", "status", "remark"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = int(data[key]) if key == "post_sort" else data[key]
+        if "update_by" in data:
+            fields.append("update_by = %(update_by)s")
+            params["update_by"] = data["update_by"]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_post SET {', '.join(fields)} WHERE post_id = %(post_id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_post(self, post_id: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_user_post WHERE post_id = %s", (post_id,))
+                cur.execute("DELETE FROM sys_post WHERE post_id = %s", (post_id,))
+                return cur.rowcount > 0
+
+    def get_user_post_ids(self, user_id: int) -> list[int]:
+        """User's post ID list (for selection echo)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT post_id FROM sys_user_post WHERE user_id = %s",
+                    (user_id,),
+                )
+                rows = cur.fetchall() or []
+        return [int(r["post_id"]) for r in rows]
+
+    def set_user_posts(self, user_id: int, post_ids: list[int]) -> None:
+        """Replace all post bindings of the user."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_user_post WHERE user_id = %s", (user_id,))
+                for pid in post_ids:
+                    cur.execute(
+                        "INSERT INTO sys_user_post (user_id, post_id) VALUES (%s, %s)",
+                        (user_id, int(pid)),
+                    )
+
+    # ------------------------------------------------------------------
+    # Login logs (sys_login_log, RuoYi standard fields)
+    # ------------------------------------------------------------------
+
+    def record_login_log(
+        self,
+        *,
+        user_name: str,
+        ipaddr: str = "",
+        login_location: str = "",
+        browser: str = "",
+        os: str = "",
+        status: str = "0",
+        msg: str = "",
+    ) -> None:
+        sql = """
+            INSERT INTO sys_login_log (user_name, ipaddr, login_location, browser, os, status, msg, login_time)
+            VALUES (%(user_name)s, %(ipaddr)s, %(login_location)s, %(browser)s, %(os)s, %(status)s, %(msg)s, NOW())
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "user_name": user_name,
+                    "ipaddr": ipaddr,
+                    "login_location": login_location,
+                    "browser": browser,
+                    "os": os,
+                    "status": status,
+                    "msg": msg,
+                })
+
+    def list_login_logs(
+        self,
+        *,
+        user_name: str | None = None,
+        status: str | None = None,
+        begin: str | None = None,
+        end: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if user_name:
+            where.append("user_name LIKE %(user_name)s")
+            params["user_name"] = f"%{user_name}%"
+        if status is not None and status != "":
+            where.append("status = %(status)s")
+            params["status"] = status
+        if begin:
+            where.append("login_time >= %(begin)s")
+            params["begin"] = begin
+        if end:
+            where.append("login_time <= %(end)s")
+            params["end"] = end
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_login_log WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT * FROM sys_login_log WHERE {clause}
+                        ORDER BY login_time DESC, info_id DESC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def delete_login_logs(self, ids: list[int]) -> int:
+        if not ids:
+            return 0
+        marks = ", ".join(["%s"] * len(ids))
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM sys_login_log WHERE info_id IN ({marks})", ids)
+                return cur.rowcount
+
+    def clean_login_logs(self) -> int:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_login_log")
+                return cur.rowcount
+
+    # ------------------------------------------------------------------
+    # Parameter settings (sys_config, RuoYi standard fields)
+    # ------------------------------------------------------------------
+
+    def list_configs(
+        self,
+        *,
+        keyword: str | None = None,
+        config_type: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if keyword:
+            where.append("(config_name LIKE %(kw)s OR config_key LIKE %(kw)s)")
+            params["kw"] = f"%{keyword}%"
+        if config_type is not None and config_type != "":
+            where.append("config_type = %(config_type)s")
+            params["config_type"] = config_type
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_config WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT config_id, config_name, config_key, config_value,
+                               config_type, create_time, remark
+                        FROM sys_config WHERE {clause}
+                        ORDER BY config_id ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def get_config_by_id(self, config_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_config WHERE config_id = %s", (config_id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_config_by_key(self, config_key: str) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_config WHERE config_key = %s", (config_key,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_config(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_config (config_name, config_key, config_value, config_type, create_by, create_time, remark)
+            VALUES (%(config_name)s, %(config_key)s, %(config_value)s, %(config_type)s, %(create_by)s, NOW(), %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "config_name": data.get("config_name"),
+                    "config_key": data.get("config_key"),
+                    "config_value": data.get("config_value"),
+                    "config_type": data.get("config_type", "N"),
+                    "create_by": data.get("create_by") or "",
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_config(self, config_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"config_id": config_id}
+        for key in ("config_name", "config_key", "config_value", "config_type", "remark"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if "update_by" in data:
+            fields.append("update_by = %(update_by)s")
+            params["update_by"] = data["update_by"]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_config SET {', '.join(fields)} WHERE config_id = %(config_id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_config(self, config_id: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_config WHERE config_id = %s", (config_id,))
+                return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Dict management (sys_dict_type / sys_dict_data, RuoYi standard fields)
+    # ------------------------------------------------------------------
+
+    def list_dict_types(
+        self,
+        *,
+        keyword: str | None = None,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if keyword:
+            where.append("(dict_name LIKE %(kw)s OR dict_type LIKE %(kw)s)")
+            params["kw"] = f"%{keyword}%"
+        if status is not None and status != "":
+            where.append("status = %(status)s")
+            params["status"] = status
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_dict_type WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT dict_id, dict_name, dict_type, status, create_time, remark
+                        FROM sys_dict_type WHERE {clause}
+                        ORDER BY dict_id ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def get_dict_type_by_id(self, dict_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_dict_type WHERE dict_id = %s", (dict_id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def get_dict_type_by_type(self, dict_type: str) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_dict_type WHERE dict_type = %s", (dict_type,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_dict_type(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_dict_type (dict_name, dict_type, status, create_by, create_time, remark)
+            VALUES (%(dict_name)s, %(dict_type)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "dict_name": data.get("dict_name"),
+                    "dict_type": data.get("dict_type"),
+                    "status": data.get("status", "0"),
+                    "create_by": data.get("create_by") or "",
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_dict_type(self, dict_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"dict_id": dict_id}
+        for key in ("dict_name", "dict_type", "status", "remark"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if "update_by" in data:
+            fields.append("update_by = %(update_by)s")
+            params["update_by"] = data["update_by"]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_dict_type SET {', '.join(fields)} WHERE dict_id = %(dict_id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_dict_type(self, dict_id: int) -> bool:
+        """Delete a dict type and its data."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT dict_type FROM sys_dict_type WHERE dict_id = %s", (dict_id,))
+                row = cur.fetchone()
+                if row:
+                    cur.execute("DELETE FROM sys_dict_data WHERE dict_type = %s", (row["dict_type"],))
+                cur.execute("DELETE FROM sys_dict_type WHERE dict_id = %s", (dict_id,))
+                return cur.rowcount > 0
+
+    def list_dict_data(
+        self,
+        *,
+        dict_type: str | None = None,
+        dict_label: str | None = None,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if dict_type:
+            where.append("dict_type = %(dict_type)s")
+            params["dict_type"] = dict_type
+        if dict_label:
+            where.append("dict_label LIKE %(dict_label)s")
+            params["dict_label"] = f"%{dict_label}%"
+        if status is not None and status != "":
+            where.append("status = %(status)s")
+            params["status"] = status
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_dict_data WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT dict_code, dict_sort, dict_label, dict_value, dict_type,
+                               css_class, list_class, is_default, status, create_time, remark
+                        FROM sys_dict_data WHERE {clause}
+                        ORDER BY dict_sort ASC, dict_code ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def get_dict_data_by_id(self, dict_code: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_dict_data WHERE dict_code = %s", (dict_code,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_dict_data(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_dict_data (dict_sort, dict_label, dict_value, dict_type,
+                                       css_class, list_class, is_default, status,
+                                       create_by, create_time, remark)
+            VALUES (%(dict_sort)s, %(dict_label)s, %(dict_value)s, %(dict_type)s,
+                    %(css_class)s, %(list_class)s, %(is_default)s, %(status)s,
+                    %(create_by)s, NOW(), %(remark)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "dict_sort": int(data.get("dict_sort") or 0),
+                    "dict_label": data.get("dict_label"),
+                    "dict_value": data.get("dict_value"),
+                    "dict_type": data.get("dict_type"),
+                    "css_class": data.get("css_class"),
+                    "list_class": data.get("list_class"),
+                    "is_default": data.get("is_default", "N"),
+                    "status": data.get("status", "0"),
+                    "create_by": data.get("create_by") or "",
+                    "remark": data.get("remark"),
+                })
+                return int(cur.lastrowid)
+
+    def update_dict_data(self, dict_code: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"dict_code": dict_code}
+        for key in ("dict_sort", "dict_label", "dict_value", "dict_type",
+                    "css_class", "list_class", "is_default", "status", "remark"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = int(data[key]) if key == "dict_sort" else data[key]
+        if "update_by" in data:
+            fields.append("update_by = %(update_by)s")
+            params["update_by"] = data["update_by"]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_dict_data SET {', '.join(fields)} WHERE dict_code = %(dict_code)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_dict_data(self, dict_code: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_dict_data WHERE dict_code = %s", (dict_code,))
+                return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Access whitelist (sys_whitelist: login-free paths such as large-screen views)
+    # ------------------------------------------------------------------
+
+    def list_whitelists(
+        self,
+        *,
+        keyword: str | None = None,
+        path_type: str | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if keyword:
+            where.append("(path LIKE %(kw)s OR remark LIKE %(kw)s)")
+            params["kw"] = f"%{keyword}%"
+        if path_type is not None and path_type != "":
+            where.append("path_type = %(path_type)s")
+            params["path_type"] = path_type
+        clause = " AND ".join(where)
+        params["limit"] = limit
+        params["offset"] = offset
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM sys_whitelist WHERE {clause}",
+                    {k: v for k, v in params.items() if k not in ("limit", "offset")},
+                )
+                total = int((cur.fetchone() or {}).get("cnt") or 0)
+                cur.execute(
+                    f"""SELECT id, path, path_type, remark, status, create_time, update_time
+                        FROM sys_whitelist WHERE {clause}
+                        ORDER BY id ASC
+                        LIMIT %(limit)s OFFSET %(offset)s""",
+                    params,
+                )
+                rows = cur.fetchall() or []
+        return [self._parse_json_fields(dict(r), ()) for r in rows], total
+
+    def get_whitelist_by_id(self, whitelist_id: int) -> dict[str, Any] | None:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM sys_whitelist WHERE id = %s", (whitelist_id,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def create_whitelist(self, data: dict[str, Any]) -> int:
+        sql = """
+            INSERT INTO sys_whitelist (path, path_type, remark, status)
+            VALUES (%(path)s, %(path_type)s, %(remark)s, %(status)s)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "path": data.get("path"),
+                    "path_type": data.get("path_type", "F"),
+                    "remark": data.get("remark"),
+                    "status": data.get("status", "0"),
+                })
+                return int(cur.lastrowid)
+
+    def update_whitelist(self, whitelist_id: int, data: dict[str, Any]) -> bool:
+        fields = []
+        params: dict[str, Any] = {"id": whitelist_id}
+        for key in ("path", "path_type", "remark", "status"):
+            if key in data:
+                fields.append(f"{key} = %({key})s")
+                params[key] = data[key]
+        if not fields:
+            return False
+        fields.append("update_time = NOW()")
+        sql = f"UPDATE sys_whitelist SET {', '.join(fields)} WHERE id = %(id)s"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.rowcount > 0
+
+    def delete_whitelist(self, whitelist_id: int) -> bool:
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sys_whitelist WHERE id = %s", (whitelist_id,))
+                return cur.rowcount > 0
+
+    def get_whitelist_paths(self, path_type: str) -> list[str]:
+        """Enabled whitelist path list (prefix matching)."""
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT path FROM sys_whitelist WHERE path_type = %s AND status = '0' ORDER BY id",
+                    (path_type,),
+                )
+                rows = cur.fetchall() or []
+        return [str(r["path"]) for r in rows]
+
+    def is_api_whitelisted(self, path: str) -> bool:
+        """Whether the backend API path matches a whitelist prefix (path_type='A')."""
+        for prefix in self.get_whitelist_paths("A"):
+            if prefix and path.startswith(prefix):
+                return True
+        return False

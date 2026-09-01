@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.db import Database
 
 router = APIRouter(prefix="/api/v1", tags=["facade"])
@@ -20,7 +20,7 @@ class FacadeConfigRequest(BaseModel):
 
 @router.get("/building/facade-config")
 def get_facade_config(db: Database = Depends(get_db)) -> dict[str, Any]:
-    """获取幕墙窗户配置。"""
+    """Get the facade window configuration."""
     row = db.get_facade_config()
     if row is None:
         return {
@@ -36,8 +36,9 @@ def get_facade_config(db: Database = Depends(get_db)) -> dict[str, Any]:
 def save_facade_config(
     body: FacadeConfigRequest,
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """保存幕墙窗户配置。"""
+    """Save the facade window configuration."""
     config = body.model_dump()
     row_id = db.save_facade_config(config)
     return {"ok": True, "id": row_id}

@@ -467,7 +467,7 @@ onMounted(async () => {
 
 .ov-card,
 .stat-card {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
   padding: 14px 16px;
   min-height: 96px;
@@ -513,7 +513,7 @@ onMounted(async () => {
 }
 
 .insight-card {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
 }
 
@@ -528,7 +528,7 @@ onMounted(async () => {
 
 .insights li {
   padding: 10px 12px;
-  background: #f7f7f5;
+  background: var(--brand-canvas, #f7f7f5);
   border-left: 3px solid #c4a574;
   font-size: 13px;
   color: #2a2a2a;
@@ -549,7 +549,7 @@ onMounted(async () => {
 .overview-legend {
   margin-top: 14px;
   padding: 14px 16px;
-  background: #f7f7f5;
+  background: var(--brand-canvas, #f7f7f5);
   border: 1px solid #e6e2da;
   border-left: 3px solid #c4a574;
 }

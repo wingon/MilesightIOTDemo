@@ -291,7 +291,7 @@ const panelEnvDevices = computed(() => {
   flex-direction: column;
   min-height: 0;
   border: 1px solid #e6e2da;
-  background: #fff;
+  background: var(--brand-surface, #fff);
 }
 
 .pane-label {
@@ -299,7 +299,7 @@ const panelEnvDevices = computed(() => {
   z-index: 2;
   top: 10px;
   left: 10px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--brand-surface, rgba(255, 255, 255, 0.88));
   border: 1px solid #e6e2da;
   padding: 4px 10px;
   font-size: 12px;

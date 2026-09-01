@@ -39,6 +39,10 @@ class Settings:
     wingon_db_user: str
     wingon_db_password: str
     wingon_db_name: str
+    # JWT 认证
+    jwt_secret: str
+    jwt_algorithm: str
+    jwt_expire_minutes: int
 
 
 def load_settings() -> Settings:
@@ -66,4 +70,7 @@ def load_settings() -> Settings:
         wingon_db_user=os.getenv("WINGON_DB_USER", "root"),
         wingon_db_password=os.getenv("WINGON_DB_PASSWORD", "root"),
         wingon_db_name=os.getenv("WINGON_DB_NAME", "WingOnIOT"),
+        jwt_secret=os.getenv("JWT_SECRET", "wingon-iot-dev-secret-change-me"),
+        jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
+        jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "720")),
     )

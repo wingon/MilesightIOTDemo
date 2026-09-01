@@ -284,3 +284,80 @@ fix: 弱化切角著色與移除懸停凸出效果
 - 切角凹槽處溫濕度著色向混凝土米灰靠攏（lerp 55%），保留可辨識傾向但不再濃烈刺眼
 - 自發光強度由 0.15 降為 0.05，避免同色樓層在切角處連成一片黃綠色塊
 - 移除 updateHoverHighlight 的懸停凸出邏輯：樓層不再縮放放大、不再顯示金色高亮盒，懸停僅保留提示 toast 與指針變化
+
+
+## 2026-08-31 12:00
+feat: RBAC 權限系統 v0.1
+
+### 後端認證與安全
+- security.py：bcrypt 密碼哈希（rounds=10）+ JWT Token 生成/校驗（PyJWT + bcrypt）
+- deps.py：get_current_user 依賴注入，解析 JWT 取得當前用戶/角色/權限
+- auth.py：登入（bcrypt 校驗 + 產生 JWT + 記錄登入日誌）/ 登出 / 當前用戶資訊 / 動態路由選單
+
+### 後端系統管理 API（12 個路由模組）
+- system_user.py：用戶 CRUD、角色分配、密碼重置
+- system_role.py：角色 CRUD、選單權限分配、部門分配、數據範圍（data_scope）
+- system_menu.py：選單 CRUD（樹形結構，M=目錄/C=菜單/F=按鈕）
+- system_dept.py：部門 CRUD（樹形結構，ancestors 祖級列表）
+- system_dict.py：字典類型與字典資料管理
+- system_config.py：參數設定
+- system_post.py：崗位管理
+- system_profile.py：個人資料
+- system_log.py：操作日誌
+- system_login_log.py：登入日誌
+- system_whitelist.py：前端路由白名單管理
+- operlog.py：操作日誌裝飾器（自動記錄用戶/操作/結果）
+
+### 後端資料庫
+- db.py 新增 ~1500 行：sys_user/sys_role/sys_menu/sys_dept/sys_post/sys_dict/sys_config/sys_oper_log/sys_login_log/sys_user_role/sys_role_menu/sys_role_dept/sys_user_post/sys_role_data_scope 共15 張表的完整 CRUD
+- init_sys_permission.sql：核心 RBAC 表（user/role/menu/user_role/role_menu/oper_log）
+- init_sys_manage.sql：擴展表（dept/post/user_post/login_log/config/dict/dict_data/whitelist）+ sys_user 新增性別欄位
+- init_role_data_scope.sql：角色數據範圍（data_scope 1~5）+ sys_role_dept
+- migrate_role_data_scope.py / test_role_api.py / test_data_scope.py / test_permission_chain.py / test_iot_auth.py
+
+### 前端認證流程
+- api/http.ts：JWT Token 自動附加 Authorization header；401 自動跳轉登入頁
+- api/auth.ts：login/getUserInfo/logout/getFrontWhitelist API
+- stores/user.ts：token/userInfo/roles/permissions 狀態管理
+- stores/permission.ts：動態路由生成（generateRoutes）、權限檢查（hasPermission/hasAnyPermission）
+- utils/whitelist.ts：前端路由白名單快取與前綴匹配
+- utils/permission.ts：v-permission 按鈕級權限指令（無權限時移除元素）
+- router/index.ts：路由守衛（未登入→白名單檢查→登入頁；已登入→動態路由加載→權限過濾）
+
+### 前端系統管理頁面
+- views/LoginView.vue：登入頁（品牌色漸層背景 + 記住帳號）
+- views/ProfileView.vue：個人資料（密碼修改、基本資料編輯）
+- views/NotFoundView.vue：404 頁面
+- views/system/SystemUserView.vue：用戶管理（表格+搜尋+角色分配+密碼重置）
+- views/system/SystemRoleView.vue：角色管理（選單權限樹、部門分配、數據範圍）
+- views/system/SystemMenuView.vue：選單管理（樹形表格、圖標選擇、權限標識）
+- views/system/SystemDeptView.vue：部門管理（樹形表格）
+- views/system/SystemDictView.vue：字典管理（類型+資料兩層）
+- views/system/SystemConfigView.vue：參數設定
+- views/system/SystemPostView.vue：崗位管理
+- views/system/SystemLogView.vue：操作日誌
+- views/system/SystemLoginLogView.vue：登入日誌
+- views/system/SystemWhitelistView.vue：白名單管理
+
+### 前端佈局與 UI
+- MainLayout.vue 大幅重構（+691 行）：側邊欄可收合、Tab 頁籤導航、麵包屑、用戶下拉選單（個人資料/登入日誌/白名單/系統管理子選單）、全螢幕切換、語言切換、鎖屏入口
+- stores/app.ts 新增 ~220 行：sidebarCollapsed/tabs/breadcrumbs/lockScreen 狀態、動態選單生成
+- App.vue：整合鎖屏元件
+- components/LockScreen.vue：鎖屏畫面（密碼解鎖）
+- components/LayoutSettings.vue：佈局設定面板
+- styles/global.less 新增 ~500 行：側邊欄/Tab/麵包屑/鎖屏/登入頁完整樣式
+
+### i18n（~260 組新文案）
+- en.ts / zh-TW.ts：login/common/profile/system 各模組完整中英文翻譯（~260 鍵）
+
+### 其他
+- package.json 新增 bcrypt 依賴
+- requirements.txt 新增 bcrypt/pyjwt
+- config.py 新增 JWT_SECRET/JWT_ALGORITHM/JWT_EXPIRE_MINUTES
+- .env.example 新增 JWT 與超級管理員設定
+- 已有路由（tof/ug65/vs135/building 等）加入權限檢查
+- TofListView/Ug65ListView/Vs135ListView/DevicesManageView 等頁面加入 v-permission 指令
+- SQL 文件結構
+  - init_sys_permission.sql 核心 RBAC 表（user/role/menu/user_role/role_menu/oper_log）+ 管理員種子
+  - init_sys_manage.sql 擴展表（dept/post/whitelist/config/dict/login_log）+ ALTER user 加 dept_id/sex + 擴展菜單
+  - init_role_data_scope.sql 數據權限（ALTER role 加 data_scope + sys_role_dept 表）

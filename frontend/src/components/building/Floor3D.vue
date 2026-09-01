@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 320px;
   overflow: hidden;
-  background: #f0eee9;
+  background: var(--brand-canvas, #f0eee9);
   cursor: grab;
 }
 
@@ -866,7 +866,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   color: #0d0d0d;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--brand-surface, rgba(255, 255, 255, 0.9));
   border: 1px solid #c4a574;
   padding: 4px 10px;
 }

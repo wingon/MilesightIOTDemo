@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_db
+from app.api.deps import get_current_user, get_db
 from app.db import Database
 
 router = APIRouter(prefix="/api/v1", tags=["tof"])
@@ -39,7 +39,10 @@ def _resolve_window(
 
 
 @router.get("/tof/devices")
-def list_tof_devices(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
+def list_tof_devices(
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> list[dict[str, Any]]:
     return db.list_tof_devices()
 
 
@@ -59,6 +62,7 @@ def list_tof(
     ),
     offset: int = Query(default=0, ge=0),
     db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     latest_received_at = (
         db.latest_tof_received_at(device_sn=device_sn)
@@ -84,7 +88,11 @@ def list_tof(
 
 
 @router.get("/tof/{row_id}")
-def get_tof(row_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
+def get_tof(
+    row_id: int,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
     row = db.get_tof(row_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"tof id={row_id} not found")

@@ -66,6 +66,7 @@ const channelBarOption = computed(() => {
   return buildChannelBarOption(channelStats.value, {
     enter: t('peopleCount.enter'),
     exit: t('peopleCount.exit'),
+    unknownChannel: t('peopleCount.unknownChannel'),
   })
 })
 
@@ -279,7 +280,7 @@ onMounted(() => {
 }
 
 .card {
-  background: #fff;
+  background: var(--brand-surface, #fff);
   border: 1px solid #e6e2da;
   padding: 16px 18px;
 }
