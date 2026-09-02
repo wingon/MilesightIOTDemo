@@ -361,3 +361,33 @@ feat: RBAC 權限系統 v0.1
   - init_sys_permission.sql 核心 RBAC 表（user/role/menu/user_role/role_menu/oper_log）+ 管理員種子
   - init_sys_manage.sql 擴展表（dept/post/whitelist/config/dict/login_log）+ ALTER user 加 dept_id/sex + 擴展菜單
   - init_role_data_scope.sql 數據權限（ALTER role 加 data_scope + sys_role_dept 表）
+
+## 2026-08-31 14:00
+feat: CCTV 人流同步定時任務與雪花 ID
+
+### CCTV 人流資料採集（cctv_sync.py，新檔案）
+- 從 Milesight 攝影機 ISAPI 拉取逐小時進出人數（28 台攝影機，硬編碼 CCTV_CAMERAS）
+- 使用 HTTPDigestAuth 認證，解析 XML 回應（xmltodict）
+- UPSERT 至 people_count_hourly（以 snowflake ID 為主鍵，date+hour+ip_address 為唯一索引）
+- 支援三種同步模式：sync_today（當天）、sync_yesterday（昨天完整 24h）、backfill_current_month（回填當月缺失日期）
+
+### 雪花 ID 產生器（snowflake.py，新檔案）
+- 64 位元雪花 ID（41 bit 時間戳 + 10 bit 機器 ID + 12 bit 序列號）
+- 執行緒安全，自訂紀元 2023-01-01，模組級單例 + init_snowflake(worker_id)
+
+### APScheduler 整合（main.py）
+- 採用 FastAPI lifespan 啟動時註冊 BackgroundScheduler
+- 三個 cron 任務：hourly（每小時 05 分同步當天）、yesterday（每天 00:05 同步昨天）、backfill（每天 00:10 回填當月）
+- 支援 cron 熱更新：每次執行前從 sys_config 讀取最新 cron 表示式，變更時自動 reschedule
+- 開關控制：cctv.sync.enabled（Y 啟用 / N 停用），停用時跳過執行
+- 啟動時立即執行一次當天同步
+
+### 手動同步 API
+- POST /api/v1/people-count/sync：需登入（get_current_user），受 cctv.sync.enabled 控制
+- 支援指定日期或預設今天
+
+### 後端
+- config.py 新增 cctv_username / cctv_password / snowflake_worker_id
+- db.py 新增 upsert_people_count_hourly（INSERT ON DUPLICATE KEY UPDATE）與 get_existing_people_count_dates
+- requirements.txt 新增 APScheduler / requests / xmltodict
+- init_cctv_sync_config.sql：初始化 sys_config 中 CCTV 同步相關參數（開關 + 三組 cron）

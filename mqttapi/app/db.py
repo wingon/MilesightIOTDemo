@@ -973,6 +973,66 @@ class Database:
                 rows = cur.fetchall() or []
         return [dict(r) for r in rows]
 
+    def upsert_people_count_hourly(
+        self,
+        *,
+        snowflake_id: int,
+        date: date,
+        hour: int,
+        ip_address: str,
+        channel_name: str,
+        enter_count: int,
+        exit_count: int,
+    ) -> None:
+        """UPSERT a single people_count_hourly row (INSERT ... ON DUPLICATE KEY UPDATE).
+
+        The unique key (date, hour, ip_address) drives the upsert; the provided
+        snowflake_id is only used on the initial insert.
+        """
+        sql = """
+            INSERT INTO people_count_hourly
+                (id, date, hour, ip_address, channel_name, enter_count, exit_count)
+            VALUES
+                (%(id)s, %(date)s, %(hour)s, %(ip_address)s, %(channel_name)s,
+                 %(enter_count)s, %(exit_count)s)
+            ON DUPLICATE KEY UPDATE
+                channel_name = VALUES(channel_name),
+                enter_count = VALUES(enter_count),
+                exit_count = VALUES(exit_count),
+                updated_at = NOW(3)
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {
+                    "id": snowflake_id,
+                    "date": date,
+                    "hour": hour,
+                    "ip_address": ip_address,
+                    "channel_name": channel_name,
+                    "enter_count": enter_count,
+                    "exit_count": exit_count,
+                })
+
+    def get_existing_people_count_dates(
+        self, year: int, month: int
+    ) -> set[date]:
+        """Return the set of dates that already have rows in the given month."""
+        first = date(year, month, 1)
+        if month == 12:
+            last = date(year + 1, 1, 1)
+        else:
+            last = date(year, month + 1, 1)
+        sql = """
+            SELECT DISTINCT date
+            FROM people_count_hourly
+            WHERE date >= %(first)s AND date < %(last)s
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"first": first, "last": last})
+                rows = cur.fetchall() or []
+        return {r["date"] for r in rows}
+
     def floor_environment_summary(self) -> list[dict[str, Any]]:
         """Per-floor aggregation: take each device's latest reading; floor temp/humidity is the median of that floor's devices."""
         sql = """

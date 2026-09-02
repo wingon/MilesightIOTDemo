@@ -43,6 +43,11 @@ class Settings:
     jwt_secret: str
     jwt_algorithm: str
     jwt_expire_minutes: int
+    # CCTV 人流統計（Milesight 攝影機 ISAPI 認證）
+    cctv_username: str
+    cctv_password: str
+    # 雪花演算法 worker_id（多實例部署時每個實例配不同值，確保 ID 全域唯一）
+    snowflake_worker_id: int
 
 
 def load_settings() -> Settings:
@@ -73,4 +78,7 @@ def load_settings() -> Settings:
         jwt_secret=os.getenv("JWT_SECRET", "wingon-iot-dev-secret-change-me"),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "720")),
+        cctv_username=os.getenv("CCTV_USERNAME", ""),
+        cctv_password=os.getenv("CCTV_PASSWORD", ""),
+        snowflake_worker_id=int(os.getenv("SNOWFLAKE_WORKER_ID", "1")),
     )
