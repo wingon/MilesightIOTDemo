@@ -1033,6 +1033,21 @@ class Database:
                 rows = cur.fetchall() or []
         return {r["date"] for r in rows}
 
+    def get_existing_people_count_dates_range(
+        self, date_from: date, date_to: date
+    ) -> set[date]:
+        """Return the set of dates in [date_from, date_to] that already have rows."""
+        sql = """
+            SELECT DISTINCT date
+            FROM people_count_hourly
+            WHERE date >= %(date_from)s AND date <= %(date_to)s
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {"date_from": date_from, "date_to": date_to})
+                rows = cur.fetchall() or []
+        return {r["date"] for r in rows}
+
     def floor_environment_summary(self) -> list[dict[str, Any]]:
         """Per-floor aggregation: take each device's latest reading; floor temp/humidity is the median of that floor's devices."""
         sql = """

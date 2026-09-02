@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 import requests
 import xmltodict
@@ -232,6 +232,57 @@ def backfill_current_month(
 
     return {
         "month": f"{today.year}-{today.month:02d}",
+        "missing": [str(d) for d in missing],
+        "synced": results,
+    }
+
+
+def sync_date_range(
+    db: Database,
+    settings: Settings,
+    date_from: date,
+    date_to: date,
+    session: requests.Session | None = None,
+    on_progress: Callable[[int, int, date], None] | None = None,
+) -> dict[str, Any]:
+    """回填 [date_from, date_to] 範圍內所有缺失日期的完整 24 小時資料。
+
+    缺失定義：people_count_hourly 中沒有該日期（date）的任何記錄。
+    已有資料的日期會自動跳過（可用於中斷後重跑）。
+
+    on_progress(completed, total, current) 在每個日期完成時回調，
+    用於後台任務更新進度（completed=已同步天數, total=待同步天數, current=當前日期）。
+
+    回傳：{date_from, date_to, missing: [...], synced: [...]}
+    """
+    own_session = session is None
+    if own_session:
+        session = _build_session(settings)
+
+    existing = db.get_existing_people_count_dates_range(date_from, date_to)
+
+    missing: list[date] = []
+    day = date_from
+    while day <= date_to:
+        if day not in existing:
+            missing.append(day)
+        day += timedelta(days=1)
+
+    total = len(missing)
+    results: list[dict[str, Any]] = []
+    try:
+        for idx, d in enumerate(missing, start=1):
+            logger.info("Range backfill missing date %s", d)
+            results.append(sync_date(db, settings, d, session=session))
+            if on_progress is not None:
+                on_progress(idx, total, d)
+    finally:
+        if own_session:
+            session.close()
+
+    return {
+        "date_from": str(date_from),
+        "date_to": str(date_to),
         "missing": [str(d) for d in missing],
         "synced": results,
     }

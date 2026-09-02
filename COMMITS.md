@@ -391,3 +391,39 @@ feat: CCTV 人流同步定時任務與雪花 ID
 - db.py 新增 upsert_people_count_hourly（INSERT ON DUPLICATE KEY UPDATE）與 get_existing_people_count_dates
 - requirements.txt 新增 APScheduler / requests / xmltodict
 - init_cctv_sync_config.sql：初始化 sys_config 中 CCTV 同步相關參數（開關 + 三組 cron）
+
+## 2026-09-02 09:00
+feat: CCTV 人流範圍回填、cron 熱更新監聽與日誌優化
+
+### 範圍回填功能（people_count.py）
+- POST /api/v1/people-count/sync 支援 date_from + date_to 範圍模式（與單天模式二選一）
+- 後台 threading 執行，回傳 task_id，不阻塞 API 回應
+- 進度追蹤：progress（%）、done_days、total_days、current_date
+- GET /api/v1/people-count/sync/status/{task_id}：查詢任務狀態
+- 任務狀態存於記憶體（_SYNC_TASKS），重啟後丟失；已有日期自動跳過，可重跑
+- 最大查詢範圍限制 6 個月（MAX_BACKFILL_DAYS=183）
+- Pydantic model PeopleCountSyncBody 解析請求參數
+
+### cctv_sync.py
+- 新增 sync_date_range：回填 [date_from, date_to] 範圍內所有缺失日期
+- on_progress 回調：每完成一個日期通知調用方更新進度
+- 已有資料的日期自動跳過（支援中斷後重跑）
+
+### db.py
+- 新增 get_existing_people_count_dates_range：查詢範圍內已有記錄的日期集合
+
+### cron 熱更新監聽（main.py）
+- 新增 _cron_watcher 後台線程：每 10 秒輪詢 DB 中 cron 配置
+- cron 變更時自動 reschedule（無需重啟）
+- 啟動時立即讀取一次初始排程並記錄日誌
+- 搭配 lifespan 正確清理：stop event + join(timeout=5)
+- cron job 由 hourly 更名為 anytime（語義更準確）
+- 啟動時同步移至後台線程執行，避免阻塞 FastAPI 啟動
+
+### 日誌優化
+- api_server.py 新增 _setup_logging：root logger 輸出到 stdout，格式化時間等級
+- 降低 apscheduler / urllib3 日誌噪音至 WARNING
+- 所有 CCTV 相關日誌統一加 [CCTV] 前綴
+
+### SQL
+- init_cctv_sync_config.sql：cctv.sync.cron.hourly 更名為 cctv.sync.cron.anytime
