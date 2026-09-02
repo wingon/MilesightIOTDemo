@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from app.api.deps import get_current_user, get_db
+from app.cctv_sync import CONFIG_ENABLED, sync_date
 from app.db import Database
+from app.security import AuthError
 
 router = APIRouter(prefix="/api/v1", tags=["people-count"])
 
@@ -117,3 +119,22 @@ def people_count_channel_stats(
         ip_address=ip_address,
         channel_name=channel_name,
     )
+
+
+@router.post("/people-count/sync")
+def sync_people_count(
+    request_date: date | None = Body(default=None, description="要同步的日期，缺省為今天"),
+    db: Database = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """手動觸發 CCTV 人流統計同步。
+
+    受參數設定 cctv.sync.enabled 控制；為 N 時拒絕執行。
+    """
+    config = db.get_config_by_key(CONFIG_ENABLED)
+    enabled = (config or {}).get("config_value") or "Y"
+    if enabled.strip().upper() != "Y":
+        raise AuthError("CCTV 人流同步已停用", code=400)
+
+    target_date = request_date or date.today()
+    return sync_date(db, db.settings, target_date)
