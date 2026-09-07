@@ -20,6 +20,7 @@ export default {
     no: '否',
     sessionExpired: '登入已失效，請重新登入',
     requestFailed: '請求失敗',
+    loginRequired: '請先登入後再進行編輯',
   },
   menu: {
     dashboard: '儀表板',

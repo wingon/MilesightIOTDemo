@@ -21,6 +21,7 @@ import {
 } from '@/utils/facadeSnapshot'
 import { getFacadeConfig, saveFacadeConfig, type FacadeConfig } from '../../api/facade'
 import { getFloorEnvironmentSummary } from '../../api/environment'
+import { TOKEN_STORAGE_KEY } from '../../api/http'
 import {
   INTERIOR_CELLS,
   cellToWorld,
@@ -1678,6 +1679,11 @@ async function resolveFloorId(floor3d: number): Promise<string | number | null> 
 /** 切换编辑模式：进入时抓取格子快照（供放弃修改回滚），退出时有改动则弹确认框 */
 async function toggleEditMode() {
   if (!editUnlocked.value) {
+    // 匿名访客（如第三方平台 iframe 大屏）仅允许只读浏览，禁止进入会写库的编辑模式
+    if (!localStorage.getItem(TOKEN_STORAGE_KEY)) {
+      message.warning(t('common.loginRequired'))
+      return
+    }
     editUnlocked.value = true
     editDirty.value = false
     undoableOps.value = 0
@@ -2786,6 +2792,9 @@ watch(showOutline, (v) => {
 // ---- 幕墙窗户配置变更触发重建 ----
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null
 
+/** 加载远端配置期间置位：抑制 watch 触发写接口（匿名大屏读取配置不应产生 POST） */
+let skipPersist = false
+
 function scheduleRebuild() {
   if (rebuildTimer) clearTimeout(rebuildTimer)
   rebuildTimer = setTimeout(() => {
@@ -2796,6 +2805,7 @@ function scheduleRebuild() {
 
 watch([windowOrientation, windowWidthRatio, windowHeightRatio], () => {
   scheduleRebuild()
+  if (skipPersist) return
   persistConfig()
 })
 
@@ -2813,6 +2823,7 @@ watch(rawMode, () => {
 
 watch(cellWindows, () => {
   scheduleRebuild()
+  if (skipPersist) return
   persistConfig()
 }, { deep: true })
 
@@ -2845,6 +2856,8 @@ function rebuildBuilding() {
 }
 
 async function loadConfig() {
+  // 读取远端配置仅供本地渲染，期间抑制 watch 回写，避免匿名大屏触发需要登录的 POST
+  skipPersist = true
   try {
     const { data } = await getFacadeConfig()
     if (data) {
@@ -2854,9 +2867,16 @@ async function loadConfig() {
       cellWindows.value = data.cellWindows || {}
     }
   } catch { /* 后端未启动时静默 */ }
+  // watch（pre 队列）在 nextTick 微任务才 flush：先等其执行完（期间 skipPersist 仍为 true），再恢复用户操作触发持久化
+  await nextTick()
+  skipPersist = false
+  scheduleRebuild()
 }
 
-async function persistConfig() {  try {
+async function persistConfig() {
+  // 匿名大屏（无登录凭证，如第三方平台 iframe）只读：配置变更不做服务端回写
+  if (!localStorage.getItem(TOKEN_STORAGE_KEY)) return
+  try {
     await saveFacadeConfig({
       orientation: windowOrientation.value,
       widthRatio: windowWidthRatio.value,

@@ -20,6 +20,7 @@ export default {
     no: 'No',
     sessionExpired: 'Session expired, please sign in again',
     requestFailed: 'Request failed',
+    loginRequired: 'Please sign in to edit',
   },
   menu: {
     dashboard: 'Dashboard',

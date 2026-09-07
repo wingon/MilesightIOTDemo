@@ -527,3 +527,19 @@ feat: 人流綜合聚合模組（視圖 / 樓層 / 資料三頁面）
 - 系統管理頁面 selectedRowKeys / editingId / checkedIds 型別同步
 - SQL 遷移檔全部更新為 building_ 前綴表名
 - init_sys_permission.sql 新增人流綜合聚合三頁面權限
+
+## 2026-09-07 14:00
+fix: 匿名大屏（iframe）登入跳轉與寫請求問題
+
+### http.ts 401 攔截器
+- 匿名大屏（無 token 且路徑為 /building-viewer）收到 401 時靜默忽略，不彈錯誤也不跳轉登入頁
+- 原因：第三方平台嵌入 iframe 大屏時，寫請求被後端拒絕屬預期行為
+
+### BuildingFacade3D.vue
+- 匿名訪客（無 TOKEN_STORAGE_KEY）點擊編輯時提示「請先登入」，禁止進入會寫庫的編輯模式
+- 新增 skipPersist 標記：載入遠端配置期間抑制 watch 觸發的 POST，避免匿名大屏產生需要認證的寫請求
+- loadConfig() 改為 async：await nextTick() 後再恢復 skipPersist，確保 watch flush 完成
+- persistConfig() 開頭檢查 token：無 token 時直接 return，不執行服務端回寫
+
+### i18n
+- en.ts + zh-TW.ts 新增 common.loginRequired（Please sign in to edit / 請先登入後再進行編輯）

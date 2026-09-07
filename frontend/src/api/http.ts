@@ -27,8 +27,16 @@ api.interceptors.response.use(
     const status: number | undefined = error.response?.status
     const detail: string | undefined = error.response?.data?.detail
     if (status === 401) {
-      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      const hadToken = !!localStorage.getItem(TOKEN_STORAGE_KEY)
       const current = router.currentRoute.value
+      const pagePath = typeof location !== 'undefined' ? location.pathname : current.path
+      // 匿名免登大屏（如第三方平台 iframe）：写请求被后端拒绝属预期，静默忽略，不弹错也不跳登录
+      const anonymousScreen = !hadToken && pagePath !== '/login' && pagePath.startsWith('/building-viewer')
+      if (anonymousScreen) {
+        console.warn('[api] 匿名大屏写请求被拒绝（未登录），已忽略:', error.config?.url)
+        return Promise.reject(error)
+      }
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
       if (current.path !== '/login') {
         message.error(detail || i18n.global.t('common.sessionExpired'))
         router.push({ path: '/login', query: { redirect: current.fullPath } })
