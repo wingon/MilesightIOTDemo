@@ -26,7 +26,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const rows = ref<SysRoleRow[]>([])
 const total = ref(0)
-const selectedRowKeys = ref<number[]>([])
+const selectedRowKeys = ref<(string | number)[]>([])
 
 const columns: TableColumnsType<SysRoleRow> = [
   { title: t('system.roleId'), dataIndex: 'id', width: 100 },
@@ -118,13 +118,13 @@ function onReset() {
 }
 
 function onRowSelectionChange(keys: (string | number)[]) {
-  selectedRowKeys.value = keys.map(Number)
+  selectedRowKeys.value = keys
 }
 
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({ role_name: '', role_key: '', sort: 0, status: 1, data_scope: '1', remark: '' })
 
 // 菜单树
@@ -132,8 +132,8 @@ const menuTree = ref<MenuNode[]>([])
 const menuExpand = ref(false)
 const menuNodeAll = ref(false)
 const menuCheckStrictly = ref(true)
-const checkedMenuIds = ref<number[]>([])
-const halfCheckedMenuIds = ref<number[]>([])
+const checkedMenuIds = ref<(string | number)[]>([])
+const halfCheckedMenuIds = ref<(string | number)[]>([])
 const menuTreeRef = ref<{ getCheckedKeys: () => (string | number)[]; getHalfCheckedKeys: () => (string | number)[] }>()
 
 async function initMenuTree() {
@@ -159,17 +159,17 @@ function handleMenuCheckChange(
   key: number | string,
   info: { checked: boolean; node: { checkedKeys?: (string | number)[]; halfCheckedKeys?: (string | number)[] } },
 ) {
-  checkedMenuIds.value = (info.node.checkedKeys || []) as number[]
-  halfCheckedMenuIds.value = (info.node.halfCheckedKeys || []) as number[]
+  checkedMenuIds.value = info.node.checkedKeys || []
+  halfCheckedMenuIds.value = info.node.halfCheckedKeys || []
 }
 
-function getMenuAllCheckedKeys(): number[] {
+function getMenuAllCheckedKeys(): (string | number)[] {
   const checked = menuTreeRef.value?.getCheckedKeys?.() || []
   const half = menuTreeRef.value?.getHalfCheckedKeys?.() || []
-  return [...checked, ...half].map(Number)
+  return [...checked, ...half]
 }
 
-function setMenuChecked(ids: number[]) {
+function setMenuChecked(ids: (string | number)[]) {
   nextTick(() => {
     const el = menuTreeRef.value
     if (!el) return
@@ -279,11 +279,11 @@ async function onStatusChange(row: SysRoleRow, checked: boolean) {
 // ---------- 数据权限 ----------
 const dataScopeOpen = ref(false)
 const dataScopeLoading = ref(false)
-const dataScopeRoleId = ref<number | null>(null)
+const dataScopeRoleId = ref<string | number | null>(null)
 const dataScopeForm = reactive({ data_scope: '1' })
 const deptTree = ref<SysDeptRow[]>([])
-const checkedDeptIds = ref<number[]>([])
-const halfCheckedDeptIds = ref<number[]>([])
+const checkedDeptIds = ref<(string | number)[]>([])
+const halfCheckedDeptIds = ref<(string | number)[]>([])
 const deptTreeRef = ref<{ getCheckedKeys: () => (string | number)[]; getHalfCheckedKeys: () => (string | number)[] }>()
 const deptExpand = ref(true)
 const deptNodeAll = ref(false)
@@ -314,14 +314,14 @@ function handleDeptCheckChange(
   key: number | string,
   info: { checked: boolean; node: { checkedKeys?: (string | number)[]; halfCheckedKeys?: (string | number)[] } },
 ) {
-  checkedDeptIds.value = (info.node.checkedKeys || []) as number[]
-  halfCheckedDeptIds.value = (info.node.halfCheckedKeys || []) as number[]
+  checkedDeptIds.value = info.node.checkedKeys || []
+  halfCheckedDeptIds.value = info.node.halfCheckedKeys || []
 }
 
-function getDeptAllCheckedKeys(): number[] {
+function getDeptAllCheckedKeys(): (string | number)[] {
   const checked = deptTreeRef.value?.getCheckedKeys?.() || []
   const half = deptTreeRef.value?.getHalfCheckedKeys?.() || []
-  return [...checked, ...half].map(Number)
+  return [...checked, ...half]
 }
 
 async function submitDataScope() {
@@ -365,8 +365,8 @@ function onDeptNodeAll(value: boolean) {
 function checkAllMenu(checked: boolean) {
   const els = document.querySelectorAll('.menu-perm-tree')
   // antdv: 用 group 方式全选需要访问 tree 实例；这里用递归收集叶子
-  const collect = (nodes: MenuNode[]): number[] => {
-    const out: number[] = []
+  const collect = (nodes: MenuNode[]): (string | number)[] => {
+    const out: (string | number)[] = []
     for (const n of nodes) {
       if (n.children?.length) out.push(...collect(n.children))
       else out.push(n.id)
@@ -381,8 +381,8 @@ function checkAllMenu(checked: boolean) {
 }
 
 function checkAllDept(checked: boolean) {
-  const collect = (nodes: SysDeptRow[]): number[] => {
-    const out: number[] = []
+  const collect = (nodes: SysDeptRow[]): (string | number)[] => {
+    const out: (string | number)[] = []
     for (const n of nodes) {
       if (n.children?.length) out.push(...collect(n.children))
       else out.push(n.dept_id)

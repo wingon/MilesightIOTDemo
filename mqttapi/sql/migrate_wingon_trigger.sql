@@ -3,13 +3,13 @@
 -- 整文件作为一条语句执行（含 BEGIN...END 内部分号）。
 -- ============================================================================
 
-CREATE TRIGGER `trg_room_cell_one_room` BEFORE INSERT ON `room_cell`
+CREATE TRIGGER `trg_room_cell_one_room` BEFORE INSERT ON `building_room_cell`
 FOR EACH ROW
 BEGIN
   IF NEW.`is_deleted` = 0 AND EXISTS (
     SELECT 1
-    FROM `room_cell` rc
-    JOIN `room` r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+    FROM `building_room_cell` rc
+    JOIN `building_room` r ON r.id = rc.room_ref_id AND r.is_deleted = 0
     WHERE rc.cell_id = NEW.cell_id
       AND rc.floor_id = NEW.floor_id
       AND rc.is_deleted = 0

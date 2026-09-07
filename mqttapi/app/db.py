@@ -11,6 +11,8 @@ from pymysql.cursors import DictCursor
 
 from .config import Settings
 from .decoder import JSON_SECTION_KEYS
+from . import people_count_aggregate
+from .snowflake import next_id
 
 logger = logging.getLogger(__name__)
 
@@ -570,11 +572,11 @@ class Database:
 
         - Devices without any reading have latest = null (LEFT JOIN)
         - level is parsed from floor (B2/F->1, B1/F->2, G/F->3, 4/F->7 ...)
-        - cell: the cell the device is bound to (device_cell->building_cell); null = unbound (incl. lobby devices)
-        - cell_lost: the device still has a binding in device_cell but the target cell is soft-deleted/missing
+        - cell: the cell the device is bound to (building_device_cell->building_cell); null = unbound (incl. lobby devices)
+        - cell_lost: the device still has a binding in building_device_cell but the target cell is soft-deleted/missing
           (leftover binding). Then cell is always null (the cell cannot be located), and cell_lost=True
           lets the UI prompt and trigger cleanup.
-        - room_id: the room the cell belongs to (reverse lookup via room_cell, room_id business key); null = lobby/corridor cell
+        - room_id: the room the cell belongs to (reverse lookup via building_room_cell, room_id business key); null = lobby/corridor cell
         """
         sql = """
             SELECT d.sn, d.name, d.deviceName, d.model, d.floor, d.location, d.macAddress,
@@ -597,14 +599,14 @@ class Database:
             LEFT JOIN (
                 SELECT dc.sn, dc.cell_id, dc.floor_id,
                        ROW_NUMBER() OVER (PARTITION BY dc.sn ORDER BY dc.id DESC) AS rn
-                FROM device_cell dc
+                FROM building_device_cell dc
             ) dc ON dc.sn = d.sn AND dc.rn = 1
             LEFT JOIN building_cell c
                    ON c.id = dc.cell_id AND c.floor_id = dc.floor_id AND c.is_deleted = 0
             LEFT JOIN (
                 SELECT rc.cell_id, rc.floor_id, MIN(r.room_id) AS room_id
-                FROM room_cell rc
-                JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+                FROM building_room_cell rc
+                JOIN building_room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
                 WHERE rc.is_deleted = 0
                 GROUP BY rc.cell_id, rc.floor_id
             ) rrc ON rrc.cell_id = c.id AND rrc.floor_id = c.floor_id
@@ -633,7 +635,7 @@ class Database:
                 item.pop("cell_x", None)
                 item.pop("cell_z", None)
                 item["cell"] = None
-            # cell_lost: the device still has a binding in device_cell but the target cell is soft-deleted/missing (leftover binding)
+            # cell_lost: the device still has a binding in building_device_cell but the target cell is soft-deleted/missing (leftover binding)
             item["cell_lost"] = cell_lost
             item["room_id"] = item.pop("room_id", None)
             result.append(item)
@@ -693,10 +695,10 @@ class Database:
             return "floor_mismatch"
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM device_cell WHERE sn = %s", (sn,))
+                cur.execute("DELETE FROM building_device_cell WHERE sn = %s", (sn,))
                 cur.execute(
-                    "INSERT INTO device_cell (sn, cell_id, floor_id) VALUES (%s, %s, %s)",
-                    (sn, cell["id"], cell["floor_id"]),
+                    "INSERT INTO building_device_cell (id, sn, cell_id, floor_id) VALUES (%s, %s, %s, %s)",
+                    (next_id(), sn, cell["id"], cell["floor_id"]),
                 )
         return "ok"
 
@@ -713,7 +715,7 @@ class Database:
                 row = cur.fetchone()
                 device_floor = (row or {}).get("floor") if row else None
                 cur.execute(
-                    "SELECT level FROM floor WHERE id = %s AND is_deleted = 0",
+                    "SELECT level FROM building_floor WHERE id = %s AND is_deleted = 0",
                     (cell_floor_id,),
                 )
                 frow = cur.fetchone()
@@ -730,7 +732,7 @@ class Database:
         """Remove all cell bindings of a device. Returns True when a binding was removed."""
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM device_cell WHERE sn = %s", (sn,))
+                cur.execute("DELETE FROM building_device_cell WHERE sn = %s", (sn,))
                 return cur.rowcount > 0
 
     def list_environment_monitoring(
@@ -1048,6 +1050,122 @@ class Database:
                 rows = cur.fetchall() or []
         return {r["date"] for r in rows}
 
+    def people_count_overview(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour_from: int | None = None,
+        hour_to: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+        exclude_zero: bool = False,
+    ) -> dict[str, Any]:
+        """載入 people_count_hourly 並執行聚合，供視圖/樓層/資料頁使用。"""
+        rows = self._load_people_count_rows(
+            date_from=date_from,
+            date_to=date_to,
+            hour_from=hour_from,
+            hour_to=hour_to,
+            ip_address=ip_address,
+            channel_name=channel_name,
+        )
+        return people_count_aggregate.aggregate(
+            rows,
+            date_from=date_from,
+            date_to=date_to,
+            hour_from=hour_from,
+            hour_to=hour_to,
+            ip_address=ip_address,
+            channel_name=channel_name,
+            exclude_zero=exclude_zero,
+        )
+
+    def _load_people_count_rows(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        hour_from: int | None = None,
+        hour_to: int | None = None,
+        ip_address: str | None = None,
+        channel_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """載入明細行（連續日期時間範圍 / 通道/IP 過濾），供聚合使用。
+
+        日期時間範圍語義：
+          - 同日：date=date_from=date_to 且 hour ∈ [hour_from, hour_to]
+          - 跨多日：首日 hour>=hour_from、末日 hour<=hour_to、中間日全天
+        """
+        where = ["1=1"]
+        params: dict[str, Any] = {}
+        if date_from is not None and date_to is not None:
+            if date_from == date_to:
+                params["dt_date"] = date_from
+                if hour_from is not None or hour_to is not None:
+                    h_from = hour_from if hour_from is not None else 0
+                    h_to = hour_to if hour_to is not None else 23
+                    params["h_from"] = h_from
+                    params["h_to"] = h_to
+                    where.append("(date = %(dt_date)s AND hour >= %(h_from)s AND hour <= %(h_to)s)")
+                else:
+                    where.append("date = %(dt_date)s")
+            else:
+                params["d_from"] = date_from
+                params["d_to"] = date_to
+                parts = ["(date > %(d_from)s AND date < %(d_to)s)"]
+                if hour_from is not None:
+                    params["d0"] = date_from
+                    params["h0"] = hour_from
+                    parts.append("(date = %(d0)s AND hour >= %(h0)s)")
+                else:
+                    params["d0b"] = date_from
+                    parts.append("(date = %(d0b)s)")
+                if hour_to is not None:
+                    params["d1"] = date_to
+                    params["h1"] = hour_to
+                    parts.append("(date = %(d1)s AND hour <= %(h1)s)")
+                else:
+                    params["d1b"] = date_to
+                    parts.append("(date = %(d1b)s)")
+                where.append("(" + " OR ".join(parts) + ")")
+        elif date_from is not None:
+            params["date_from"] = date_from
+            where.append("date >= %(date_from)s")
+        elif date_to is not None:
+            params["date_to"] = date_to
+            where.append("date <= %(date_to)s")
+
+        if ip_address:
+            where.append("ip_address = %(ip_address)s")
+            params["ip_address"] = ip_address
+        if channel_name:
+            where.append("channel_name = %(channel_name)s")
+            params["channel_name"] = channel_name
+        clause = " AND ".join(where)
+        sql = f"""
+            SELECT date, hour, channel_name, ip_address,
+                   enter_count, exit_count
+            FROM people_count_hourly
+            WHERE {clause}
+            ORDER BY date, hour, channel_name
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall() or []
+        return [
+            {
+                "date": r["date"],
+                "hour": int(r["hour"]),
+                "channel_name": r["channel_name"],
+                "ip_address": r["ip_address"],
+                "enter": int(r["enter_count"] or 0),
+                "exit": int(r["exit_count"] or 0),
+            }
+            for r in rows
+        ]
+
     def floor_environment_summary(self) -> list[dict[str, Any]]:
         """Per-floor aggregation: take each device's latest reading; floor temp/humidity is the median of that floor's devices."""
         sql = """
@@ -1090,7 +1208,7 @@ class Database:
         return result
 
     # ------------------------------------------------------------------
-    # 3D building structure (WingOnIOT.building / floor / building_cell / room / room_cell)
+    # 3D building structure (WingOnIOT.building / building_floor / building_cell / building_room / building_room_cell)
     # Cell shapes are driven by the building_cell table (replacing the old building_cell_shape)
     # ------------------------------------------------------------------
 
@@ -1131,7 +1249,7 @@ class Database:
         clause = " AND ".join(where)
         sql = f"""
             SELECT f.id, f.building_id, f.row_amount, f.column_amount, f.level, f.floor_name
-            FROM floor f
+            FROM building_floor f
             WHERE {clause}
             ORDER BY f.level ASC
         """
@@ -1178,7 +1296,7 @@ class Database:
                 c.render_height,
                 c.is_active
             FROM building_cell c
-            JOIN floor f ON f.id = c.floor_id
+            JOIN building_floor f ON f.id = c.floor_id
             JOIN building b ON b.id = c.building_id
             WHERE {clause}
             ORDER BY f.level ASC, c.row_no ASC, c.col_no ASC
@@ -1218,7 +1336,7 @@ class Database:
                    c.x, c.y, c.z, c.length, c.width, c.cell_height, c.rotation_xyz,
                    c.is_active, c.shape, c.color, c.render_height
             FROM building_cell c
-            JOIN floor f ON f.id = c.floor_id AND f.is_deleted = 0
+            JOIN building_floor f ON f.id = c.floor_id AND f.is_deleted = 0
             WHERE c.floor_id = %(floor_id)s AND c.is_deleted = 0
             ORDER BY c.row_no ASC, c.col_no ASC
         """
@@ -1229,24 +1347,24 @@ class Database:
         return [self._parse_json_fields(dict(row), ()) for row in rows]
 
     def list_floor_rooms(self, floor_id: int) -> list[dict[str, Any]]:
-        """Rooms of a floor plus their occupied cells (via room_cell).
+        """Rooms of a floor plus their occupied cells (via building_room_cell).
 
         Soft-delete aware: skips deleted floor/rooms/cells; returns each room
         with its cell list (row/col) ready for the frontend room layout.
         """
         rooms_sql = """
             SELECT r.id, r.room_id, r.building_id, r.floor_id, r.room_number, r.room_type, r.area
-            FROM room r
-            JOIN floor f ON f.id = r.floor_id AND f.is_deleted = 0
+            FROM building_room r
+            JOIN building_floor f ON f.id = r.floor_id AND f.is_deleted = 0
             WHERE r.floor_id = %(floor_id)s AND r.is_deleted = 0
             ORDER BY r.id ASC
         """
         relations_sql = """
             SELECT rc.room_ref_id, c.row_no, c.col_no
-            FROM room_cell rc
-            JOIN room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
+            FROM building_room_cell rc
+            JOIN building_room r ON r.id = rc.room_ref_id AND r.is_deleted = 0
             JOIN building_cell c ON c.id = rc.cell_id AND c.is_deleted = 0
-            JOIN floor f ON f.id = rc.floor_id AND f.is_deleted = 0
+            JOIN building_floor f ON f.id = rc.floor_id AND f.is_deleted = 0
             WHERE rc.floor_id = %(floor_id)s AND rc.is_deleted = 0
             ORDER BY rc.room_ref_id ASC, c.row_no ASC, c.col_no ASC
         """
@@ -1269,7 +1387,7 @@ class Database:
         return rooms
 
     def delete_room(self, room_id: str) -> bool:
-        """Physically delete a room: room_cell is cleared by foreign-key cascade and its devices revert to the lobby.
+        """Physically delete a room: building_room_cell is cleared by foreign-key cascade and its devices revert to the lobby.
 
         A room is just a cell set and can be rebuilt, so no soft-delete is used (no leftover dirty rows).
         Non-recoverable; confirm before deleting. Returns whether the room was found.
@@ -1277,13 +1395,13 @@ class Database:
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id FROM room WHERE room_id = %s",
+                    "SELECT id FROM building_room WHERE room_id = %s",
                     (room_id,),
                 )
                 row = cur.fetchone()
                 if row is None:
                     return False
-                cur.execute("DELETE FROM room WHERE id = %s", (int(row["id"]),))
+                cur.execute("DELETE FROM building_room WHERE id = %s", (int(row["id"]),))
         return True
 
     def assign_room_cell(self, room_id: str, floor_id: int, row_no: int, col_no: int) -> str:
@@ -1297,7 +1415,7 @@ class Database:
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id FROM room WHERE room_id = %s AND is_deleted = 0",
+                    "SELECT id FROM building_room WHERE room_id = %s AND is_deleted = 0",
                     (room_id,),
                 )
                 room = cur.fetchone()
@@ -1314,23 +1432,23 @@ class Database:
                     return "invalid"
                 cid = int(cell["id"])
                 cur.execute(
-                    """SELECT id FROM room_cell
+                    """SELECT id FROM building_room_cell
                        WHERE room_ref_id = %s AND floor_id = %s AND cell_id = %s AND is_deleted = 0""",
                     (rid, floor_id, cid),
                 )
                 existing = cur.fetchone()
                 if existing is not None:
-                    cur.execute("DELETE FROM room_cell WHERE id = %s", (int(existing["id"]),))
+                    cur.execute("DELETE FROM building_room_cell WHERE id = %s", (int(existing["id"]),))
                     return "removed"
                 # Release other valid rooms' occupancy of this cell (physical delete, avoids one cell in multiple rooms)
                 cur.execute(
-                    """DELETE FROM room_cell
+                    """DELETE FROM building_room_cell
                        WHERE floor_id = %s AND cell_id = %s AND room_ref_id <> %s AND is_deleted = 0""",
                     (floor_id, cid, rid),
                 )
                 cur.execute(
-                    "INSERT INTO room_cell (room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s)",
-                    (rid, floor_id, cid),
+                    "INSERT INTO building_room_cell (id, room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s, %s)",
+                    (next_id(), rid, floor_id, cid),
                 )
         return "added"
 
@@ -1338,15 +1456,15 @@ class Database:
         """Batch save the floor room↔cell layout (atomic replacement).
 
         layout: { room_id: [(row_no, col_no), ...], ... }
-        1. Physically delete all room_cell rows of this floor
-        2. Batch insert the new room_cell rows
+        1. Physically delete all building_room_cell rows of this floor
+        2. Batch insert the new building_room_cell rows
         3. Return the number of inserted rows
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 # Get the id mapping of all valid rooms on this floor
                 cur.execute(
-                    "SELECT id, room_id FROM room WHERE floor_id = %s AND is_deleted = 0",
+                    "SELECT id, room_id FROM building_room WHERE floor_id = %s AND is_deleted = 0",
                     (floor_id,),
                 )
                 room_map = {r["room_id"]: int(r["id"]) for r in cur.fetchall()}
@@ -1358,11 +1476,11 @@ class Database:
                 )
                 cell_map = {(int(c["row_no"]), int(c["col_no"])): int(c["id"]) for c in cur.fetchall()}
 
-                # Physically delete all room_cell rows of this floor
-                cur.execute("DELETE FROM room_cell WHERE floor_id = %s", (floor_id,))
+                # Physically delete all building_room_cell rows of this floor
+                cur.execute("DELETE FROM building_room_cell WHERE floor_id = %s", (floor_id,))
                 deleted = cur.rowcount
 
-                # Batch insert the new room_cell rows
+                # Batch insert the new building_room_cell rows
                 inserted = 0
                 for room_id, cells in layout.items():
                     rid = room_map.get(room_id)
@@ -1373,8 +1491,8 @@ class Database:
                         if cid is None:
                             continue
                         cur.execute(
-                            "INSERT INTO room_cell (room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s)",
-                            (rid, floor_id, cid),
+                            "INSERT INTO building_room_cell (id, room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s, %s)",
+                            (next_id(), rid, floor_id, cid),
                         )
                         inserted += 1
 
@@ -1500,11 +1618,11 @@ class Database:
                             "is_active": int(s.get("is_active", 1)),
                         })
                         cell_ids.append(int(s["id"]))
-                    # Cascading cleanup of related bindings (R1/R2): soft-delete room_cell, physically delete device_cell, and record undo for recovery
+                    # Cascading cleanup of related bindings (R1/R2): soft-delete building_room_cell, physically delete building_device_cell, and record undo for recovery
                     if cell_ids:
                         placeholders = ",".join(["%s"] * len(cell_ids))
                         cur.execute(
-                            f"SELECT id, room_ref_id, floor_id, cell_id FROM room_cell WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
+                            f"SELECT id, room_ref_id, floor_id, cell_id FROM building_room_cell WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
                             cell_ids,
                         )
                         for rc in cur.fetchall() or []:
@@ -1516,11 +1634,11 @@ class Database:
                                 "cell_id": int(rc["cell_id"]),
                             })
                         cur.execute(
-                            f"UPDATE room_cell SET is_deleted = 1 WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
+                            f"UPDATE building_room_cell SET is_deleted = 1 WHERE cell_id IN ({placeholders}) AND is_deleted = 0",
                             cell_ids,
                         )
                         cur.execute(
-                            f"SELECT sn, cell_id, floor_id FROM device_cell WHERE cell_id IN ({placeholders})",
+                            f"SELECT sn, cell_id, floor_id FROM building_device_cell WHERE cell_id IN ({placeholders})",
                             cell_ids,
                         )
                         for dc in cur.fetchall() or []:
@@ -1531,7 +1649,7 @@ class Database:
                                 "floor_id": int(dc["floor_id"]),
                             })
                         cur.execute(
-                            f"DELETE FROM device_cell WHERE cell_id IN ({placeholders})",
+                            f"DELETE FROM building_device_cell WHERE cell_id IN ({placeholders})",
                             cell_ids,
                         )
                     cur.execute(f"UPDATE building_cell SET is_deleted = 1 WHERE {' AND '.join(where)}", params)
@@ -1544,7 +1662,7 @@ class Database:
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, level FROM floor WHERE building_id = %(bid)s AND is_deleted = 0 ORDER BY level",
+                    "SELECT id, level FROM building_floor WHERE building_id = %(bid)s AND is_deleted = 0 ORDER BY level",
                     {"bid": building_id},
                 )
                 floors = cur.fetchall() or []
@@ -1635,19 +1753,20 @@ class Database:
                         else:
                             x_val = round((c - 6.5) * 1.15, 3)
                             y_val = round((r - 4.5) * 1.15, 3)
+                            new_cell_id = next_id()
                             cur.execute(
                                 """INSERT INTO building_cell
-                                   (building_id, floor_id, row_no, col_no, x, y, z,
+                                   (id, building_id, floor_id, row_no, col_no, x, y, z,
                                     length, width, cell_height, rotation_xyz,
                                     is_active, shape, color, render_height, is_deleted)
-                                   VALUES (%(bid)s, %(fid)s, %(row)s, %(col)s,
+                                   VALUES (%(id)s, %(bid)s, %(fid)s, %(row)s, %(col)s,
                                            %(x)s, %(y)s, %(z)s,
                                            1.150, 1.150, 0.000, NULL,
                                            1, %(shape)s, NULL, NULL, 0)""",
-                                {"bid": building_id, "fid": fid, "row": r, "col": c,
+                                {"id": new_cell_id, "bid": building_id, "fid": fid, "row": r, "col": c,
                                  "x": x_val, "y": y_val, "z": z_val, "shape": add_shape},
                             )
-                            undo_ops.append({"action": "delete_new", "id": cur.lastrowid})
+                            undo_ops.append({"action": "delete_new", "id": new_cell_id})
                             affected += 1
 
         _push_undo(undo_ops, affected)
@@ -1697,7 +1816,7 @@ class Database:
                     elif op["action"] == "restore_room_cell":
                         # Restore room↔cell bindings soft-deleted by the cascade; skip if the cell was reassigned to the same room
                         cur.execute(
-                            """SELECT id FROM room_cell
+                            """SELECT id FROM building_room_cell
                                WHERE room_ref_id = %(room_ref_id)s AND floor_id = %(floor_id)s
                                  AND cell_id = %(cell_id)s AND is_deleted = 0""",
                             {"room_ref_id": op["room_ref_id"],
@@ -1706,20 +1825,20 @@ class Database:
                         )
                         if cur.fetchone() is None:
                             cur.execute(
-                                "UPDATE room_cell SET is_deleted = 0 WHERE id = %(id)s",
+                                "UPDATE building_room_cell SET is_deleted = 0 WHERE id = %(id)s",
                                 {"id": op["id"]},
                             )
                             affected += cur.rowcount
                     elif op["action"] == "restore_device_cell":
                         # Restore device↔cell bindings physically deleted by the cascade; skip if the device was rebound
                         cur.execute(
-                            "SELECT id FROM device_cell WHERE sn = %s",
+                            "SELECT id FROM building_device_cell WHERE sn = %s",
                             (op["sn"],),
                         )
                         if cur.fetchone() is None:
                             cur.execute(
-                                "INSERT INTO device_cell (sn, cell_id, floor_id) VALUES (%s, %s, %s)",
-                                (op["sn"], op["cell_id"], op["floor_id"]),
+                                "INSERT INTO building_device_cell (id, sn, cell_id, floor_id) VALUES (%s, %s, %s, %s)",
+                                (next_id(), op["sn"], op["cell_id"], op["floor_id"]),
                             )
                             affected += 1
 
@@ -1810,11 +1929,12 @@ class Database:
                     )
                     return int(row["id"])
                 else:
+                    new_id = next_id()
                     cur.execute(
-                        "INSERT INTO building_facade_config (config_json) VALUES (%s)",
-                        (payload,),
+                        "INSERT INTO building_facade_config (id, config_json) VALUES (%s, %s)",
+                        (new_id, payload),
                     )
-                    return cur.lastrowid
+                    return new_id
 
     # ------------------------------------------------------------------
     # Permission module (sys_user / sys_role / sys_menu / sys_oper_log)
@@ -2004,14 +2124,16 @@ class Database:
         return [self._parse_json_fields(dict(r), ()) for r in rows], total
 
     def create_sys_user(self, data: dict[str, Any]) -> int:
-        """Create a user, returning the new user ID."""
+        """Create a user, returning the new user ID (snowflake)."""
+        user_id = next_id()
         sql = """
-            INSERT INTO sys_user (username, password, nickname, email, phone, dept_id, status, remark)
-            VALUES (%(username)s, %(password)s, %(nickname)s, %(email)s, %(phone)s, %(dept_id)s, %(status)s, %(remark)s)
+            INSERT INTO sys_user (id, username, password, nickname, email, phone, dept_id, status, remark)
+            VALUES (%(id)s, %(username)s, %(password)s, %(nickname)s, %(email)s, %(phone)s, %(dept_id)s, %(status)s, %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "id": user_id,
                     "username": data["username"],
                     "password": data["password"],
                     "nickname": data.get("nickname"),
@@ -2021,7 +2143,7 @@ class Database:
                     "status": int(data.get("status", 1)),
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return user_id
 
     def update_sys_user(self, user_id: int, data: dict[str, Any]) -> bool:
         """Update user profile (without password); returns whether a row was matched."""
@@ -2162,13 +2284,15 @@ class Database:
         return dict(row) if row else None
 
     def create_sys_role(self, data: dict[str, Any]) -> int:
+        role_id = next_id()
         sql = """
-            INSERT INTO sys_role (role_name, role_key, sort, status, data_scope, remark)
-            VALUES (%(role_name)s, %(role_key)s, %(sort)s, %(status)s, %(data_scope)s, %(remark)s)
+            INSERT INTO sys_role (id, role_name, role_key, sort, status, data_scope, remark)
+            VALUES (%(id)s, %(role_name)s, %(role_key)s, %(sort)s, %(status)s, %(data_scope)s, %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "id": role_id,
                     "role_name": data["role_name"],
                     "role_key": data["role_key"],
                     "sort": int(data.get("sort", 0)),
@@ -2176,7 +2300,7 @@ class Database:
                     "data_scope": str(data.get("data_scope", "1")),
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return role_id
 
     def update_sys_role(self, role_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -2358,15 +2482,17 @@ class Database:
                 return int((cur.fetchone() or {}).get("cnt") or 0)
 
     def create_sys_menu(self, data: dict[str, Any]) -> int:
+        menu_id = next_id()
         sql = """
-            INSERT INTO sys_menu (parent_id, menu_name, i18n_key, path, component,
+            INSERT INTO sys_menu (id, parent_id, menu_name, i18n_key, path, component,
                                   menu_type, permission, icon, sort, visible, status, remark)
-            VALUES (%(parent_id)s, %(menu_name)s, %(i18n_key)s, %(path)s, %(component)s,
+            VALUES (%(id)s, %(parent_id)s, %(menu_name)s, %(i18n_key)s, %(path)s, %(component)s,
                     %(menu_type)s, %(permission)s, %(icon)s, %(sort)s, %(visible)s, %(status)s, %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "id": menu_id,
                     "parent_id": int(data.get("parent_id", 0)),
                     "menu_name": data["menu_name"],
                     "i18n_key": data.get("i18n_key"),
@@ -2380,7 +2506,7 @@ class Database:
                     "status": int(data.get("status", 1)),
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return menu_id
 
     def update_sys_menu(self, menu_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -2410,16 +2536,17 @@ class Database:
 
     def insert_oper_log(self, entry: dict[str, Any]) -> None:
         sql = """
-            INSERT INTO sys_oper_log (title, business_type, method, request_method,
+            INSERT INTO sys_oper_log (id, title, business_type, method, request_method,
                                       oper_url, oper_ip, oper_name, oper_param,
                                       json_result, status, error_msg)
-            VALUES (%(title)s, %(business_type)s, %(method)s, %(request_method)s,
+            VALUES (%(id)s, %(title)s, %(business_type)s, %(method)s, %(request_method)s,
                     %(oper_url)s, %(oper_ip)s, %(oper_name)s, %(oper_param)s,
                     %(json_result)s, %(status)s, %(error_msg)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "id": next_id(),
                     "title": entry.get("title") or "",
                     "business_type": int(entry.get("business_type", 0)),
                     "method": entry.get("method") or "",
@@ -2551,15 +2678,17 @@ class Database:
 
     def create_dept(self, data: dict[str, Any]) -> int:
         parent_id = int(data.get("parent_id") or 0)
+        dept_id = next_id()
         sql = """
-            INSERT INTO sys_dept (parent_id, ancestors, dept_name, order_num, leader,
+            INSERT INTO sys_dept (dept_id, parent_id, ancestors, dept_name, order_num, leader,
                                   phone, email, status, create_by, create_time)
-            VALUES (%(parent_id)s, %(ancestors)s, %(dept_name)s, %(order_num)s,
+            VALUES (%(dept_id)s, %(parent_id)s, %(ancestors)s, %(dept_name)s, %(order_num)s,
                     %(leader)s, %(phone)s, %(email)s, %(status)s, %(create_by)s, NOW())
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "dept_id": dept_id,
                     "parent_id": parent_id,
                     "ancestors": self._dept_ancestors(parent_id),
                     "dept_name": data.get("dept_name"),
@@ -2570,7 +2699,7 @@ class Database:
                     "status": data.get("status", "0"),
                     "create_by": data.get("create_by") or "",
                 })
-                return int(cur.lastrowid)
+                return dept_id
 
     def update_dept(self, dept_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -2677,13 +2806,15 @@ class Database:
         return dict(row) if row else None
 
     def create_post(self, data: dict[str, Any]) -> int:
+        post_id = next_id()
         sql = """
-            INSERT INTO sys_post (post_code, post_name, post_sort, status, create_by, create_time, remark)
-            VALUES (%(post_code)s, %(post_name)s, %(post_sort)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
+            INSERT INTO sys_post (post_id, post_code, post_name, post_sort, status, create_by, create_time, remark)
+            VALUES (%(post_id)s, %(post_code)s, %(post_name)s, %(post_sort)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "post_id": post_id,
                     "post_code": data["post_code"],
                     "post_name": data["post_name"],
                     "post_sort": int(data.get("post_sort") or 0),
@@ -2691,7 +2822,7 @@ class Database:
                     "create_by": data.get("create_by") or "",
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return post_id
 
     def update_post(self, post_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -2757,12 +2888,13 @@ class Database:
         msg: str = "",
     ) -> None:
         sql = """
-            INSERT INTO sys_login_log (user_name, ipaddr, login_location, browser, os, status, msg, login_time)
-            VALUES (%(user_name)s, %(ipaddr)s, %(login_location)s, %(browser)s, %(os)s, %(status)s, %(msg)s, NOW())
+            INSERT INTO sys_login_log (info_id, user_name, ipaddr, login_location, browser, os, status, msg, login_time)
+            VALUES (%(info_id)s, %(user_name)s, %(ipaddr)s, %(login_location)s, %(browser)s, %(os)s, %(status)s, %(msg)s, NOW())
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "info_id": next_id(),
                     "user_name": user_name,
                     "ipaddr": ipaddr,
                     "login_location": login_location,
@@ -2886,13 +3018,15 @@ class Database:
         return dict(row) if row else None
 
     def create_config(self, data: dict[str, Any]) -> int:
+        config_id = next_id()
         sql = """
-            INSERT INTO sys_config (config_name, config_key, config_value, config_type, create_by, create_time, remark)
-            VALUES (%(config_name)s, %(config_key)s, %(config_value)s, %(config_type)s, %(create_by)s, NOW(), %(remark)s)
+            INSERT INTO sys_config (config_id, config_name, config_key, config_value, config_type, create_by, create_time, remark)
+            VALUES (%(config_id)s, %(config_name)s, %(config_key)s, %(config_value)s, %(config_type)s, %(create_by)s, NOW(), %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "config_id": config_id,
                     "config_name": data.get("config_name"),
                     "config_key": data.get("config_key"),
                     "config_value": data.get("config_value"),
@@ -2900,7 +3034,7 @@ class Database:
                     "create_by": data.get("create_by") or "",
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return config_id
 
     def update_config(self, config_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -2982,20 +3116,22 @@ class Database:
         return dict(row) if row else None
 
     def create_dict_type(self, data: dict[str, Any]) -> int:
+        dict_id = next_id()
         sql = """
-            INSERT INTO sys_dict_type (dict_name, dict_type, status, create_by, create_time, remark)
-            VALUES (%(dict_name)s, %(dict_type)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
+            INSERT INTO sys_dict_type (dict_id, dict_name, dict_type, status, create_by, create_time, remark)
+            VALUES (%(dict_id)s, %(dict_name)s, %(dict_type)s, %(status)s, %(create_by)s, NOW(), %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "dict_id": dict_id,
                     "dict_name": data.get("dict_name"),
                     "dict_type": data.get("dict_type"),
                     "status": data.get("status", "0"),
                     "create_by": data.get("create_by") or "",
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return dict_id
 
     def update_dict_type(self, dict_id: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -3076,17 +3212,19 @@ class Database:
         return dict(row) if row else None
 
     def create_dict_data(self, data: dict[str, Any]) -> int:
+        dict_code = next_id()
         sql = """
-            INSERT INTO sys_dict_data (dict_sort, dict_label, dict_value, dict_type,
+            INSERT INTO sys_dict_data (dict_code, dict_sort, dict_label, dict_value, dict_type,
                                        css_class, list_class, is_default, status,
                                        create_by, create_time, remark)
-            VALUES (%(dict_sort)s, %(dict_label)s, %(dict_value)s, %(dict_type)s,
+            VALUES (%(dict_code)s, %(dict_sort)s, %(dict_label)s, %(dict_value)s, %(dict_type)s,
                     %(css_class)s, %(list_class)s, %(is_default)s, %(status)s,
                     %(create_by)s, NOW(), %(remark)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "dict_code": dict_code,
                     "dict_sort": int(data.get("dict_sort") or 0),
                     "dict_label": data.get("dict_label"),
                     "dict_value": data.get("dict_value"),
@@ -3098,7 +3236,7 @@ class Database:
                     "create_by": data.get("create_by") or "",
                     "remark": data.get("remark"),
                 })
-                return int(cur.lastrowid)
+                return dict_code
 
     def update_dict_data(self, dict_code: int, data: dict[str, Any]) -> bool:
         fields = []
@@ -3174,19 +3312,21 @@ class Database:
         return dict(row) if row else None
 
     def create_whitelist(self, data: dict[str, Any]) -> int:
+        whitelist_id = next_id()
         sql = """
-            INSERT INTO sys_whitelist (path, path_type, remark, status)
-            VALUES (%(path)s, %(path_type)s, %(remark)s, %(status)s)
+            INSERT INTO sys_whitelist (id, path, path_type, remark, status)
+            VALUES (%(id)s, %(path)s, %(path_type)s, %(remark)s, %(status)s)
         """
         with self.wingon_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, {
+                    "id": whitelist_id,
                     "path": data.get("path"),
                     "path_type": data.get("path_type", "F"),
                     "remark": data.get("remark"),
                     "status": data.get("status", "0"),
                 })
-                return int(cur.lastrowid)
+                return whitelist_id
 
     def update_whitelist(self, whitelist_id: int, data: dict[str, Any]) -> bool:
         fields = []

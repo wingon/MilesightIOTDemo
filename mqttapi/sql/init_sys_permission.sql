@@ -5,6 +5,10 @@
 -- 参照 RuoYi-Vue RBAC 模型设计（菜单即权限），适配本项目 MariaDB 命名规范。
 -- 执行方式：
 --   mysql -uroot -proot WingOnIOT < init_sys_permission.sql
+--
+-- !!! 重要：数据库主键已迁移为「雪花算法 ID」（见 migrate_snowflake_ids.py），
+--     本脚本内的 CREATE TABLE 含 AUTO_INCREMENT、INSERT 使用固定自增 ID（1,2,3…），
+--     与现行雪花 ID 语义不一致。该脚本仅供历史初始化参考，请勿在雪花化后的库上重跑！
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -151,10 +155,14 @@ INSERT INTO sys_menu (id, parent_id, menu_name, i18n_key, path, component, menu_
 (2, 0, '樓宇監控', 'menu.buildingMonitor', '', '', 'M', '', 'BankOutlined', 10, 1, 1),
 (3, 2, '樓棟可視化', 'menu.buildingViewer', 'building-viewer', 'BuildingViewerView', 'C', '', 'BankOutlined', 1, 1, 1),
 (4, 2, '設備管理', 'menu.devices', 'devices', 'DevicesManageView', 'C', '', 'ApiOutlined', 2, 1, 1),
-(5, 2, '人流統計', 'menu.peopleCount', 'people-count', 'PeopleCountListView', 'C', '', 'DatabaseOutlined', 3, 1, 1),
 (6, 2, 'ToF 列表', 'menu.tof', 'ct103', 'TofListView', 'C', '', 'ThunderboltOutlined', 4, 1, 1),
 (7, 2, 'UG65 列表', 'menu.ug65', 'ug65', 'Ug65ListView', 'C', '', 'CloudOutlined', 5, 1, 1),
-(8, 2, 'VS135 列表', 'menu.vs135', 'vs135', 'Vs135ListView', 'C', '', 'TeamOutlined', 6, 1, 1);
+(8, 2, 'VS135 列表', 'menu.vs135', 'vs135', 'Vs135ListView', 'C', '', 'TeamOutlined', 6, 1, 1),
+-- 人流時數統計（獨立目錄）
+(9, 0, '人流時數統計', 'menu.peopleCountMonitor', '', '', 'M', '', 'AreaChartOutlined', 5, 1, 1),
+(10, 9, '視圖', 'menu.peopleCountView', 'people-count/view', 'PeopleCountView', 'C', '', 'FundViewOutlined', 1, 1, 1),
+(11, 9, '樓層', 'menu.peopleCountFloor', 'people-count/floor', 'PeopleCountFloor', 'C', '', 'AppstoreOutlined', 2, 1, 1),
+(12, 9, '資料', 'menu.peopleCountData', 'people-count/data', 'PeopleCountData', 'C', '', 'TableOutlined', 3, 1, 1);
 
 -- 超级管理员角色授予全部菜单权限（兼容已存在的数据，避免重复插入报错）
 INSERT INTO sys_role_menu (role_id, menu_id)

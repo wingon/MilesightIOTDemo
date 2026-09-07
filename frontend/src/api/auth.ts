@@ -3,7 +3,7 @@ import api from './http'
 /** 当前用户信息（/api/v1/auth/userinfo 返回结构） */
 export interface UserInfoPayload {
   user: {
-    id: number
+    id: string | number
     username: string
     nickname?: string | null
     avatar?: string | null
@@ -14,8 +14,8 @@ export interface UserInfoPayload {
 
 /** 后端菜单树节点（/api/v1/auth/routes 返回结构） */
 export interface MenuNode {
-  id: number
-  parent_id: number
+  id: string | number
+  parent_id: string | number
   menu_name: string
   i18n_key?: string | null
   path?: string | null

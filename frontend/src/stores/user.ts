@@ -9,7 +9,7 @@ import { TOKEN_STORAGE_KEY } from '@/api/http'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
-  const userInfo = ref<{ id: number; username: string; nickname?: string | null; avatar?: string | null } | null>(null)
+  const userInfo = ref<{ id: string | number; username: string; nickname?: string | null; avatar?: string | null } | null>(null)
   const roles = ref<string[]>([])
   const permissions = ref<string[]>([])
 

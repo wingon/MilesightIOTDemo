@@ -10,7 +10,7 @@
 -- 注意：連接到 WingOnIOT 庫執行（與 building_cell / room_cell 同庫）。
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS `device_cell` (
+CREATE TABLE IF NOT EXISTS `building_device_cell` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主鍵',
   `sn` varchar(20) NOT NULL COMMENT '設備序列號（Environment_Device.sn）',
   `cell_id` bigint(20) unsigned NOT NULL COMMENT '格子外鍵',

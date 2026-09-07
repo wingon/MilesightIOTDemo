@@ -427,3 +427,103 @@ feat: CCTV 人流範圍回填、cron 熱更新監聽與日誌優化
 
 ### SQL
 - init_cctv_sync_config.sql：cctv.sync.cron.hourly 更名為 cctv.sync.cron.anytime
+
+## 2026-09-02 15:00
+refactor: 雪花 ID 全端支援與 building_ 資料表命名標準化
+
+### 前端：雪花 ID 型別相容（API + 全部系統管理頁面）
+- 所有 API 介面（auth/building/environment/facade/peopleCount/system）ID 型別由 number 改為 string | number
+- 系統管理頁面（User/Role/Menu/Dept/Dict/Config/Post/Whitelist）selectedRowKeys / editingId / checkedIds 型別同步調整
+- 3D 元件（Building3D / BuildingFacade3D）ID 型別相容
+- stores/building.ts + stores/user.ts ID 型別同步
+- 原因：雪花 ID 為 64 位元整數，超出 JavaScript 安全整數範圍（2^53），改用 string 避免精度遺失
+
+### 後端：資料表命名標準化（添加 building_ 前綴）
+- device_cell → building_device_cell
+- room_cell → building_room_cell
+- room → building_room
+- floor → building_floor
+- 所有 SQL 遷移檔同步更新（migrate_5f_*.sql / migrate_building_structure.sql / migrate_device_cell.sql / migrate_lowercase_tables.sql / migrate_remove_hidden_cells.sql / migrate_wingon_fixes.sql / migrate_wingon_trigger.sql）
+- init_sys_permission.sql + init_sys_manage.sql 同步更新
+- clear_51_tables.sql 更新
+
+### 後端：雪花 ID 寫入
+- building_device_cell 新增 id 欄位，由 app.snowflake.next_id() 產生
+- db.py bind_device_to_cell 改為 INSERT INTO building_device_cell (id, sn, cell_id, floor_id)
+- db.py 所有 device_cell / room_cell / room / floor 查詢改用 building_ 前綴表名
+
+### 後端
+- mqttapi/app/api/main.py：更新表名註解
+- mqttapi/app/api/routes/building.py：更新表名引用
+- mqttapi/cleanup_wingon.py：更新表名引用
+- mqttapi/test_wingon_fixes.py：更新表名引用
+
+### 遷移腳本
+- migrate_snowflake_ids.py（新檔案）：將現有 building_device_cell 記錄的 id 轉換為雪花 ID
+- test_snowflake_create.py（新檔案）：雪花 ID 產生測試腳本
+
+
+## 2026-09-02 16:00
+refactor: 雪花 ID 全端支援與 building_*, system_* 資料表命名標準化
+
+### 前端：雪花 ID 型別相容（API + 全部系統管理頁面）
+- 所有 API 介面（auth/building/environment/facade/peopleCount/system）ID 型別由 number 改為 string | number
+- 系統管理頁面（User/Role/Menu/Dept/Dict/Config/Post/Whitelist）selectedRowKeys / editingId / checkedIds 型別同步調整
+- 3D 元件（Building3D / BuildingFacade3D）ID 型別相容
+- stores/building.ts + stores/user.ts ID 型別同步
+- 原因：雪花 ID 為 64 位元整數，超出 JavaScript 安全整數範圍（2^53），改用 string 避免精度遺失
+
+### 後端：資料表命名標準化（添加 building_ 前綴）
+- device_cell → building_device_cell
+- room_cell → building_room_cell
+- room → building_room
+- floor → building_floor
+- 所有 SQL 遷移檔同步更新（migrate_5f_*.sql / migrate_building_structure.sql / migrate_device_cell.sql / migrate_lowercase_tables.sql / migrate_remove_hidden_cells.sql / migrate_wingon_fixes.sql / migrate_wingon_trigger.sql）
+- init_sys_permission.sql + init_sys_manage.sql 同步更新
+- clear_51_tables.sql 更新
+
+### 後端：雪花 ID 寫入
+- building_device_cell 新增 id 欄位，由 app.snowflake.next_id() 產生
+- db.py bind_device_to_cell 改為 INSERT INTO building_device_cell (id, sn, cell_id, floor_id)
+- db.py 所有 device_cell / room_cell / room / floor 查詢改用 building_ 前綴表名
+
+### 後端
+- mqttapi/app/api/main.py：更新表名註解
+- mqttapi/app/api/routes/building.py：更新表名引用
+- mqttapi/cleanup_wingon.py：更新表名引用
+- mqttapi/test_wingon_fixes.py：更新表名引用
+
+### 遷移腳本
+- migrate_snowflake_ids.py（新檔案）：將現有 building_device_cell 記錄的 id 轉換為雪花 ID
+- test_snowflake_create.py（新檔案）：雪花 ID 產生測試腳本
+
+## 2026-09-02 17:00
+feat: 人流綜合聚合模組（視圖 / 樓層 / 資料三頁面）
+
+### 後端：綜合聚合 API
+- GET /api/v1/people-count/stats/overview：供三個頁面共用的聚合端點
+- people_count_aggregate.py（新檔案）：Python 側聚合計算，回傳 demo/data.json 同構的結構化 JSON
+  - 包含：KPI 匯總、每日趨勢、時段分布、星期分布、星期×時段熱力圖、通道分布、通道×時段、樓層分布、樓層×通道×時段、通道類型、樓梯流向 Sankey
+  - 通道自動分類：lift / stairs / entrance（依通道名稱關鍵字判斷）
+  - 樓層提取：正則匹配 B1/F ~ 6/F
+- db.py 新增 people_count_overview + _load_people_count_rows
+  - 支援連續日期時間範圍過濾（同日 / 跨多日）
+  - 支援 ip_address / channel_name / exclude_zero 過濾
+
+### 前端：三個新頁面
+- PeopleCountView.vue（視圖頁）：KPI 卡片 + 每日趨勢折線圖 + 時段柱狀圖 + 星期熱力圖 + 通道分布柱狀圖
+- PeopleCountFloor.vue（樓層頁）：各樓層進出總數 + 通道明細 + 每日趨勢 + 時段分布
+- PeopleCountData.vue（資料頁）：可篩選的明細資料表
+- peopleCountAggregateCharts.ts（新檔案）：ECharts option 產生器，提供 buildDailyTrendOption / buildHourlyBarOption / buildWeekdayHeatmapOption / buildChannelBarOption / buildFloorBarOption / buildSankeyOption 等
+- ChartPanel.vue 增強：支援 Line / Bar / Heatmap / Sankey / Table 圖表類型
+
+### 前端：API 與 i18n
+- peopleCount.ts 新增 PeopleCountOverview 介面與 getPeopleCountOverview 函式
+- en.ts + zh-TW.ts 新增約 60 個 i18n 字串（視圖 / 樓層 / 資料頁面用）
+- MainLayout 側邊欄新增「人流統計」子選單（視圖 / 樓層 / 資料）
+
+### 後端：雪花 ID 與表名標準化（延續前次提交）
+- 前端所有 API 介面 ID 型別由 number 改為 string | number
+- 系統管理頁面 selectedRowKeys / editingId / checkedIds 型別同步
+- SQL 遷移檔全部更新為 building_ 前綴表名
+- init_sys_permission.sql 新增人流綜合聚合三頁面權限

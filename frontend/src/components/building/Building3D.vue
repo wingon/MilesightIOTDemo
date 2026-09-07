@@ -49,7 +49,7 @@ const props = defineProps<{
   /** Custom cell shape settings (DB-driven; falls back to default rectangles when no match) */
   cellShapes?: CellShapeConfig[]
   /** Building ID (for batch rotation) */
-  buildingId?: number
+  buildingId?: string | number
   /** Loading state - when true, shows loading indicator instead of 3D */
   loading?: boolean
 }>()
@@ -245,8 +245,8 @@ async function finishEditSession(save: boolean) {
 }
 
 /** floor3d (1~11) → DB floor.id（優先從已有格子推斷，其次查 floors 表，緩存結果） */
-const floorIdCache = new Map<number, number>()
-async function resolveFloorId(floor3d: number): Promise<number | null> {
+const floorIdCache = new Map<number, string | number>()
+async function resolveFloorId(floor3d: number): Promise<string | number | null> {
   const cached = floorIdCache.get(floor3d)
   if (cached != null) return cached
   const s = props.cellShapes?.find((x) => x.floor === floor3d && x.floor_id != null)

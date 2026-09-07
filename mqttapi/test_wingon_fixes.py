@@ -16,6 +16,7 @@ import pymysql
 
 from app.config import load_settings
 from app.db import Database
+from app.snowflake import next_id
 
 settings = load_settings()
 db = Database(settings)
@@ -60,7 +61,7 @@ def room_snapshot() -> list[tuple]:
     with conn() as c, c.cursor() as cur:
         cur.execute(
             """SELECT id, room_id, building_id, floor_id, room_number, room_type, area, is_deleted
-               FROM room ORDER BY id"""
+               FROM building_room ORDER BY id"""
         )
         rows = cur.fetchall()
         return [(tuple(sorted(r.items()))) for r in rows]
@@ -69,7 +70,7 @@ def room_snapshot() -> list[tuple]:
 def room_cell_snapshot() -> list[tuple]:
     with conn() as c, c.cursor() as cur:
         cur.execute(
-            """SELECT id, room_ref_id, floor_id, cell_id, is_deleted FROM room_cell ORDER BY id"""
+            """SELECT id, room_ref_id, floor_id, cell_id, is_deleted FROM building_room_cell ORDER BY id"""
         )
         rows = cur.fetchall()
         return [(tuple(sorted(r.items()))) for r in rows]
@@ -77,7 +78,7 @@ def room_cell_snapshot() -> list[tuple]:
 
 def device_cell_snapshot() -> list[tuple]:
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT id, sn, cell_id, floor_id FROM device_cell ORDER BY id")
+        cur.execute("SELECT id, sn, cell_id, floor_id FROM building_device_cell ORDER BY id")
         rows = cur.fetchall()
         return [(tuple(sorted(r.items()))) for r in rows]
 
@@ -126,7 +127,7 @@ def main() -> None:
         dev_level = db.floor_to_level(dev["floor"])
         # 找与设备楼层一致的 floor_id（3D 层号匹配）
         cur.execute(
-            "SELECT id, level FROM floor WHERE is_deleted = 0 ORDER BY level"
+            "SELECT id, level FROM building_floor WHERE is_deleted = 0 ORDER BY level"
         )
         floors_all = cur.fetchall()
     matching_fid = next(
@@ -151,10 +152,10 @@ def main() -> None:
     check("bind_device_cell#2(replace)", r == "ok", f"result={r}")
 
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS cnt FROM device_cell WHERE sn = %s", (dev_sn,))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_device_cell WHERE sn = %s", (dev_sn,))
         n = cur.fetchone()["cnt"]
         cur.execute(
-            "SELECT cell_id FROM device_cell WHERE sn = %s ORDER BY id DESC LIMIT 1",
+            "SELECT cell_id FROM building_device_cell WHERE sn = %s ORDER BY id DESC LIMIT 1",
             (dev_sn,),
         )
         last_cell = cur.fetchone()["cell_id"]
@@ -171,7 +172,7 @@ def main() -> None:
     r = db.unbind_device_cell(dev_sn)
     check("unbind_device_cell", r is True, f"result={r}")
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS cnt FROM device_cell WHERE sn = %s", (dev_sn,))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_device_cell WHERE sn = %s", (dev_sn,))
         check("device_cell empty after unbind", cur.fetchone()["cnt"] == 0)
 
     # ---------- 2. R3 一格一房：assign_room_cell + 触发器 ----------
@@ -179,15 +180,15 @@ def main() -> None:
     with conn() as c, c.cursor() as cur:
         cur.execute(
             """SELECT bc.floor_id, bc.row_no, bc.col_no FROM building_cell bc
-               LEFT JOIN room_cell rc ON rc.cell_id = bc.id
+               LEFT JOIN building_room_cell rc ON rc.cell_id = bc.id
                   AND rc.floor_id = bc.floor_id AND rc.is_deleted = 0
-               JOIN floor f ON f.id = bc.floor_id AND f.is_deleted = 0
+               JOIN building_floor f ON f.id = bc.floor_id AND f.is_deleted = 0
                WHERE bc.is_deleted = 0 AND bc.shape <> 'Hidden' AND rc.id IS NULL
                ORDER BY bc.floor_id, bc.row_no, bc.col_no LIMIT 1"""
         )
         free_cell = cur.fetchone()
         cur.execute(
-            "SELECT room_id FROM room WHERE is_deleted = 0 AND floor_id = %s ORDER BY id LIMIT 2",
+            "SELECT room_id FROM building_room WHERE is_deleted = 0 AND floor_id = %s ORDER BY id LIMIT 2",
             (free_cell["floor_id"],),
         )
         room_rows = cur.fetchall()
@@ -200,8 +201,8 @@ def main() -> None:
     check("assign_room_cell(A)", r == "added", f"result={r}")
     with conn() as c, c.cursor() as cur:
         cur.execute(
-            """SELECT rc.room_ref_id, r.room_id FROM room_cell rc
-               JOIN room r ON r.id = rc.room_ref_id
+            """SELECT rc.room_ref_id, r.room_id FROM building_room_cell rc
+               JOIN building_room r ON r.id = rc.room_ref_id
                WHERE rc.cell_id = (SELECT id FROM building_cell WHERE floor_id=%s AND row_no=%s AND col_no=%s AND is_deleted=0)
                  AND rc.is_deleted = 0""",
             (fid, rrow, rcol),
@@ -213,14 +214,14 @@ def main() -> None:
     # 直插 B 到同一格子 → 触发器必须拒绝
     trig_ok = False
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT id FROM room WHERE room_id = %s", (roomB,))
+        cur.execute("SELECT id FROM building_room WHERE room_id = %s", (roomB,))
         bid = cur.fetchone()["id"]
         cur.execute("SELECT id FROM building_cell WHERE floor_id=%s AND row_no=%s AND col_no=%s AND is_deleted=0", (fid, rrow, rcol))
         cell_db_id = cur.fetchone()["id"]
         try:
             cur.execute(
-                "INSERT INTO room_cell (room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s)",
-                (bid, fid, cell_db_id),
+                "INSERT INTO building_room_cell (id, room_ref_id, floor_id, cell_id) VALUES (%s, %s, %s, %s)",
+                (next_id(), bid, fid, cell_db_id),
             )
         except pymysql.MySQLError as e:
             trig_ok = "already occupied" in str(e) or "45000" in str(e)
@@ -230,8 +231,8 @@ def main() -> None:
     check("assign_room_cell(B) steals", r == "added", f"result={r}")
     with conn() as c, c.cursor() as cur:
         cur.execute(
-            """SELECT rc.room_ref_id, r.room_id FROM room_cell rc
-               JOIN room r ON r.id = rc.room_ref_id
+            """SELECT rc.room_ref_id, r.room_id FROM building_room_cell rc
+               JOIN building_room r ON r.id = rc.room_ref_id
                WHERE rc.cell_id = (SELECT id FROM building_cell WHERE floor_id=%s AND row_no=%s AND col_no=%s AND is_deleted=0)
                  AND rc.is_deleted = 0""",
             (fid, rrow, rcol),
@@ -244,22 +245,21 @@ def main() -> None:
     check("assign_room_cell(B) removes", r == "removed", f"result={r}")
     with conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT COUNT(*) AS cnt FROM room_cell WHERE floor_id=%s AND cell_id=%s AND is_deleted=0",
+            "SELECT COUNT(*) AS cnt FROM building_room_cell WHERE floor_id=%s AND cell_id=%s AND is_deleted=0",
             (fid, cell_db_id),
         )
         check("free cell released", cur.fetchone()["cnt"] == 0)
 
     # ---------- 3. 房间物理删除（房间=格子集合，可重建，不留伪删除） ----------
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT MAX(id) AS max_id FROM room")
-        tmp_rid = int(cur.fetchone()["max_id"]) + 1
-        cur.execute("SELECT MIN(id) AS min_fid, building_id FROM floor WHERE is_deleted = 0")
+        tmp_rid = next_id()
+        cur.execute("SELECT MIN(id) AS min_fid, building_id FROM building_floor WHERE is_deleted = 0")
         frow = cur.fetchone()
         test_fid = int(frow["min_fid"])
         test_bid = int(frow["building_id"])
         cur.execute(
             """SELECT bc.id, bc.floor_id, bc.row_no, bc.col_no FROM building_cell bc
-               LEFT JOIN room_cell rc ON rc.cell_id = bc.id
+               LEFT JOIN building_room_cell rc ON rc.cell_id = bc.id
                   AND rc.floor_id = bc.floor_id AND rc.is_deleted = 0
                WHERE bc.floor_id = %s AND bc.is_deleted = 0 AND bc.shape <> 'Hidden'
                  AND rc.id IS NULL
@@ -269,9 +269,9 @@ def main() -> None:
         rcell = cur.fetchone()
         tmp_room_id = f"test-room-{tmp_rid}"
         cur.execute(
-            """INSERT INTO room (room_id, building_id, floor_id, room_number, is_deleted)
-               VALUES (%s, %s, %s, %s, 0)""",
-            (tmp_room_id, test_bid, test_fid, f"TEST-{tmp_rid}"),
+            """INSERT INTO building_room (id, room_id, building_id, floor_id, room_number, is_deleted)
+               VALUES (%s, %s, %s, %s, %s, 0)""",
+            (tmp_rid, tmp_room_id, test_bid, test_fid, f"TEST-{tmp_rid}"),
         )
     check("create temp room for delete test", rcell is not None,
           f"cell={rcell} tmp_room={tmp_room_id}")
@@ -280,9 +280,9 @@ def main() -> None:
     ok = db.delete_room(tmp_room_id)
     check("delete_room (physical)", ok, f"room={tmp_room_id}")
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS cnt FROM room WHERE room_id = %s", (tmp_room_id,))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_room WHERE room_id = %s", (tmp_room_id,))
         room_cnt = cur.fetchone()["cnt"]
-        cur.execute("SELECT COUNT(*) AS cnt FROM room_cell WHERE cell_id = %s", (rcell["id"],))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_room_cell WHERE cell_id = %s", (rcell["id"],))
         rc_cnt = cur.fetchone()["cnt"]
     check("room row physically gone", room_cnt == 0, f"cnt={room_cnt}")
     check("room_cell cascade deleted", rc_cnt == 0, f"room_cell rows={rc_cnt}")
@@ -296,8 +296,8 @@ def main() -> None:
         cur.execute(
             """SELECT bc.id, bc.building_id, bc.floor_id, bc.row_no, bc.col_no, bc.shape, bc.is_active
                FROM building_cell bc
-               LEFT JOIN room_cell rc ON rc.cell_id = bc.id AND rc.floor_id = bc.floor_id AND rc.is_deleted = 0
-               LEFT JOIN device_cell dc ON dc.cell_id = bc.id
+               LEFT JOIN building_room_cell rc ON rc.cell_id = bc.id AND rc.floor_id = bc.floor_id AND rc.is_deleted = 0
+               LEFT JOIN building_device_cell dc ON dc.cell_id = bc.id
                WHERE bc.floor_id = %s AND bc.is_deleted = 0 AND bc.shape <> 'Hidden'
                  AND rc.id IS NULL AND dc.id IS NULL
                ORDER BY bc.floor_id, bc.row_no, bc.col_no LIMIT 1""",
@@ -312,7 +312,7 @@ def main() -> None:
     r = db.bind_device_cell(dev_sn, victim["floor_id"], victim["row_no"], victim["col_no"])
     check("bind device to victim", r == "ok", f"result={r}")
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT room_id FROM room WHERE is_deleted = 0 AND floor_id = %s ORDER BY id LIMIT 1", (matching_fid,))
+        cur.execute("SELECT room_id FROM building_room WHERE is_deleted = 0 AND floor_id = %s ORDER BY id LIMIT 1", (matching_fid,))
         vr = cur.fetchone()
     ar = db.assign_room_cell(vr["room_id"], victim["floor_id"], victim["row_no"], victim["col_no"])
     check("assign room to victim", ar in ("added", "removed"), f"result={ar}")
@@ -325,10 +325,10 @@ def main() -> None:
     with conn() as c, c.cursor() as cur:
         cur.execute("SELECT is_deleted FROM building_cell WHERE id = %s", (victim_id,))
         cell_flag = cur.fetchone()["is_deleted"]
-        cur.execute("SELECT COUNT(*) AS cnt FROM device_cell WHERE sn = %s", (dev_sn,))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_device_cell WHERE sn = %s", (dev_sn,))
         dc_cnt = cur.fetchone()["cnt"]
         cur.execute(
-            "SELECT COUNT(*) AS cnt FROM room_cell WHERE cell_id = %s AND is_deleted = 0",
+            "SELECT COUNT(*) AS cnt FROM building_room_cell WHERE cell_id = %s AND is_deleted = 0",
             (victim_id,),
         )
         rc_active = cur.fetchone()["cnt"]
@@ -341,10 +341,10 @@ def main() -> None:
     with conn() as c, c.cursor() as cur:
         cur.execute("SELECT is_deleted FROM building_cell WHERE id = %s", (victim_id,))
         cell_flag = cur.fetchone()["is_deleted"]
-        cur.execute("SELECT COUNT(*) AS cnt FROM device_cell WHERE sn = %s", (dev_sn,))
+        cur.execute("SELECT COUNT(*) AS cnt FROM building_device_cell WHERE sn = %s", (dev_sn,))
         dc_cnt = cur.fetchone()["cnt"]
         cur.execute(
-            "SELECT COUNT(*) AS cnt FROM room_cell WHERE cell_id = %s AND is_deleted = 0",
+            "SELECT COUNT(*) AS cnt FROM building_room_cell WHERE cell_id = %s AND is_deleted = 0",
             (victim_id,),
         )
         rc_active = cur.fetchone()["cnt"]
@@ -355,10 +355,10 @@ def main() -> None:
     # 清理测试痕迹：解绑设备、移除测试房间占用
     db.unbind_device_cell(dev_sn)
     with conn() as c, c.cursor() as cur:
-        cur.execute("SELECT id FROM room WHERE room_id = %s", (vr["room_id"],))
+        cur.execute("SELECT id FROM building_room WHERE room_id = %s", (vr["room_id"],))
         vrid = cur.fetchone()["id"]
         cur.execute(
-            "DELETE FROM room_cell WHERE room_ref_id = %s AND cell_id = %s",
+            "DELETE FROM building_room_cell WHERE room_ref_id = %s AND cell_id = %s",
             (vrid, victim_id),
         )
 

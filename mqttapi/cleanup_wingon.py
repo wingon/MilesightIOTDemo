@@ -2,7 +2,7 @@
 """WingOnIOT 数据治理定时任务（建议每日运行）。
 
 功能：
-  1. 孤儿清理：删除 room_cell / device_cell 中指向"不存在或已软删格子"的残留（R1/R2 兜底）
+  1. 孤儿清理：删除 building_room_cell / building_device_cell 中指向"不存在或已软删格子"的残留（R1/R2 兜底）
   2. 超期软删清理：超过保留期（默认 90 天）的 building_cell / room / floor / building
      软删行物理删除（软删时间以 updated_at 为准）
   3. 分区维护：确保 environmental_monitoring 存在"当前月"分区（REORGANIZE pmax）
@@ -75,14 +75,14 @@ def cleanup_orphans(cur, dry_run: bool = False) -> dict[str, int]:
     stats: dict[str, int] = {}
     if dry_run:
         cur.execute(
-            """SELECT COUNT(*) AS cnt FROM room_cell rc
+            """SELECT COUNT(*) AS cnt FROM building_room_cell rc
                LEFT JOIN building_cell c
                  ON c.id = rc.cell_id AND c.floor_id = rc.floor_id AND c.is_deleted = 0
                WHERE c.id IS NULL"""
         )
         stats["room_cell_orphans"] = int(cur.fetchone()["cnt"])
         cur.execute(
-            """SELECT COUNT(*) AS cnt FROM device_cell dc
+            """SELECT COUNT(*) AS cnt FROM building_device_cell dc
                LEFT JOIN building_cell c
                  ON c.id = dc.cell_id AND c.floor_id = dc.floor_id AND c.is_deleted = 0
                WHERE c.id IS NULL"""
@@ -90,14 +90,14 @@ def cleanup_orphans(cur, dry_run: bool = False) -> dict[str, int]:
         stats["device_cell_orphans"] = int(cur.fetchone()["cnt"])
         return stats
     cur.execute(
-        """DELETE rc FROM room_cell rc
+        """DELETE rc FROM building_room_cell rc
            LEFT JOIN building_cell c
              ON c.id = rc.cell_id AND c.floor_id = rc.floor_id AND c.is_deleted = 0
            WHERE c.id IS NULL"""
     )
     stats["room_cell_orphans"] = cur.rowcount
     cur.execute(
-        """DELETE dc FROM device_cell dc
+        """DELETE dc FROM building_device_cell dc
            LEFT JOIN building_cell c
              ON c.id = dc.cell_id AND c.floor_id = dc.floor_id AND c.is_deleted = 0
            WHERE c.id IS NULL"""
@@ -110,7 +110,7 @@ def cleanup_expired_soft_deletes(cur, retention_days: int, dry_run: bool = False
     """物理删除超过保留期的软删行（先子后父，利用 FK CASCADE 清关联）。"""
     cutoff = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
     stats: dict[str, int] = {}
-    for table in ("building_cell", "room", "floor", "building"):
+    for table in ("building_cell", "building_room", "building_floor", "building"):
         if dry_run:
             cur.execute(
                 f"SELECT COUNT(*) AS cnt FROM {table} WHERE is_deleted = 1 AND updated_at < %(cutoff)s",

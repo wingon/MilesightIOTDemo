@@ -84,7 +84,7 @@ function onReset() {
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({ path: '', path_type: 'F', remark: '', status: '0' })
 
 function openCreate() {

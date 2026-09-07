@@ -15,7 +15,7 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const treeData = ref<SysDeptRow[]>([])
-const expandedKeys = ref<number[]>([])
+const expandedKeys = ref<(string | number)[]>([])
 
 const columns: TableColumnsType<SysDeptRow> = [
   { title: t('system.deptName'), dataIndex: 'dept_name' },
@@ -36,7 +36,7 @@ const columns: TableColumnsType<SysDeptRow> = [
 ]
 
 function buildDeptTree(flat: SysDeptRow[]): SysDeptRow[] {
-  const map = new Map<number, SysDeptRow>()
+  const map = new Map<string | number, SysDeptRow>()
   const roots: SysDeptRow[] = []
   for (const item of flat) {
     map.set(item.dept_id, { ...item, children: [] })
@@ -52,8 +52,8 @@ function buildDeptTree(flat: SysDeptRow[]): SysDeptRow[] {
   return roots
 }
 
-function getAllKeys(data: SysDeptRow[]): number[] {
-  const keys: number[] = []
+function getAllKeys(data: SysDeptRow[]): (string | number)[] {
+  const keys: (string | number)[] = []
   const walk = (list: SysDeptRow[]) => {
     for (const d of list) {
       if (d.children?.length) {
@@ -99,9 +99,9 @@ function onTableExpand(expanded: boolean, record: SysDeptRow) {
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({
-  parent_id: 0,
+  parent_id: 0 as string | number,
   dept_name: '',
   order_num: 0,
   leader: '',

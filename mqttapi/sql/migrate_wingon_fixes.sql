@@ -26,14 +26,14 @@ ALTER TABLE `Environmental_Monitoring`
   );
 
 -- 3. room_cell：加软删字段，唯一索引含 is_deleted（软删后可重建）
-ALTER TABLE `room_cell`
+ALTER TABLE `building_room_cell`
   ADD COLUMN `is_deleted` tinyint(4) NOT NULL DEFAULT 0 COMMENT '邏輯刪除：0=正常，1=已刪除' AFTER `cell_id`,
   DROP INDEX `uk_room_cell`,
   ADD UNIQUE KEY `uk_room_cell` (`room_ref_id`, `floor_id`, `cell_id`, `is_deleted`),
   ADD KEY `idx_cell_active` (`cell_id`, `floor_id`, `is_deleted`);
 
 -- 4. device_cell：一设备一格
-ALTER TABLE `device_cell`
+ALTER TABLE `building_device_cell`
   DROP INDEX `uk_device_cell`,
   ADD UNIQUE KEY `uk_device_sn` (`sn`);
 

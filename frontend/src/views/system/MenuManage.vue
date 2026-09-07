@@ -16,15 +16,15 @@ const { t } = useI18n()
 const loading = ref(false)
 const menuTree = ref<MenuNode[]>([])
 const allTree = ref<MenuNode[]>([])
-const expandedKeys = ref<number[]>([])
+const expandedKeys = ref<(string | number)[]>([])
 
 const query = reactive({
   menu_name: '',
   status: undefined as number | undefined,
 })
 
-function collectKey(list: MenuNode[]): number[] {
-  const keys: number[] = []
+function collectKey(list: MenuNode[]): (string | number)[] {
+  const keys: (string | number)[] = []
   const walk = (nodes: MenuNode[]) => {
     for (const m of nodes) {
       if (m.children?.length) {
@@ -185,9 +185,9 @@ const columns: TableColumnsType<MenuNode> = [
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({
-  parent_id: 0,
+  parent_id: 0 as string | number,
   menu_name: '',
   i18n_key: undefined as string | undefined,
   path: '',
@@ -204,7 +204,7 @@ const form = reactive({
 /** 父级选择树（剔除按钮 F，按钮不能作父级） */
 const parentTreeData = computed(() => filterDirMenu(menuTree.value))
 
-function filterDirMenu(menus: MenuNode[]): { value: number; title: string; children?: unknown[] }[] {
+function filterDirMenu(menus: MenuNode[]): { value: string | number; title: string; children?: unknown[] }[] {
   return menus
     .filter((m) => m.menu_type !== 'F')
     .map((m) => ({

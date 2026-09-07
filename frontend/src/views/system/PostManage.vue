@@ -77,7 +77,7 @@ function onReset() {
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({ post_code: '', post_name: '', post_sort: 0, status: '0', remark: '' })
 
 function openCreate() {

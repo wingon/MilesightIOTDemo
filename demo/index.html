@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人流時數統計</title>
+<script src="assets/echarts.min.js"></script>
+<style>
+  :root {
+    --sidebar: #14213a;
+    --sidebar-2: #1b2c4e;
+    --accent: #2f8ee5;
+    --accent-soft: #dcecfa;
+    --ink: #1f2733;
+    --muted: #647084;
+    --line: #e3e8f0;
+    --bg: #f3f5f9;
+    --card: #ffffff;
+    --shadow: 0 2px 8px rgba(30, 45, 80, 0.08);
+    --blue: #2f6fd6;
+    --orange: #e0782f;
+    --green: #2f9e6e;
+    --yellow: #c9a227;
+    --red: #d6454f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "PingFang TC", "Microsoft JhengHei", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 16px;
+  }
+  .layout { display: flex; height: 100vh; }
+
+  /* 左側選單 */
+  .sidebar {
+    width: 240px;
+    flex: 0 0 240px;
+    background: linear-gradient(180deg, var(--sidebar), var(--sidebar-2));
+    color: #d7e2f4;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 0;
+  }
+  .brand {
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    padding: 6px 22px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+  }
+  .brand small { display: block; font-size: 13px; font-weight: 400; color: #93a7c9; margin-top: 4px; }
+  nav { display: flex; flex-direction: column; gap: 6px; padding: 0 12px; }
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 20px;
+    font-weight: 600;
+    color: #c3d2e8;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+  }
+  .menu-item .icon { font-size: 22px; width: 26px; text-align: center; }
+  .menu-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .menu-item.active { background: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(47,142,229,0.45); }
+  .sidebar-foot {
+    margin-top: auto;
+    padding: 16px 22px;
+    font-size: 14px;
+    color: #8ba0c2;
+    line-height: 1.7;
+  }
+
+  /* 右側主區 */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    height: 68px;
+    flex: 0 0 68px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 26px;
+  }
+  .topbar h2 { font-size: 24px; font-weight: 700; }
+  .topbar .meta { display: flex; gap: 18px; font-size: 15px; color: var(--muted); }
+  .topbar .meta b { color: var(--accent); font-weight: 600; }
+  .content { flex: 1; overflow-y: auto; padding: 20px 26px 30px; }
+
+  section.page { display: none; }
+  section.page.active { display: block; }
+
+  /* KPI */
+  .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 18px; }
+  .kpi {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .kpi .label { font-size: 15px; color: var(--muted); margin-bottom: 6px; }
+  .kpi .value { font-size: 38px; font-weight: 700; line-height: 1.1; color: var(--ink); }
+  .kpi .value.blue { color: var(--blue); }
+  .kpi .value.orange { color: var(--orange); }
+  .kpi .value.green { color: var(--green); }
+  .kpi .value.yellow { color: var(--yellow); }
+  .kpi .sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  /* 圖表卡片 */
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px 10px;
+    box-shadow: var(--shadow);
+    grid-column: span 2;
+    min-width: 0;
+  }
+  .card .title { font-size: 18px; font-weight: 600; margin: 2px 2px 6px; }
+  .card .title .no { color: var(--accent); font-size: 14px; font-weight: 600; margin-right: 6px; }
+  .card .chart { width: 100%; height: 320px; }
+
+  /* 樓層按鈕 */
+  .floor-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+  .floor-btn {
+    padding: 12px 22px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .floor-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .floor-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(47,142,229,0.4); }
+
+  .floor-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+
+  /* 通道卡片 */
+  .ch-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 18px; }
+  .ch-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .ch-card .name { font-size: 17px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 20px; white-space: nowrap; }
+  .badge.lift { background: #e6f0ff; color: #2f6fd6; }
+  .badge.stairs { background: #fff2e0; color: #c06a1e; }
+  .badge.entrance { background: #e4f7ee; color: #1f7a54; }
+  .ch-card .big { font-size: 28px; font-weight: 700; color: var(--ink); }
+  .ch-card .nums { display: flex; gap: 16px; margin-top: 6px; font-size: 15px; color: var(--muted); }
+
+  /* 表格 */
+  .tabs { display: flex; gap: 10px; margin-bottom: 16px; }
+  .tab-btn {
+    padding: 10px 20px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--card); font-size: 17px; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  th, td { padding: 13px 16px; text-align: left; font-size: 16px; border-bottom: 1px solid var(--line); }
+  th { background: #f0f4fa; font-weight: 700; color: var(--muted); white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:nth-child(even) { background: #fafbfe; }
+  tbody tr:hover { background: var(--accent-soft); }
+
+  #status {
+    position: fixed; right: 20px; bottom: 16px;
+    background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow);
+    color: var(--muted); font-size: 14px; padding: 10px 16px; border-radius: 10px;
+    display: none; max-width: 340px;
+  }
+
+  @media (max-width: 1400px) {
+    .kpis { grid-template-columns: repeat(3, 1fr); }
+    .card { grid-column: span 3; }
+    .ch-list { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 900px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .card { grid-column: span 6; }
+    .ch-list { grid-template-columns: 1fr; }
+    .floor-kpis { grid-template-columns: repeat(2, 1fr); }
+    .sidebar { width: 190px; flex-basis: 190px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">人流時數統計<small>Wing On Godown Building</small></div>
+    <nav>
+      <div class="menu-item active" data-page="view"><span class="icon">◉</span>視圖</div>
+      <div class="menu-item" data-page="floor"><span class="icon">▦</span>樓層</div>
+      <div class="menu-item" data-page="data"><span class="icon">☰</span>資料</div>
+    </nav>
+    <div class="sidebar-foot">目標客群：管理 / 保安<br>大字顯示，一鍵切換</div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <h2 id="page-title">視圖</h2>
+      <div class="meta">
+        <span>統計區間：<b id="m-range">–</b></span>
+        <span>天數：<b id="m-days">–</b></span>
+        <span>資料產生：<b id="m-generated">–</b></span>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ============ 視圖 ============ -->
+      <section class="page active" id="page-view">
+        <div class="kpis" id="kpis"></div>
+        <div class="grid" id="view-grid"></div>
+      </section>
+
+      <!-- ============ 樓層 ============ -->
+      <section class="page" id="page-floor">
+        <div class="floor-bar" id="floor-bar"></div>
+
+        <div id="floor-all">
+          <div class="grid">
+            <div class="card wide"><div class="title">各樓層總人流（含電梯/樓梯/出入口）</div><div class="chart" id="fc-compare"></div></div>
+            <div class="card wide"><div class="title">樓梯流向（上 / 下）</div><div class="chart" id="fc-sankey"></div></div>
+          </div>
+        </div>
+
+        <div id="floor-detail" style="display:none">
+          <div class="floor-kpis" id="fd-kpis"></div>
+          <div class="ch-list" id="fd-channels"></div>
+          <div class="grid">
+            <div class="card wide"><div class="title">該層 24 時人流</div><div class="chart" id="fd-hour"></div></div>
+            <div class="card wide"><div class="title">該層每日人流趨勢</div><div class="chart" id="fd-daily"></div></div>
+            <div class="card"><div class="title">該層通道佔比</div><div class="chart" id="fd-pie"></div></div>
+            <div class="card"><div class="title">該層通道 × 小時熱力</div><div class="chart" id="fd-heat"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 資料 ============ -->
+      <section class="page" id="page-data">
+        <div class="tabs">
+          <div class="tab-btn active" id="tab-daily">每日統計</div>
+          <div class="tab-btn" id="tab-channel">通道統計</div>
+        </div>
+        <div id="table-daily"></div>
+        <div id="table-channel" style="display:none"></div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script>
+'use strict';
+
+const COLOR = {
+  blue: '#2f6fd6', orange: '#e0782f', green: '#2f9e6e', yellow: '#c9a227',
+  red: '#d6454f', purple: '#7a5fd0', teal: '#2f9ea6',
+  muted: '#647084', line: '#e3e8f0', ink: '#1f2733',
+};
+const WEEKDAYS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+const FLOOR_LIST = ['B1/F', 'G/F', '1/F', '2/F', '3/F', '4/F', '5/F', '6/F'];
+const HOURS = Array.from({ length: 24 }, (_, h) => `${h}:00`);
+
+let report = null;
+const charts = [];
+let activeFloor = null;
+
+const fmt = (n) => Number(n).toLocaleString('en-US');
+const tooltip = (trigger = 'axis') => ({
+  trigger,
+  backgroundColor: '#ffffff',
+  borderColor: '#d8e0ea',
+  textStyle: { color: '#1f2733', fontSize: 15 },
+  axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(47,142,229,0.08)' } },
+});
+const catAxis = (data, opts = {}) => ({
+  type: 'category', data,
+  axisLine: { lineStyle: { color: COLOR.line } },
+  axisTick: { show: false },
+  axisLabel: { color: COLOR.muted, fontSize: 13, interval: opts.interval ?? 'auto' },
+});
+const valAxis = () => ({
+  type: 'value',
+  splitLine: { lineStyle: { color: '#edf1f7' } },
+  axisLabel: { color: COLOR.muted, fontSize: 13 },
+  minInterval: 1,
+});
+const gridOpt = () => ({ top: 40, left: 12, right: 16, bottom: 8, containLabel: true });
+
+function initChart(el, option) {
+  let c = echarts.getInstanceByDom(el);
+  if (!c) {
+    c = echarts.init(el);
+    charts.push({ inst: c, el });
+  }
+  c.setOption(option, true);
+  return c;
+}
+function resizePage() {
+  requestAnimationFrame(() => charts.forEach((ch) => ch.inst.resize()));
+}
+window.addEventListener('resize', resizePage);
+
+function card(title, no, wide) {
+  const div = document.createElement('div');
+  div.className = 'card' + (wide ? ' wide' : '');
+  div.innerHTML = `<div class="title"><span class="no">#${no}</span>${title}</div><div class="chart"></div>`;
+  document.getElementById('view-grid').appendChild(div);
+  return div.querySelector('.chart');
+}
+
+/* ================= 視圖頁 ================= */
+
+function dailyTrend(el) {
+  const d = report.daily;
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange, COLOR.yellow],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開', '合計'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: catAxis(d.map((r) => r.date.slice(5))),
+    yAxis: valAxis(),
+    series: [
+      { name: '進入', type: 'line', smooth: true, data: d.map((r) => r.enter), symbolSize: 5, label: { show: true, fontSize: 11, color: COLOR.blue, formatter: (p) => fmt(p.value) } },
+      { name: '離開', type: 'line', smooth: true, data: d.map((r) => r.exit), symbolSize: 5, label: { show: true, fontSize: 11, color: COLOR.orange, formatter: (p) => fmt(p.value) } },
+      { name: '合計', type: 'line', smooth: true, data: d.map((r) => r.total), symbolSize: 5, lineStyle: { width: 2 }, label: { show: true, fontSize: 11, color: COLOR.ink, fontWeight: 'bold', formatter: (p) => fmt(p.value) } },
+    ],
+  });
+}
+
+function dailyCumulative(el) {
+  let acc = 0;
+  const cum = report.daily.map((r) => (acc += r.total));
+  initChart(el, {
+    tooltip: tooltip(),
+    grid: gridOpt(),
+    xAxis: catAxis(report.daily.map((r) => r.date.slice(5))),
+    yAxis: valAxis(),
+    series: [{
+      name: '累計人次', type: 'line', smooth: true, data: cum,
+      areaStyle: { color: COLOR.blue, opacity: 0.15 },
+      lineStyle: { color: COLOR.blue, width: 2 }, symbol: 'none',
+    }],
+  });
+}
+
+function hourAvg(el) {
+  const h = report.hour;
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['平均進入', '平均離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: valAxis(),
+    series: [
+      { name: '平均進入', type: 'bar', data: h.map((r) => r.enter), barMaxWidth: 14, label: { show: true, position: 'top', fontSize: 11, color: COLOR.blue, formatter: (p) => p.value > 0 ? fmt(p.value) : '' } },
+      { name: '平均離開', type: 'bar', data: h.map((r) => r.exit), barMaxWidth: 14, label: { show: true, position: 'top', fontSize: 11, color: COLOR.orange, formatter: (p) => p.value > 0 ? fmt(p.value) : '' } },
+    ],
+  });
+}
+
+function last7Flow(el) {
+  const dh = report.dailyHour;
+  const dates = [...new Set(dh.map((r) => r.date))].slice(-7);
+  const series = dates.map((dt) => {
+    const arr = Array(24).fill(0);
+    dh.forEach((r) => { if (r.date === dt) arr[r.hour] = r.total; });
+    return { name: dt.slice(5), type: 'line', smooth: true, data: arr, symbol: 'none' };
+  });
+  initChart(el, {
+    color: [COLOR.blue, COLOR.green, COLOR.yellow, COLOR.orange, COLOR.purple, COLOR.teal, COLOR.red],
+    tooltip: tooltip(),
+    legend: { textStyle: { color: COLOR.muted, fontSize: 12 }, top: 6, type: 'scroll' },
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: valAxis(),
+    series,
+  });
+}
+
+function calendarHeat(el) {
+  const d = report.daily;
+  const rows = d.map((r, i) => [Math.floor(i / 7), r.weekday, r.total]);
+  const weeks = Math.max(...rows.map((r) => r[0])) + 1;
+  const max = Math.max(...d.map((r) => r.total));
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(WEEKDAYS),
+    yAxis: catAxis(Array.from({ length: weeks }, (_, i) => `第 ${i + 1} 週`), { extra: { splitArea: { show: true } } }),
+    visualMap: {
+      min: 0, max, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
+      textStyle: { color: COLOR.muted, fontSize: 12 },
+      inRange: { color: ['#eef4fb', '#bcd6f2', '#7fb2e6', '#2f6fd6', '#c9a227'] },
+    },
+    series: [{ type: 'heatmap', data: rows, label: { show: true, fontSize: 11, color: COLOR.ink, formatter: (p) => fmt(p.value[2]) } }],
+  });
+}
+
+function weekdayHourHeat(el) {
+  const wh = report.weekdayHour;
+  const max = Math.max(...wh.map((r) => r.total));
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: catAxis(WEEKDAYS),
+    visualMap: {
+      min: 0, max, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
+      textStyle: { color: COLOR.muted, fontSize: 12 },
+      inRange: { color: ['#eef4fb', '#bcd6f2', '#7fb2e6', '#2f6fd6', '#e0782f'] },
+    },
+    series: [{ type: 'heatmap', data: wh.map((r) => [r.hour, r.weekday, r.total]) }],
+  });
+}
+
+function weekdayBar(el) {
+  const w = report.weekday;
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: catAxis(w.map((r) => r.name)),
+    yAxis: valAxis(),
+    series: [
+      { name: '進入', type: 'bar', stack: 't', data: w.map((r) => r.enter), barMaxWidth: 26, label: { show: true, position: 'inside', fontSize: 12, color: '#fff', fontWeight: 'bold', formatter: (p) => fmt(p.value) } },
+      { name: '離開', type: 'bar', stack: 't', data: w.map((r) => r.exit), barMaxWidth: 26, label: { show: true, position: 'inside', fontSize: 12, color: '#fff', fontWeight: 'bold', formatter: (p) => fmt(p.value) } },
+    ],
+  });
+}
+
+function weekdayVsWeekend(el) {
+  const w = report.weekday;
+  const avg = (arr, key) => arr.length ? arr.reduce((s, r) => s + r[key], 0) / arr.length : 0;
+  const row = [
+    { name: '平日', enter: avg(w.filter((r) => r.weekday < 5), 'enter'), exit: avg(w.filter((r) => r.weekday < 5), 'exit') },
+    { name: '週末', enter: avg(w.filter((r) => r.weekday >= 5), 'enter'), exit: avg(w.filter((r) => r.weekday >= 5), 'exit') },
+  ];
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: catAxis(row.map((r) => r.name)),
+    yAxis: valAxis(),
+    series: [
+      { name: '進入', type: 'bar', data: row.map((r) => r.enter), barMaxWidth: 44, label: { show: true, position: 'top', fontSize: 13, color: COLOR.ink, fontWeight: 'bold', formatter: (p) => fmt(Math.round(p.value)) } },
+      { name: '離開', type: 'bar', data: row.map((r) => r.exit), barMaxWidth: 44, label: { show: true, position: 'top', fontSize: 13, color: COLOR.ink, fontWeight: 'bold', formatter: (p) => fmt(Math.round(p.value)) } },
+    ],
+  });
+}
+
+function channelTop10(el) {
+  const top = report.channel.slice(0, 10);
+  const names = top.map((r) => r.channel_name).reverse();
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: valAxis(),
+    yAxis: catAxis(names, { extra: { axisLabel: { color: COLOR.muted, fontSize: 13, width: 110, overflow: 'truncate' } } }),
+    series: [
+      { name: '進入', type: 'bar', stack: 't', data: top.map((r) => r.enter).reverse(), barMaxWidth: 16, label: { show: true, position: 'inside', fontSize: 11, color: '#fff', formatter: (p) => p.value > 0 ? fmt(p.value) : '' } },
+      { name: '離開', type: 'bar', stack: 't', data: top.map((r) => r.exit).reverse(), barMaxWidth: 16, itemStyle: { borderRadius: [0, 3, 3, 0] }, label: { show: true, position: 'right', fontSize: 11, color: COLOR.ink, formatter: (p) => fmt(p.value) } },
+    ],
+  });
+}
+
+function channelGrouped(el) {
+  const top = report.channel.slice(0, 10);
+  const names = top.map((r) => r.channel_name).reverse();
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: valAxis(),
+    yAxis: catAxis(names, { extra: { axisLabel: { color: COLOR.muted, fontSize: 13, width: 110, overflow: 'truncate' } } }),
+    series: [
+      { name: '進入', type: 'bar', data: top.map((r) => r.enter).reverse(), barMaxWidth: 10, label: { show: true, position: 'right', fontSize: 11, color: COLOR.blue, formatter: (p) => fmt(p.value) } },
+      { name: '離開', type: 'bar', data: top.map((r) => r.exit).reverse(), barMaxWidth: 10, label: { show: true, position: 'right', fontSize: 11, color: COLOR.orange, formatter: (p) => fmt(p.value) } },
+    ],
+  });
+}
+
+function channelNet(el) {
+  const rows = [...report.channel].sort((a, b) => (a.enter - a.exit) - (b.enter - b.exit));
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: valAxis(),
+    yAxis: catAxis(rows.map((r) => r.channel_name), { extra: { axisLabel: { color: COLOR.muted, fontSize: 12, width: 100, overflow: 'truncate' } } }),
+    series: [{
+      type: 'bar', data: rows.map((r) => r.enter - r.exit), barMaxWidth: 14,
+      itemStyle: { color: (p) => (p.value >= 0 ? COLOR.blue : COLOR.orange), borderRadius: 3 },
+      label: { show: true, position: 'right', fontSize: 11, color: COLOR.ink, formatter: (p) => fmt(p.value) },
+    }],
+  });
+}
+
+function floorSankey(el) {
+  const nodes = new Set();
+  const links = report.sankey.map((r) => {
+    const dir = r.direction === 'up' ? '\u2191' : '\u2193';
+    const s = r.from + dir, t = r.to + dir;
+    nodes.add(s); nodes.add(t);
+    return { source: s, target: t, value: r.value };
+  });
+  initChart(el, {
+    tooltip: tooltip('item'),
+    series: [{
+      type: 'sankey',
+      data: [...nodes].map((n) => ({ name: n })),
+      links, layoutIterations: 16, nodeWidth: 16, nodeGap: 12,
+      lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.4 },
+      emphasis: { focus: 'adjacency' },
+      label: { color: COLOR.ink, fontSize: 14, formatter: (p) => p.name.replace(/[↑↓]$/, '') },
+      itemStyle: { color: (p) => (p.name.endsWith('↑') ? 'rgba(47,111,214,0.85)' : 'rgba(224,120,47,0.85)'), borderColor: 'rgba(255,255,255,0.5)' },
+    }],
+  });
+}
+
+function channelHourHeat(el) {
+  const ch = report.channelHour;
+  const names = [...new Set(ch.map((r) => r.channel_name))];
+  const max = Math.max(...ch.map((r) => r.total));
+  const idx = new Map(names.map((n, i) => [n, i]));
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: catAxis(names, { extra: { axisLabel: { color: COLOR.muted, fontSize: 11, width: 100, overflow: 'truncate' } } }),
+    visualMap: {
+      min: 0, max, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
+      textStyle: { color: COLOR.muted, fontSize: 12 },
+      inRange: { color: ['#eef4fb', '#bcd6f2', '#7fb2e6', '#2f6fd6', '#c9a227'] },
+    },
+    series: [{ type: 'heatmap', data: ch.map((r) => [r.hour, idx.get(r.channel_name), r.total]) }],
+  });
+}
+
+function channelTypePie(el) {
+  const ct = report.channelType;
+  initChart(el, {
+    tooltip: tooltip('item'),
+    legend: { textStyle: { color: COLOR.muted, fontSize: 13 }, bottom: 0 },
+    color: [COLOR.blue, COLOR.orange, COLOR.green],
+    series: [{
+      type: 'pie', radius: ['42%', '68%'], center: ['50%', '45%'],
+      label: { color: COLOR.ink, fontSize: 15, formatter: '{b}\n{d}%' },
+      data: ct.map((r) => ({ name: r.label, value: r.total })),
+    }],
+  });
+}
+
+function floorStacked(el) {
+  const f = report.floor;
+  initChart(el, {
+    color: [COLOR.blue, COLOR.orange],
+    tooltip: tooltip(),
+    legend: { data: ['進入', '離開'], textStyle: { color: COLOR.muted, fontSize: 13 }, top: 6 },
+    grid: gridOpt(),
+    xAxis: catAxis(f.map((r) => r.floor)),
+    yAxis: valAxis(),
+    series: [
+      { name: '進入', type: 'bar', stack: 'f', data: f.map((r) => r.enter), barMaxWidth: 30, label: { show: true, position: 'inside', fontSize: 12, color: '#fff', fontWeight: 'bold', formatter: (p) => fmt(p.value) } },
+      { name: '離開', type: 'bar', stack: 'f', data: f.map((r) => r.exit), barMaxWidth: 30, label: { show: true, position: 'inside', fontSize: 12, color: '#fff', fontWeight: 'bold', formatter: (p) => fmt(p.value) } },
+    ],
+  });
+}
+
+function dailyNet(el) {
+  const d = report.daily;
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(d.map((r) => r.date.slice(5))),
+    yAxis: valAxis(),
+    series: [{
+      type: 'bar', data: d.map((r) => r.enter - r.exit), barMaxWidth: 16,
+      itemStyle: { color: (p) => (p.value >= 0 ? COLOR.blue : COLOR.orange) },
+      label: { show: true, position: 'top', fontSize: 11, color: COLOR.ink, formatter: (p) => fmt(p.value) },
+    }],
+  });
+}
+
+function dailyScatter(el) {
+  const d = report.daily;
+  const max = Math.max(...d.map((r) => r.total));
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: { ...valAxis(), name: '進入人次', nameTextStyle: { color: COLOR.muted } },
+    yAxis: { ...valAxis(), name: '離開人次', nameTextStyle: { color: COLOR.muted } },
+    series: [{
+      type: 'scatter', data: d.map((r) => [r.enter, r.exit, r.total]),
+      symbolSize: (v) => 8 + (v[2] / max) * 26,
+      itemStyle: { color: 'rgba(47,111,214,0.7)' },
+      label: { show: true, position: 'top', fontSize: 10, color: COLOR.muted, formatter: (p) => p.data[2] },
+    }],
+  });
+}
+
+function ratioRank(el) {
+  const rows = report.channel
+    .filter((r) => r.exit > 0)
+    .map((r) => ({ name: r.channel_name, ratio: r.enter / r.exit }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .slice(0, 12);
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: { type: 'log', splitLine: { lineStyle: { color: '#edf1f7' } }, axisLabel: { color: COLOR.muted, fontSize: 12 }, name: '進/出比 (log)' },
+    yAxis: catAxis(rows.map((r) => r.name).reverse(), { extra: { axisLabel: { color: COLOR.muted, fontSize: 12, width: 100, overflow: 'truncate' } } }),
+    series: [{
+      type: 'bar', data: rows.map((r) => r.ratio).reverse(), barMaxWidth: 16,
+      itemStyle: { color: (p) => (p.value >= 1 ? COLOR.blue : COLOR.orange) },
+      label: { show: true, position: 'right', fontSize: 11, color: COLOR.ink, formatter: (p) => p.value.toFixed(2) },
+      markLine: { symbol: 'none', lineStyle: { color: COLOR.yellow, type: 'dashed' }, label: { color: COLOR.muted, formatter: '1:1' }, data: [{ xAxis: 1 }] },
+    }],
+  });
+}
+
+function peakTop5(el) {
+  const top = [...report.hour].sort((a, b) => b.total - a.total).slice(0, 5).reverse();
+  const max = top[top.length - 1].total;
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: valAxis(),
+    yAxis: catAxis(top.map((r) => `${r.hour}:00`)),
+    series: [{
+      type: 'bar', data: top.map((r) => r.total), barMaxWidth: 24,
+      itemStyle: { color: (p) => (p.value === max ? COLOR.yellow : COLOR.blue) },
+      label: { show: true, position: 'right', color: COLOR.ink, fontSize: 14, formatter: (p) => fmt(p.value) },
+    }],
+  });
+}
+
+function anomaly(el) {
+  const a = report.anomalies;
+  const avg = a.reduce((s, r) => s + r.total, 0) / a.length;
+  initChart(el, {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(a.map((r) => r.date.slice(5))),
+    yAxis: valAxis(),
+    series: [{
+      type: 'bar', data: a.map((r) => r.total), barMaxWidth: 14,
+      itemStyle: { color: (p) => (a[p.dataIndex].flag ? COLOR.red : 'rgba(47,158,110,0.85)') },
+      label: { show: true, position: 'top', fontSize: 11, color: COLOR.ink, formatter: (p) => fmt(p.value) },
+      markLine: {
+        symbol: 'none', lineStyle: { color: COLOR.yellow, type: 'dashed' },
+        label: { color: COLOR.muted, formatter: `平均 ${fmt(avg.toFixed(0))}` },
+        data: [{ yAxis: avg }],
+      },
+    }],
+  });
+}
+
+function flowTier(el) {
+  const h = report.hour;
+  const peak = Math.max(...h.map((r) => r.total));
+  const tier = { high: 0, mid: 0, low: 0 };
+  h.forEach((r) => {
+    const p = r.total / peak;
+    if (p >= 0.6) tier.high++;
+    else if (p >= 0.2) tier.mid++;
+    else tier.low++;
+  });
+  initChart(el, {
+    tooltip: tooltip('item'),
+    legend: { textStyle: { color: COLOR.muted, fontSize: 13 }, bottom: 0 },
+    color: [COLOR.yellow, COLOR.blue, COLOR.line],
+    series: [{
+      type: 'pie', radius: ['40%', '66%'], center: ['50%', '45%'],
+      label: { color: COLOR.ink, fontSize: 15, formatter: '{b}\n{d}%' },
+      data: [
+        { name: '高流量時段', value: tier.high },
+        { name: '中流量時段', value: tier.mid },
+        { name: '低流量時段', value: tier.low },
+      ],
+    }],
+  });
+}
+
+function channelShare(el) {
+  const top = report.channel.slice(0, 10);
+  const rest = report.channel.slice(10).reduce((s, r) => s + r.total, 0);
+  const data = top.map((r) => ({ name: r.channel_name, value: r.total }));
+  if (rest > 0) data.push({ name: '其他', value: rest });
+  initChart(el, {
+    tooltip: tooltip('item'),
+    legend: { type: 'scroll', textStyle: { color: COLOR.muted, fontSize: 12 }, bottom: 0 },
+    color: [COLOR.blue, COLOR.green, COLOR.yellow, COLOR.orange, COLOR.purple, COLOR.teal, COLOR.red, '#5a7fae', '#c0a86a', '#7fae5a', COLOR.line],
+    series: [{
+      type: 'pie', radius: ['42%', '66%'], center: ['50%', '45%'],
+      label: { color: COLOR.ink, fontSize: 13, formatter: '{b}\n{d}%' },
+      data,
+    }],
+  });
+}
+
+function buildKpis() {
+  const m = report.meta;
+  const kpis = [
+    { label: '統計總人次', value: fmt(m.total_people), cls: 'green', sub: `進入 ${fmt(m.total_enter)} · 離開 ${fmt(m.total_exit)}` },
+    { label: '平均每日人次', value: fmt(Math.round(m.daily_avg)), cls: 'blue', sub: `共 ${m.days} 天` },
+    { label: '單日最多人次', value: fmt(m.max_day.total), cls: 'yellow', sub: m.max_day.date },
+    { label: '最繁忙時段', value: `${m.peak_hour.hour}:00`, cls: 'orange', sub: `平均每小時 ${fmt(Math.round(m.peak_hour.avg))} 人次` },
+    { label: '週末 / 平日', value: `${m.weekend_ratio ? m.weekend_ratio.toFixed(2) : '–'} 倍`, cls: 'orange', sub: '週末比平日多' },
+    { label: '最多人流通道', value: '—', cls: 'blue', sub: m.busiest_channel.name },
+  ];
+  const wrap = document.getElementById('kpis');
+  kpis.forEach((k) => {
+    const el = document.createElement('div');
+    el.className = 'kpi';
+    el.innerHTML = `<div class="label">${k.label}</div><div class="value ${k.cls}">${k.value}</div><div class="sub">${k.sub}</div>`;
+    wrap.appendChild(el);
+  });
+}
+
+function buildViewGrid() {
+  const specs = [
+    [dailyTrend, '每日進出趨勢（折線）', 1, true],
+    [dailyCumulative, '累計人次（面積）', 2, false],
+    [hourAvg, '24 時平均進出（柱狀）', 3, true],
+    [last7Flow, '最近 7 天 24 時輪廓', 4, true],
+    [calendarHeat, '日人次月曆熱力', 5, true],
+    [weekdayHourHeat, '星期 × 小時熱力', 6, true],
+    [weekdayBar, '一週七天平均人次', 7, false],
+    [weekdayVsWeekend, '平日 vs 週末', 8, false],
+    [channelTop10, '各通道總流量 Top 10', 9, true],
+    [channelGrouped, '通道進出分組（Top 10）', 10, true],
+    [channelNet, '各通道淨流排行', 11, false],
+    [floorSankey, '樓梯流向（上 / 下）', 12, true],
+    [channelHourHeat, '通道 × 小時熱力', 13, true],
+    [channelTypePie, '通道類型分布', 14, false],
+    [floorStacked, '各樓層人次堆積', 15, false],
+    [dailyNet, '每日淨流（進－出）', 16, true],
+    [dailyScatter, '每日進出散點', 17, false],
+    [ratioRank, '各通道進出比例', 18, false],
+    [peakTop5, '最繁忙時段 Top 5', 19, false],
+    [anomaly, '異常日標注（紅 = 異常）', 20, true],
+    [flowTier, '高 / 中 / 低流量時段', 21, false],
+    [channelShare, '各通道佔比', 22, false],
+  ];
+  specs.forEach(([fn, title, no, wide]) => fn(card(title, no, wide)));
+}
+
+/* ================= 樓層頁 ================= */
+
+function buildFloorBar() {
+  const bar = document.getElementById('floor-bar');
+  const btns = [{ label: '全部樓層', floor: null }, ...FLOOR_LIST.map((f) => ({ label: f, floor: f }))];
+  btns.forEach((b) => {
+    const el = document.createElement('div');
+    el.className = 'floor-btn' + (b.floor === null ? ' active' : '');
+    el.textContent = b.label;
+    el.addEventListener('click', () => selectFloor(b.floor));
+    bar.appendChild(el);
+  });
+}
+
+function selectFloor(floor) {
+  activeFloor = floor;
+  document.querySelectorAll('.floor-btn').forEach((b) => {
+    b.classList.toggle('active', b.textContent === (floor === null ? '全部樓層' : floor));
+  });
+  document.getElementById('floor-all').style.display = floor === null ? 'block' : 'none';
+  document.getElementById('floor-detail').style.display = floor === null ? 'none' : 'block';
+  if (floor === null) {
+    renderFloorAll();
+  } else {
+    renderFloorDetail(floor);
+  }
+  resizePage();
+}
+
+function renderFloorAll() {
+  const f = report.floors;
+  const names = f.map((r) => r.floor).reverse();
+  initChart(document.getElementById('fc-compare'), {
+    tooltip: tooltip(),
+    grid: gridOpt(),
+    xAxis: valAxis(),
+    yAxis: catAxis(names),
+    series: [{
+      type: 'bar', data: f.map((r) => r.total).reverse(), barMaxWidth: 22,
+      itemStyle: { color: COLOR.blue, borderRadius: [0, 3, 3, 0] },
+      label: { show: true, position: 'right', color: COLOR.ink, fontSize: 14, formatter: (p) => fmt(p.value) },
+    }],
+  });
+  const nodes = new Set();
+  const links = report.sankey.map((r) => {
+    const dir = r.direction === 'up' ? '\u2191' : '\u2193';
+    const s = r.from + dir, t = r.to + dir;
+    nodes.add(s); nodes.add(t);
+    return { source: s, target: t, value: r.value };
+  });
+  initChart(document.getElementById('fc-sankey'), {
+    tooltip: tooltip('item'),
+    series: [{
+      type: 'sankey',
+      data: [...nodes].map((n) => ({ name: n })),
+      links, layoutIterations: 16, nodeWidth: 16, nodeGap: 12,
+      lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.4 },
+      emphasis: { focus: 'adjacency' },
+      label: { color: COLOR.ink, fontSize: 14, formatter: (p) => p.name.replace(/[↑↓]$/, '') },
+      itemStyle: { color: (p) => (p.name.endsWith('↑') ? 'rgba(47,111,214,0.85)' : 'rgba(224,120,47,0.85)') },
+    }],
+  });
+}
+
+function renderFloorDetail(floor) {
+  const fd = report.floors.find((x) => x.floor === floor);
+  if (!fd) return;
+
+  const k = document.getElementById('fd-kpis');
+  k.innerHTML = '';
+  const kpis = [
+    { label: '該層總人次', value: fmt(fd.total), cls: 'green', sub: `進入 ${fmt(fd.enter)} · 離開 ${fmt(fd.exit)}` },
+    { label: '平均每日', value: fmt(Math.round(fd.total / report.meta.days)), cls: 'blue', sub: `${report.meta.days} 天平均` },
+    { label: '通道數量', value: String(fd.channels.length), cls: 'yellow', sub: '電梯 / 樓梯 / 出入口' },
+    { label: '最繁忙通道', value: fd.channels.length ? '—' : '', cls: 'orange', sub: fd.channels.length ? fd.channels[0].channel_name : '—' },
+  ];
+  kpis.forEach((x) => {
+    const el = document.createElement('div');
+    el.className = 'kpi';
+    el.innerHTML = `<div class="label">${x.label}</div><div class="value ${x.cls}">${x.value}</div><div class="sub">${x.sub}</div>`;
+    k.appendChild(el);
+  });
+
+  const ch = document.getElementById('fd-channels');
+  ch.innerHTML = '';
+  fd.channels.forEach((c) => {
+    const el = document.createElement('div');
+    el.className = 'ch-card';
+    const net = c.enter - c.exit;
+    el.innerHTML = `
+      <div class="name">${c.channel_name}<span class="badge ${c.type}">${c.type_label}</span></div>
+      <div class="big">${fmt(c.total)} <span style="font-size:15px;color:var(--muted)">人次</span></div>
+      <div class="nums">
+        <span>進入 <b style="color:var(--blue)">${fmt(c.enter)}</b></span>
+        <span>離開 <b style="color:var(--orange)">${fmt(c.exit)}</b></span>
+        <span>淨流 <b style="color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(net)}</b></span>
+      </div>`;
+    ch.appendChild(el);
+  });
+
+  initChart(document.getElementById('fd-hour'), {
+    tooltip: tooltip(),
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: valAxis(),
+    series: [{
+      type: 'bar', data: fd.hour, barMaxWidth: 14,
+      itemStyle: { color: COLOR.blue },
+      label: { show: true, position: 'top', fontSize: 11, color: COLOR.blue, formatter: (p) => p.value > 0 ? fmt(p.value) : '' },
+    }],
+  });
+
+  initChart(document.getElementById('fd-daily'), {
+    tooltip: tooltip(),
+    grid: gridOpt(),
+    xAxis: catAxis(fd.daily.map((r) => r.date.slice(5))),
+    yAxis: valAxis(),
+    series: [{
+      type: 'line', smooth: true, data: fd.daily.map((r) => r.total), symbolSize: 5,
+      areaStyle: { color: COLOR.green, opacity: 0.12 }, lineStyle: { color: COLOR.green, width: 2 },
+    }],
+  });
+
+  initChart(document.getElementById('fd-pie'), {
+    tooltip: tooltip('item'),
+    legend: { type: 'scroll', textStyle: { color: COLOR.muted, fontSize: 12 }, bottom: 0 },
+    color: [COLOR.blue, COLOR.green, COLOR.yellow, COLOR.orange, COLOR.purple, COLOR.teal, COLOR.red],
+    series: [{
+      type: 'pie', radius: ['40%', '66%'], center: ['50%', '44%'],
+      label: { color: COLOR.ink, fontSize: 13, formatter: '{b}\n{d}%' },
+      data: fd.channels.map((c) => ({ name: c.channel_name, value: c.total })),
+    }],
+  });
+
+  const names = fd.channels.map((c) => c.channel_name);
+  const nameSet = new Set(names);
+  const heatRows = report.channelHour.filter((r) => nameSet.has(r.channel_name));
+  const max = Math.max(...heatRows.map((r) => r.total), 1);
+  const idx = new Map(names.map((n, i) => [n, i]));
+  initChart(document.getElementById('fd-heat'), {
+    tooltip: tooltip('item'),
+    grid: gridOpt(),
+    xAxis: catAxis(HOURS, { interval: 2 }),
+    yAxis: catAxis(names, { extra: { axisLabel: { color: COLOR.muted, fontSize: 12, width: 90, overflow: 'truncate' } } }),
+    visualMap: {
+      min: 0, max, calculable: false, orient: 'horizontal', left: 'center', bottom: 0,
+      textStyle: { color: COLOR.muted, fontSize: 12 },
+      inRange: { color: ['#eef4fb', '#bcd6f2', '#7fb2e6', '#2f6fd6', '#e0782f'] },
+    },
+    series: [{ type: 'heatmap', data: heatRows.map((r) => [r.hour, idx.get(r.channel_name), r.total]) }],
+  });
+}
+
+/* ================= 資料頁 ================= */
+
+function renderDataTables() {
+  const td = document.getElementById('table-daily');
+  let html = '<table><thead><tr><th>日期</th><th>星期</th><th class="num">進入</th><th class="num">離開</th><th class="num">合計人次</th></tr></thead><tbody>';
+  report.daily.forEach((r) => {
+    html += `<tr><td>${r.date}</td><td>${WEEKDAYS[r.weekday]}</td><td class="num">${fmt(r.enter)}</td><td class="num">${fmt(r.exit)}</td><td class="num"><b>${fmt(r.total)}</b></td></tr>`;
+  });
+  html += '</tbody></table>';
+  td.innerHTML = html;
+
+  const tc = document.getElementById('table-channel');
+  html = '<table><thead><tr><th>通道</th><th>樓層</th><th>類型</th><th class="num">進入</th><th class="num">離開</th><th class="num">合計人次</th><th class="num">淨流</th></tr></thead><tbody>';
+  report.channel.forEach((r) => {
+    const net = r.enter - r.exit;
+    html += `<tr><td>${r.channel_name}</td><td>${r.floors.join('、')}</td><td>${r.type_label}</td><td class="num">${fmt(r.enter)}</td><td class="num">${fmt(r.exit)}</td><td class="num"><b>${fmt(r.total)}</b></td><td class="num" style="color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(net)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  tc.innerHTML = html;
+}
+
+/* ================= 導航 ================= */
+
+function switchPage(page) {
+  const titles = { view: '視圖', floor: '樓層', data: '資料' };
+  document.getElementById('page-title').textContent = titles[page];
+  document.querySelectorAll('.menu-item').forEach((m) => m.classList.toggle('active', m.dataset.page === page));
+  document.querySelectorAll('section.page').forEach((s) => s.classList.toggle('active', s.id === 'page-' + page));
+  resizePage();
+}
+
+function fillMeta() {
+  const m = report.meta;
+  document.getElementById('m-range').textContent = `${m.date_from} ~ ${m.date_to}`;
+  document.getElementById('m-days').textContent = `${m.days} 天`;
+  document.getElementById('m-generated').textContent = m.generated_at;
+}
+
+function setStatus(msg) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function main() {
+  try {
+    const res = await fetch('./data.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    report = await res.json();
+    fillMeta();
+    buildKpis();
+    buildViewGrid();
+    buildFloorBar();
+    selectFloor(null);
+    renderDataTables();
+
+    document.querySelectorAll('.menu-item').forEach((m) => {
+      m.addEventListener('click', () => switchPage(m.dataset.page));
+    });
+    document.getElementById('tab-daily').addEventListener('click', () => {
+      document.getElementById('tab-daily').classList.add('active');
+      document.getElementById('tab-channel').classList.remove('active');
+      document.getElementById('table-daily').style.display = 'block';
+      document.getElementById('table-channel').style.display = 'none';
+    });
+    document.getElementById('tab-channel').addEventListener('click', () => {
+      document.getElementById('tab-channel').classList.add('active');
+      document.getElementById('tab-daily').classList.remove('active');
+      document.getElementById('table-daily').style.display = 'none';
+      document.getElementById('table-channel').style.display = 'block';
+    });
+    setStatus(`✓ 已載入（${report.meta.days} 天，${report.meta.date_from} ~ ${report.meta.date_to}）`);
+  } catch (err) {
+    setStatus('無法讀取 data.json：' + err.message + '。請以 HTTP 伺服器開啟（python -m http.server）。');
+  }
+}
+
+main();
+</script>
+</body>
+</html>

@@ -1,10 +1,10 @@
 SET FOREIGN_KEY_CHECKS=0;
 TRUNCATE TABLE `building_facade_config`;
-TRUNCATE TABLE `device_cell`;
-TRUNCATE TABLE `room_cell`;
+TRUNCATE TABLE `building_device_cell`;
+TRUNCATE TABLE `building_room_cell`;
 TRUNCATE TABLE `people_count_hourly`;
-TRUNCATE TABLE `room`;
+TRUNCATE TABLE `building_room`;
 TRUNCATE TABLE `building_cell`;
-TRUNCATE TABLE `floor`;
+TRUNCATE TABLE `building_floor`;
 TRUNCATE TABLE `building`;
 SET FOREIGN_KEY_CHECKS=1;

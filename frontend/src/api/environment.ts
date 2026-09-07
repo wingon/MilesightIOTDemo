@@ -2,7 +2,7 @@ import api from './http'
 
 /** 设备绑定的格子（building_cell）坐标，x/z 为前端 3D 平面世界坐标 */
 export interface DeviceCell {
-  cell_id: number
+  cell_id: string | number
   row_no: number
   col_no: number
   x: number
@@ -77,7 +77,7 @@ export function getFloorEnvironmentSummary() {
 /** 绑定设备到具体格子（设备→格子；替换设备原有绑定） */
 export function bindDeviceToCell(
   sn: string,
-  params: { floor_id: number; row_no: number; col_no: number },
+  params: { floor_id: string | number; row_no: number; col_no: number },
 ) {
   return api.post<{ ok: boolean }>(`/api/v1/environment/devices/${sn}/cell`, params)
 }

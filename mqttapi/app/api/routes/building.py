@@ -189,7 +189,7 @@ def save_floor_layout(
     db: Database = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Batch save floor room↔cell layout (atomically replaces the whole floor's room_cell)."""
+    """Batch save floor room↔cell layout (atomically replaces the whole floor's building_room_cell)."""
     inserted = db.save_floor_layout(body.floor_id, body.layout)
     return {"ok": True, "inserted": inserted}
 

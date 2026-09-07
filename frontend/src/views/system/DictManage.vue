@@ -89,7 +89,7 @@ async function loadData() {
 // ---------- 字典类型新增 / 编辑 ----------
 const typeModalOpen = ref(false)
 const typeModalLoading = ref(false)
-const typeEditingId = ref<number | null>(null)
+const typeEditingId = ref<string | number | null>(null)
 const typeForm = reactive({ dict_name: '', dict_type: '', status: '0', remark: '' })
 
 function openTypeCreate() {
@@ -153,7 +153,7 @@ function onDeleteType() {
 // ---------- 字典数据新增 / 编辑 ----------
 const dataModalOpen = ref(false)
 const dataModalLoading = ref(false)
-const dataEditingCode = ref<number | null>(null)
+const dataEditingCode = ref<string | number | null>(null)
 const dataForm = reactive({
   dict_sort: 0,
   dict_label: '',

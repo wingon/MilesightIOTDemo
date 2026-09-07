@@ -11,8 +11,8 @@ export interface PageResult<T> {
 
 // ---------- 用户管理 ----------
 export interface SysUserRow {
-  id: number
-  dept_id?: number | null
+  id: string | number
+  dept_id?: string | number | null
   dept_name?: string | null
   username: string
   nickname?: string | null
@@ -29,7 +29,7 @@ export interface SysUserRow {
 export interface SysUserBody {
   username?: string
   password?: string
-  dept_id?: number | null
+  dept_id?: string | number | null
   nickname?: string | null
   email?: string | null
   phone?: string | null
@@ -40,48 +40,48 @@ export interface SysUserBody {
 export function listUsers(params: {
   keyword?: string
   status?: number
-  dept_id?: number
+  dept_id?: string | number
   offset?: number
   limit?: number
 }) {
   return api.get<PageResult<SysUserRow>>('/api/v1/system/user/list', { params })
 }
 
-export function getUserRoleIds(userId: number) {
-  return api.get<number[]>(`/api/v1/system/user/${userId}/roles`)
+export function getUserRoleIds(userId: string | number) {
+  return api.get<(string | number)[]>(`/api/v1/system/user/${userId}/roles`)
 }
 
-export function getUserPostIds(userId: number) {
-  return api.get<number[]>(`/api/v1/system/user/${userId}/posts`)
+export function getUserPostIds(userId: string | number) {
+  return api.get<(string | number)[]>(`/api/v1/system/user/${userId}/posts`)
 }
 
 export function createUser(body: SysUserBody) {
-  return api.post<{ id: number }>('/api/v1/system/user', body)
+  return api.post<{ id: string | number }>('/api/v1/system/user', body)
 }
 
-export function updateUser(userId: number, body: SysUserBody) {
+export function updateUser(userId: string | number, body: SysUserBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/user/${userId}`, body)
 }
 
-export function resetUserPassword(userId: number, password: string) {
+export function resetUserPassword(userId: string | number, password: string) {
   return api.put<{ ok: boolean }>(`/api/v1/system/user/${userId}/password`, { password })
 }
 
-export function assignUserRoles(userId: number, roleIds: number[]) {
+export function assignUserRoles(userId: string | number, roleIds: (string | number)[]) {
   return api.put<{ ok: boolean }>(`/api/v1/system/user/${userId}/roles`, { role_ids: roleIds })
 }
 
-export function assignUserPosts(userId: number, postIds: number[]) {
+export function assignUserPosts(userId: string | number, postIds: (string | number)[]) {
   return api.put<{ ok: boolean }>(`/api/v1/system/user/${userId}/posts`, { post_ids: postIds })
 }
 
-export function deleteUser(userId: number) {
+export function deleteUser(userId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/user/${userId}`)
 }
 
 // ---------- 角色管理 ----------
 export interface SysRoleRow {
-  id: number
+  id: string | number
   role_name: string
   role_key: string
   sort: number
@@ -103,7 +103,7 @@ export interface SysRoleBody {
 
 export interface DataScopeBody {
   data_scope?: string
-  dept_ids?: number[]
+  dept_ids?: (string | number)[]
 }
 
 export function listRoles(params: {
@@ -122,16 +122,16 @@ export function listRoleOptions() {
   return api.get<SysRoleRow[]>('/api/v1/system/role/options')
 }
 
-export function getRole(roleId: number) {
+export function getRole(roleId: string | number) {
   return api.get<SysRoleRow>(`/api/v1/system/role/${roleId}`)
 }
 
-export function getRoleMenuIds(roleId: number) {
-  return api.get<number[]>(`/api/v1/system/role/${roleId}/menus`)
+export function getRoleMenuIds(roleId: string | number) {
+  return api.get<(string | number)[]>(`/api/v1/system/role/${roleId}/menus`)
 }
 
-export function getRoleDeptIds(roleId: number) {
-  return api.get<number[]>(`/api/v1/system/role/${roleId}/depts`)
+export function getRoleDeptIds(roleId: string | number) {
+  return api.get<(string | number)[]>(`/api/v1/system/role/${roleId}/depts`)
 }
 
 export function getRoleMenuTree() {
@@ -143,39 +143,39 @@ export function getRoleDeptTree() {
 }
 
 export function createRole(body: SysRoleBody) {
-  return api.post<{ id: number }>('/api/v1/system/role', body)
+  return api.post<{ id: string | number }>('/api/v1/system/role', body)
 }
 
-export function updateRole(roleId: number, body: SysRoleBody) {
+export function updateRole(roleId: string | number, body: SysRoleBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/role/${roleId}`, body)
 }
 
-export function assignRoleMenus(roleId: number, menuIds: number[]) {
+export function assignRoleMenus(roleId: string | number, menuIds: (string | number)[]) {
   return api.put<{ ok: boolean }>(`/api/v1/system/role/${roleId}/menus`, { menu_ids: menuIds })
 }
 
-export function assignRoleDataScope(roleId: number, body: DataScopeBody) {
+export function assignRoleDataScope(roleId: string | number, body: DataScopeBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/role/${roleId}/data-scope`, {
     data_scope: body.data_scope,
     dept_ids: body.dept_ids || [],
   })
 }
 
-export function changeRoleStatus(roleId: number, status: number) {
+export function changeRoleStatus(roleId: string | number, status: number) {
   return api.put<{ ok: boolean }>(`/api/v1/system/role/${roleId}/status`, { status })
 }
 
-export function deleteRole(roleId: number) {
+export function deleteRole(roleId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/role/${roleId}`)
 }
 
-export function deleteRolesBatch(roleIds: number[]) {
+export function deleteRolesBatch(roleIds: (string | number)[]) {
   return api.delete<{ ok: boolean; deleted: number }>('/api/v1/system/role', { data: { role_ids: roleIds } })
 }
 
 // ---------- 菜单管理 ----------
 export interface SysMenuBody {
-  parent_id?: number
+  parent_id?: string | number
   menu_name: string
   i18n_key?: string | null
   path?: string | null
@@ -193,25 +193,25 @@ export function listMenus() {
   return api.get<MenuNode[]>('/api/v1/system/menu/list')
 }
 
-export function getMenu(menuId: number) {
+export function getMenu(menuId: string | number) {
   return api.get<MenuNode>(`/api/v1/system/menu/${menuId}`)
 }
 
 export function createMenu(body: SysMenuBody) {
-  return api.post<{ id: number }>('/api/v1/system/menu', body)
+  return api.post<{ id: string | number }>('/api/v1/system/menu', body)
 }
 
-export function updateMenu(menuId: number, body: SysMenuBody) {
+export function updateMenu(menuId: string | number, body: SysMenuBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/menu/${menuId}`, body)
 }
 
-export function deleteMenu(menuId: number) {
+export function deleteMenu(menuId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/menu/${menuId}`)
 }
 
 // ---------- 操作日志 ----------
 export interface OperLogRow {
-  id: number
+  id: string | number
   title?: string
   business_type: number
   method?: string
@@ -239,7 +239,7 @@ export function listOperLogs(params: {
   return api.get<PageResult<OperLogRow>>('/api/v1/system/log/list', { params })
 }
 
-export function deleteOperLogs(ids: number[]) {
+export function deleteOperLogs(ids: (string | number)[]) {
   return api.delete<{ ok: boolean; deleted: number }>('/api/v1/system/log', { data: { ids } })
 }
 
@@ -249,8 +249,8 @@ export function cleanOperLogs() {
 
 // ---------- 部门管理 ----------
 export interface SysDeptRow {
-  dept_id: number
-  parent_id: number
+  dept_id: string | number
+  parent_id: string | number
   ancestors?: string
   dept_name: string
   order_num: number
@@ -263,7 +263,7 @@ export interface SysDeptRow {
 }
 
 export interface SysDeptBody {
-  parent_id?: number
+  parent_id?: string | number
   dept_name: string
   order_num?: number
   leader?: string | null
@@ -277,20 +277,20 @@ export function listDepts() {
 }
 
 export function createDept(body: SysDeptBody) {
-  return api.post<{ dept_id: number }>('/api/v1/system/dept', body)
+  return api.post<{ dept_id: string | number }>('/api/v1/system/dept', body)
 }
 
-export function updateDept(deptId: number, body: SysDeptBody) {
+export function updateDept(deptId: string | number, body: SysDeptBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/dept/${deptId}`, body)
 }
 
-export function deleteDept(deptId: number) {
+export function deleteDept(deptId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/dept/${deptId}`)
 }
 
 // ---------- 岗位管理 ----------
 export interface SysPostRow {
-  post_id: number
+  post_id: string | number
   post_code: string
   post_name: string
   post_sort: number
@@ -322,20 +322,20 @@ export function listPostOptions() {
 }
 
 export function createPost(body: SysPostBody) {
-  return api.post<{ post_id: number }>('/api/v1/system/post', body)
+  return api.post<{ post_id: string | number }>('/api/v1/system/post', body)
 }
 
-export function updatePost(postId: number, body: SysPostBody) {
+export function updatePost(postId: string | number, body: SysPostBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/post/${postId}`, body)
 }
 
-export function deletePost(postId: number) {
+export function deletePost(postId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/post/${postId}`)
 }
 
 // ---------- 登录日志 ----------
 export interface LoginLogRow {
-  info_id: number
+  info_id: string | number
   user_name?: string
   ipaddr?: string
   login_location?: string
@@ -357,7 +357,7 @@ export function listLoginLogs(params: {
   return api.get<PageResult<LoginLogRow>>('/api/v1/system/loginlog/list', { params })
 }
 
-export function deleteLoginLogs(ids: number[]) {
+export function deleteLoginLogs(ids: (string | number)[]) {
   return api.delete<{ ok: boolean; deleted: number }>('/api/v1/system/loginlog', { data: { ids } })
 }
 
@@ -367,7 +367,7 @@ export function cleanLoginLogs() {
 
 // ---------- 参数设置 ----------
 export interface SysConfigRow {
-  config_id: number
+  config_id: string | number
   config_name: string
   config_key: string
   config_value: string
@@ -395,20 +395,20 @@ export function listConfigs(params: {
 }
 
 export function createConfig(body: SysConfigBody) {
-  return api.post<{ config_id: number }>('/api/v1/system/config', body)
+  return api.post<{ config_id: string | number }>('/api/v1/system/config', body)
 }
 
-export function updateConfig(configId: number, body: SysConfigBody) {
+export function updateConfig(configId: string | number, body: SysConfigBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/config/${configId}`, body)
 }
 
-export function deleteConfig(configId: number) {
+export function deleteConfig(configId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/config/${configId}`)
 }
 
 // ---------- 字典管理 ----------
 export interface SysDictTypeRow {
-  dict_id: number
+  dict_id: string | number
   dict_name: string
   dict_type: string
   status: string
@@ -424,7 +424,7 @@ export interface SysDictTypeBody {
 }
 
 export interface SysDictDataRow {
-  dict_code: number
+  dict_code: string | number
   dict_sort: number
   dict_label: string
   dict_value: string
@@ -460,14 +460,14 @@ export function listDictTypes(params: {
 }
 
 export function createDictType(body: SysDictTypeBody) {
-  return api.post<{ dict_id: number }>('/api/v1/system/dict/type', body)
+  return api.post<{ dict_id: string | number }>('/api/v1/system/dict/type', body)
 }
 
-export function updateDictType(dictId: number, body: SysDictTypeBody) {
+export function updateDictType(dictId: string | number, body: SysDictTypeBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/dict/type/${dictId}`, body)
 }
 
-export function deleteDictType(dictId: number) {
+export function deleteDictType(dictId: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/dict/type/${dictId}`)
 }
 
@@ -482,20 +482,20 @@ export function listDictData(params: {
 }
 
 export function createDictData(body: SysDictDataBody) {
-  return api.post<{ dict_code: number }>('/api/v1/system/dict/data', body)
+  return api.post<{ dict_code: string | number }>('/api/v1/system/dict/data', body)
 }
 
-export function updateDictData(dictCode: number, body: SysDictDataBody) {
+export function updateDictData(dictCode: string | number, body: SysDictDataBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/dict/data/${dictCode}`, body)
 }
 
-export function deleteDictData(dictCode: number) {
+export function deleteDictData(dictCode: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/dict/data/${dictCode}`)
 }
 
 // ---------- 白名单设置 ----------
 export interface WhitelistRow {
-  id: number
+  id: string | number
   path: string
   path_type: string
   remark?: string | null
@@ -521,13 +521,13 @@ export function listWhitelists(params: {
 }
 
 export function createWhitelist(body: WhitelistBody) {
-  return api.post<{ id: number }>('/api/v1/system/whitelist', body)
+  return api.post<{ id: string | number }>('/api/v1/system/whitelist', body)
 }
 
-export function updateWhitelist(id: number, body: WhitelistBody) {
+export function updateWhitelist(id: string | number, body: WhitelistBody) {
   return api.put<{ ok: boolean }>(`/api/v1/system/whitelist/${id}`, body)
 }
 
-export function deleteWhitelist(id: number) {
+export function deleteWhitelist(id: string | number) {
   return api.delete<{ ok: boolean }>(`/api/v1/system/whitelist/${id}`)
 }

@@ -29,7 +29,7 @@ const loading = ref(false)
 const rows = ref<SysUserRow[]>([])
 const total = ref(0)
 const deptTree = ref<SysDeptRow[]>([])
-const selectedDept = ref<number | undefined>(undefined)
+const selectedDept = ref<string | number | undefined>(undefined)
 const deptSearchValue = ref('')
 
 const columns: TableColumnsType<SysUserRow> = [
@@ -96,7 +96,7 @@ function onReset() {
   onSearch()
 }
 
-function onSelectDept(deptId?: number) {
+function onSelectDept(deptId?: string | number) {
   selectedDept.value = deptId
   onSearch()
 }
@@ -108,18 +108,18 @@ function isSuperAdmin(row: SysUserRow): boolean {
 // ---------- 新增 / 编辑 ----------
 const modalOpen = ref(false)
 const modalLoading = ref(false)
-const editingId = ref<number | null>(null)
+const editingId = ref<string | number | null>(null)
 const form = reactive({
   username: '',
   password: '',
-  dept_id: undefined as number | undefined,
+  dept_id: undefined as string | number | undefined,
   nickname: '',
   email: '',
   phone: '',
   status: 1,
   remark: '',
-  post_ids: [] as number[],
-  role_ids: [] as number[],
+  post_ids: [] as (string | number)[],
+  role_ids: [] as (string | number)[],
 })
 
 const roleOptions = ref<SysRoleRow[]>([])
@@ -243,7 +243,7 @@ function onDelete(row: SysUserRow) {
 // ---------- 重置密码 ----------
 const pwdOpen = ref(false)
 const pwdLoading = ref(false)
-const pwdUserId = ref<number | null>(null)
+const pwdUserId = ref<string | number | null>(null)
 const newPassword = ref('')
 
 function openResetPwd(row: SysUserRow) {
@@ -265,7 +265,7 @@ async function submitResetPwd() {
 }
 
 function buildDeptTree(flat: SysDeptRow[]): SysDeptRow[] {
-  const map = new Map<number, SysDeptRow>()
+  const map = new Map<string | number, SysDeptRow>()
   const roots: SysDeptRow[] = []
   for (const item of flat) {
     map.set(item.dept_id, { ...item, children: [] })
@@ -291,8 +291,8 @@ function filterDeptTree(nodes: SysDeptRow[], keyword: string): SysDeptRow[] {
   }, [])
 }
 
-function collectAllKeys(nodes: SysDeptRow[]): number[] {
-  const keys: number[] = []
+function collectAllKeys(nodes: SysDeptRow[]): (string | number)[] {
+  const keys: (string | number)[] = []
   for (const node of nodes) {
     keys.push(node.dept_id)
     if (node.children?.length) keys.push(...collectAllKeys(node.children))

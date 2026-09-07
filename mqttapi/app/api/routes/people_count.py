@@ -184,6 +184,33 @@ def people_count_channel_stats(
     )
 
 
+@router.get("/people-count/stats/overview")
+def people_count_overview(
+    date_from: DateType | None = Query(default=None),
+    date_to: DateType | None = Query(default=None),
+    hour_from: int | None = Query(default=None, ge=0, le=23),
+    hour_to: int | None = Query(default=None, ge=0, le=23),
+    ip_address: str | None = Query(default=None),
+    channel_name: str | None = Query(default=None),
+    exclude_zero: bool = Query(default=False, description="過濾進入和離開皆為 0 的記錄"),
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """綜合聚合：KPI 匯總 / 每日 / 時段 / 通道 / 樓層 / 通道類型 / 樓梯流向。
+
+    供「視圖 / 樓層 / 資料」三個頁面使用，回傳結構與 demo/data.json 同構。
+    """
+    return db.people_count_overview(
+        date_from=date_from,
+        date_to=date_to,
+        hour_from=hour_from,
+        hour_to=hour_to,
+        ip_address=ip_address,
+        channel_name=channel_name,
+        exclude_zero=exclude_zero,
+    )
+
+
 @router.post("/people-count/sync")
 def sync_people_count(
     body: PeopleCountSyncBody = Body(default=PeopleCountSyncBody()),

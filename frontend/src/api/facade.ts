@@ -1,7 +1,7 @@
 import api from './http'
 
 export interface FacadeConfig {
-  id?: number
+  id?: string | number
   orientation: 'vertical' | 'horizontal'
   widthRatio: number
   heightRatio: number
@@ -13,5 +13,5 @@ export function getFacadeConfig() {
 }
 
 export function saveFacadeConfig(config: FacadeConfig) {
-  return api.post<{ ok: boolean; id: number }>('/api/v1/building/facade-config', config)
+  return api.post<{ ok: boolean; id: string | number }>('/api/v1/building/facade-config', config)
 }

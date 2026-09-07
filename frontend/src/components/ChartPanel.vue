@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
-import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import {
+  BarChart,
+  LineChart,
+  PieChart,
+  ScatterChart,
+  SankeyChart,
+  HeatmapChart,
+} from 'echarts/charts'
 import {
   GridComponent,
   LegendComponent,
   TooltipComponent,
+  VisualMapComponent,
+  MarkLineComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { EChartsCoreOption } from 'echarts/core'
@@ -14,9 +23,14 @@ echarts.use([
   LineChart,
   BarChart,
   PieChart,
+  ScatterChart,
+  SankeyChart,
+  HeatmapChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
+  VisualMapComponent,
+  MarkLineComponent,
   CanvasRenderer,
 ])
 

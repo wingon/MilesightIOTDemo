@@ -104,7 +104,7 @@ const props = defineProps<{
   /** 编辑模式用的格子设置（building_cell，DB 驱动） */
   cellShapes?: CellShapeConfig[]
   /** 楼栋 ID（用于添加/删除/撤回格子） */
-  buildingId?: number
+  buildingId?: string | number
 }>()
 
 const emit = defineEmits<{
@@ -1652,8 +1652,8 @@ function updateHiddenOverlaysVisibility() {
 }
 
 /** floor3d (1~11) → DB floor.id（优先从已有格子推断，其次查 floors 表，缓存结果） */
-const floorIdCache = new Map<number, number>()
-async function resolveFloorId(floor3d: number): Promise<number | null> {
+const floorIdCache = new Map<number, string | number>()
+async function resolveFloorId(floor3d: number): Promise<string | number | null> {
   const cached = floorIdCache.get(floor3d)
   if (cached != null) return cached
   const s = props.cellShapes?.find((x) => x.floor === floor3d && x.floor_id != null)

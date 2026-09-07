@@ -10,16 +10,47 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# JS Number.MAX_SAFE_INTEGER = 2^53 - 1；超过该值的整数（雪花 ID）在浏览器解析 JSON 时会丢失精度，
+# 需要统一序列化为字符串，避免前端路由 name / 业务 id 冲突。
+JS_SAFE_INTEGER_MAX = (1 << 53) - 1
+
+
+def _safe_serialize(obj: Any) -> Any:
+    """递归将超过 JS 安全整数范围的 int 转为字符串，其余原样返回。"""
+    if obj is None or isinstance(obj, bool):
+        return obj
+    if isinstance(obj, int):
+        return str(obj) if abs(obj) > JS_SAFE_INTEGER_MAX else obj
+    if isinstance(obj, dict):
+        return {k: _safe_serialize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe_serialize(v) for v in obj]
+    return obj
+
+
+class SafeJSONResponse(JSONResponse):
+    """默认 JSON 响应：将超大整数（雪花 ID）序列化为字符串，防止前端精度丢失。"""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            _safe_serialize(content),
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 from app import cctv_sync
 from app.api.router import api_router
@@ -183,6 +214,7 @@ app = FastAPI(
     description="REST API for tof / ug65 uplink data. Backend for IOT Console.",
     version="1.0.0",
     lifespan=lifespan,
+    default_response_class=SafeJSONResponse,
 )
 
 app.add_middleware(

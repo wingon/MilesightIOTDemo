@@ -164,7 +164,7 @@ export const useBuildingStore = defineStore('building', () => {
   let structureFetched = false
 
   /** floor_id -> rooms with their occupied cells (from room / room_cell) */
-  const floorRooms = reactive<Record<number, FloorRoom[]>>({})
+  const floorRooms = reactive<Record<string | number, FloorRoom[]>>({})
 
   /** Fetch the building + floor list once; retriable on failure */
   async function fetchBuildingStructure() {
@@ -182,7 +182,7 @@ export const useBuildingStore = defineStore('building', () => {
   }
 
   /** Map a 3D level (1..11) to the DB floor id */
-  function floorIdByLevel(level3d: number): number | null {
+  function floorIdByLevel(level3d: number): string | number | null {
     const f = floors.value.find((x) => x.level_3d === level3d)
     return f?.id ?? null
   }

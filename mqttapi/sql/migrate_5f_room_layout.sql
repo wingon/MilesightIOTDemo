@@ -13,12 +13,12 @@
 -- ----------------------------------------------------------------------------
 -- 1. 找到 5F 的 floor_id（level=6 對應 3D 層號 8）
 -- ----------------------------------------------------------------------------
-SET @target_floor_id = (SELECT id FROM floor WHERE level = 6 AND is_deleted = 0 LIMIT 1);
+SET @target_floor_id = (SELECT id FROM building_floor WHERE level = 6 AND is_deleted = 0 LIMIT 1);
 
 -- ----------------------------------------------------------------------------
 -- 2. 清除 5F 現有的 room_cell 映射
 -- ----------------------------------------------------------------------------
-DELETE FROM room_cell WHERE floor_id = @target_floor_id;
+DELETE FROM building_room_cell WHERE floor_id = @target_floor_id;
 
 -- ----------------------------------------------------------------------------
 -- 3. 重新定義 5F 的房間（11 間，匹配平面圖）
@@ -27,9 +27,9 @@ DELETE FROM room_cell WHERE floor_id = @target_floor_id;
 
 -- Room 1: 樓梯間 A（左上角）
 -- 位置：Row 1-2, Col 1-2（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '1'
@@ -39,9 +39,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 2: 機電房（左上中部）
 -- 位置：Row 1-2, Col 3-4（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '2'
@@ -51,9 +51,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 3: 電梯區 A（中上左）
 -- 位置：Row 1-2, Col 5-6（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '3'
@@ -63,9 +63,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 4: 電梯區 B / 儲物間（中上右）
 -- 位置：Row 1-2, Col 7-8（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '4'
@@ -75,9 +75,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 5: 儲物間 / 樓梯（右上中部）
 -- 位置：Row 1-2, Col 9-10（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '5'
@@ -87,9 +87,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 6: 樓梯間 B（右上角）
 -- 位置：Row 1-2, Col 11-12（4 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '6'
@@ -99,9 +99,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 7: 倉庫區域（左側大區域）
 -- 位置：Row 3-5, Col 1-4（12 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '7'
@@ -111,9 +111,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 8: 主工作區（中間大區域）
 -- 位置：Row 3-5, Col 5-8（12 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '8'
@@ -123,9 +123,9 @@ WHERE r.floor_id = @target_floor_id
 
 -- Room 9: 辦公區（右側大區域）
 -- 位置：Row 3-5, Col 9-12（12 個單元格）
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '9'
@@ -139,9 +139,9 @@ WHERE r.floor_id = @target_floor_id
 --   Row 7: Col 2-7（6 個單元格，排除 col 1 切角）
 --   Row 8: Col 2-7（6 個單元格，排除 col 1 切角）
 -- 共 16 個單元格
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '10'
@@ -158,9 +158,9 @@ WHERE r.floor_id = @target_floor_id
 --   Row 7: Col 8-10（3 個單元格，排除 cols 11,12 切角）
 --   Row 8: Col 8-9（2 個單元格，排除 cols 10,11,12 切角）
 -- 共 10 個單元格
-INSERT INTO room_cell (room_ref_id, floor_id, cell_id)
+INSERT INTO building_room_cell (room_ref_id, floor_id, cell_id)
 SELECT r.id, r.floor_id, c.id
-FROM room r
+FROM building_room r
 JOIN building_cell c ON c.floor_id = r.floor_id AND c.is_deleted = 0
 WHERE r.floor_id = @target_floor_id
   AND r.room_number = '11'
@@ -191,8 +191,8 @@ WHERE r.floor_id = @target_floor_id
 SELECT
   r.room_number,
   COUNT(rc.id) AS cell_count
-FROM room r
-LEFT JOIN room_cell rc ON rc.room_ref_id = r.id AND rc.floor_id = r.floor_id
+FROM building_room r
+LEFT JOIN building_room_cell rc ON rc.room_ref_id = r.id AND rc.floor_id = r.floor_id
 WHERE r.floor_id = @target_floor_id AND r.is_deleted = 0
 GROUP BY r.room_number
 ORDER BY CAST(r.room_number AS UNSIGNED);

@@ -3,7 +3,7 @@
 -- 這兩個位置在平面圖中是凹進去的區域
 -- ============================================================================
 
-SET @target_floor_id = (SELECT id FROM floor WHERE level = 6 AND is_deleted = 0 LIMIT 1);
+SET @target_floor_id = (SELECT id FROM building_floor WHERE level = 6 AND is_deleted = 0 LIMIT 1);
 
 -- 1. 將這兩個 building_cell 標記為 is_active = 0（不渲染）
 UPDATE building_cell
@@ -13,7 +13,7 @@ WHERE floor_id = @target_floor_id
   AND is_deleted = 0;
 
 -- 2. 從 room_cell 中移除這兩個單元格
-DELETE FROM room_cell
+DELETE FROM building_room_cell
 WHERE floor_id = @target_floor_id
   AND cell_id IN (
     SELECT id FROM building_cell
@@ -26,8 +26,8 @@ WHERE floor_id = @target_floor_id
 SELECT
   r.room_number,
   COUNT(rc.id) AS cell_count
-FROM room r
-LEFT JOIN room_cell rc ON rc.room_ref_id = r.id AND rc.floor_id = r.floor_id
+FROM building_room r
+LEFT JOIN building_room_cell rc ON rc.room_ref_id = r.id AND rc.floor_id = r.floor_id
 WHERE r.floor_id = @target_floor_id AND r.is_deleted = 0
 GROUP BY r.room_number
 ORDER BY CAST(r.room_number AS UNSIGNED);
