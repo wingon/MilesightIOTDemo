@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 FLOORS = ["B1/F", "G/F", "1/F", "2/F", "3/F", "4/F", "5/F", "6/F"]
@@ -159,15 +159,22 @@ def aggregate(
         er = sum(r["enter"] for r in rows if r["date"] == d)
         xr = sum(r["exit"] for r in rows if r["date"] == d)
         daily_by_date[d] = {"enter": er, "exit": xr, "total": er + xr}
+    # 以數據實際覆蓋範圍生成連續日期；缺失日補 0，讓趨勢圖保持連續（避免跳點）
+    cal_days: list[date] = []
+    if days:
+        cursor = days[0]
+        while cursor <= days[-1]:
+            cal_days.append(cursor)
+            cursor += timedelta(days=1)
     daily = [
         {
             "date": d.isoformat(),
             "weekday": d.weekday(),
-            "enter": daily_by_date[d]["enter"],
-            "exit": daily_by_date[d]["exit"],
-            "total": daily_by_date[d]["total"],
+            "enter": daily_by_date.get(d, {"enter": 0})["enter"],
+            "exit": daily_by_date.get(d, {"exit": 0})["exit"],
+            "total": daily_by_date.get(d, {"total": 0})["total"],
         }
-        for d in days
+        for d in cal_days
     ]
 
     # --- hour（各時段合計） ---
@@ -279,11 +286,13 @@ def aggregate(
         chans_sorted = sorted(chans, key=lambda n: -(ch_accum[n]["enter"] + ch_accum[n]["exit"]))
         f_enter = sum(ch_accum[n]["enter"] for n in chans)
         f_exit = sum(ch_accum[n]["exit"] for n in chans)
-        hour24 = [0] * 24
+        hour24_enter = [0] * 24
+        hour24_exit = [0] * 24
         daily_by_floor = {d: 0 for d in days}
         for r in rows:
             if f in floors_of(r["channel_name"]):
-                hour24[r["hour"]] += r["enter"] + r["exit"]
+                hour24_enter[r["hour"]] += r["enter"]
+                hour24_exit[r["hour"]] += r["exit"]
                 daily_by_floor[r["date"]] += r["enter"] + r["exit"]
         floors.append(
             {
@@ -302,7 +311,8 @@ def aggregate(
                     }
                     for n in chans_sorted
                 ],
-                "hour": hour24,
+                "hour_enter": hour24_enter,
+                "hour_exit": hour24_exit,
                 "daily": [
                     {"date": d.isoformat(), "total": daily_by_floor[d]} for d in days
                 ],

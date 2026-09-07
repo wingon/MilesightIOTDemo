@@ -35,8 +35,9 @@ const channelName = ref<string | undefined>(undefined)
 const excludeZero = ref(true)
 
 /** 截止到昨天的最近 7 天默認範圍（整點，分鐘為 0） */
+/** 最近 7 天默認範圍（含今天，整點，分鐘為 0），進入頁面即載入最新數據 */
 function defaultRange(): [Dayjs, Dayjs] {
-  const end = dayjs().subtract(1, 'day').hour(23).minute(0).second(0).millisecond(0)
+  const end = dayjs().hour(23).minute(0).second(0).millisecond(0)
   const start = end.subtract(6, 'day').hour(0).minute(0).second(0).millisecond(0)
   return [start, end]
 }
@@ -62,7 +63,12 @@ const currentFloor = computed(() => {
 })
 
 const floorHourOption = computed(() =>
-  currentFloor.value ? buildFloorHourOption(currentFloor.value.hour) : {},
+  currentFloor.value
+    ? buildFloorHourOption(currentFloor.value.hour_enter, currentFloor.value.hour_exit, {
+        enter: t('peopleCount.enter'),
+        exit: t('peopleCount.exit'),
+      })
+    : {},
 )
 const floorDailyOption = computed(() =>
   currentFloor.value ? buildFloorDailyOption(currentFloor.value.daily) : {},

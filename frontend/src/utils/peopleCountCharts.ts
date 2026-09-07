@@ -3,8 +3,8 @@ import { brand } from '@/theme/colorConfig'
 import type { EChartsCoreOption } from 'echarts/core'
 
 /**
- * 按小时统计的进出人数柱状图
- * X轴: 0-23 小时
+ * 按小时统计的进出人数柱状�?
+ * X�? 0-23 小时
  */
 export function buildHourlyBarOption(
   rows: PeopleCountStatsRow[],
@@ -40,7 +40,7 @@ export function buildHourlyBarOption(
       bottom: 0,
       textStyle: { color: brand.muted, fontSize: 11 },
     },
-    grid: { top: 20, right: 16, bottom: 44, left: 48 },
+    grid: { top: 20, right: 8, bottom: 44, left: 8, containLabel: true },
     xAxis: {
       type: 'category',
       data: hours,
@@ -73,8 +73,8 @@ export function buildHourlyBarOption(
 }
 
 /**
- * 按日期统计的进出人数折线图
- * 以数据范围为中心，前后各扩展1天
+ * 按日期统计的进出人数折线�?
+ * 以数据范围为中心，前后各扩展1�?
  */
 export function buildDailyTrendOption(
   rows: PeopleCountStatsRow[],
@@ -112,10 +112,11 @@ export function buildDailyTrendOption(
         bottom: 0,
         textStyle: { color: brand.muted, fontSize: 11 },
       },
-      grid: { top: 20, right: 16, bottom: 44, left: 48 },
+      grid: { top: 20, right: 8, bottom: 44, left: 8, containLabel: true },
       xAxis: {
         type: 'category',
         data: emptyLabels,
+        boundaryGap: false,
         axisLabel: { color: brand.muted, fontSize: 10 },
         axisLine: { lineStyle: { color: brand.line } },
       },
@@ -158,10 +159,11 @@ export function buildDailyTrendOption(
       bottom: 0,
       textStyle: { color: brand.muted, fontSize: 11 },
     },
-    grid: { top: 20, right: 16, bottom: 44, left: 48 },
+    grid: { top: 20, right: 8, bottom: 44, left: 8, containLabel: true },
     xAxis: {
       type: 'category',
       data: dateLabels,
+      boundaryGap: false,
       axisLabel: { color: brand.muted, fontSize: 10, rotate: dates.length > 10 ? 45 : 0 },
       axisLine: { lineStyle: { color: brand.line } },
     },
@@ -195,8 +197,8 @@ export function buildDailyTrendOption(
 }
 
 /**
- * 按通道统计的进出人数 - 水平柱状图
- * 只显示 Top 10，其余合并为"其他"
+ * 按通道统计的进出人�?- 水平柱状�?
+ * 只显�?Top 10，其余合并为"其他"
  */
 export function buildChannelBarOption(
   rows: PeopleCountStatsRow[],

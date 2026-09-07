@@ -96,7 +96,8 @@ export interface PeopleCountOverview {
       type: 'lift' | 'stairs' | 'entrance'
       type_label: string
     }>
-    hour: number[]
+    hour_enter: number[]
+    hour_exit: number[]
     daily: Array<{ date: string; total: number }>
   }>
   channelType: Array<{

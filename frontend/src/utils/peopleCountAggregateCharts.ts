@@ -26,10 +26,11 @@ function tooltip(trigger: 'axis' | 'item' = 'axis') {
   }
 }
 
-function catAxis(data: (string | number)[], opts: { interval?: number } = {}) {
+function catAxis(data: (string | number)[], opts: { interval?: number; boundaryGap?: boolean } = {}) {
   return {
     type: 'category' as const,
     data,
+    boundaryGap: opts.boundaryGap ?? true,
     axisLine: { lineStyle: { color: brand.line } },
     axisTick: { show: false },
     axisLabel: { color: brand.muted, fontSize: 12, interval: opts.interval ?? 'auto' as unknown as number },
@@ -46,7 +47,7 @@ function valAxis() {
 }
 
 function gridOpt() {
-  return { top: 40, left: 12, right: 16, bottom: 8, containLabel: true }
+  return { top: 40, left: 8, right: 8, bottom: 8, containLabel: true }
 }
 
 /** 每日進出趨勢（折線，帶數值標籤） */
@@ -57,7 +58,7 @@ export function buildDailyTrendOption(ov: PeopleCountOverview, labels: { enter: 
     tooltip: tooltip(),
     legend: { data: [labels.enter, labels.exit], textStyle: { color: brand.muted, fontSize: 13 }, top: 4 },
     grid: gridOpt(),
-    xAxis: catAxis(d.map((r) => r.date.slice(5))),
+    xAxis: catAxis(d.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
     series: [
       {
@@ -310,7 +311,7 @@ export function buildWeekdayHourOption(ov: PeopleCountOverview, weekdayNames: st
   const max = Math.max(...wh.map((r) => r.total), 1)
   return {
     tooltip: tooltip('item'),
-    grid: { top: 40, left: 12, right: 16, bottom: 8, containLabel: true },
+    grid: gridOpt(),
     xAxis: catAxis(Array.from({ length: 24 }, (_, h) => `${h}:00`), { interval: 2 }),
     yAxis: {
       type: 'category' as const,
@@ -350,7 +351,7 @@ export function buildCumulativeOption(ov: PeopleCountOverview): EChartsCoreOptio
   return {
     tooltip: tooltip(),
     grid: gridOpt(),
-    xAxis: catAxis(ov.daily.map((r) => r.date.slice(5))),
+    xAxis: catAxis(ov.daily.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
     series: [
       {
@@ -455,7 +456,7 @@ export function buildFloorChannelHourOption(
   const idx = new Map(names.map((n, i) => [n, i]))
   return {
     tooltip: tooltip('item'),
-    grid: { top: 40, left: 12, right: 16, bottom: 8, containLabel: true },
+    grid: gridOpt(),
     xAxis: catAxis(Array.from({ length: 24 }, (_, h) => `${h}:00`), { interval: 2 }),
     yAxis: {
       type: 'category' as const,
@@ -515,23 +516,43 @@ export function buildFloorCompareOption(ov: PeopleCountOverview): EChartsCoreOpt
   }
 }
 
-/** 單樓層 24 時人流（柱狀，帶數值標籤） */
-export function buildFloorHourOption(hour: number[]): EChartsCoreOption {
+/** 單樓層 24 時人流（進出分開柱狀，帶數值標籤） */
+export function buildFloorHourOption(
+  hourEnter: number[],
+  hourExit: number[],
+  labels: { enter: string; exit: string },
+): EChartsCoreOption {
   return {
+    color: [brand.primary, brand.charcoal],
     tooltip: tooltip(),
+    legend: { data: [labels.enter, labels.exit], textStyle: { color: brand.muted, fontSize: 13 }, top: 4 },
     grid: gridOpt(),
     xAxis: catAxis(Array.from({ length: 24 }, (_, h) => `${h}:00`), { interval: 2 }),
     yAxis: valAxis(),
     series: [
       {
+        name: labels.enter,
         type: 'bar',
-        data: hour,
-        barMaxWidth: 16,
-        itemStyle: { color: brand.primary },
+        data: hourEnter,
+        barMaxWidth: 14,
+        itemStyle: { borderRadius: [2, 2, 0, 0] },
         label: {
           show: true,
           position: 'top',
-          ...labelStyle(brand.primary, 700, 12),
+          ...labelStyle(brand.primary, 700, 11),
+          formatter: (p: { value: number }) => (p.value > 0 ? fmt(p.value) : ''),
+        },
+      },
+      {
+        name: labels.exit,
+        type: 'bar',
+        data: hourExit,
+        barMaxWidth: 14,
+        itemStyle: { borderRadius: [2, 2, 0, 0] },
+        label: {
+          show: true,
+          position: 'top',
+          ...labelStyle(brand.charcoal, 700, 11),
           formatter: (p: { value: number }) => (p.value > 0 ? fmt(p.value) : ''),
         },
       },
@@ -544,7 +565,7 @@ export function buildFloorDailyOption(daily: Array<{ date: string; total: number
   return {
     tooltip: tooltip(),
     grid: gridOpt(),
-    xAxis: catAxis(daily.map((r) => r.date.slice(5))),
+    xAxis: catAxis(daily.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
     series: [
       {
