@@ -1353,11 +1353,12 @@ class Database:
         with its cell list (row/col) ready for the frontend room layout.
         """
         rooms_sql = """
-            SELECT r.id, r.room_id, r.building_id, r.floor_id, r.room_number, r.room_type, r.area
+            SELECT r.id, r.room_id, r.building_id, r.floor_id, r.room_number,
+                   r.room_name, r.room_type, r.area
             FROM building_room r
             JOIN building_floor f ON f.id = r.floor_id AND f.is_deleted = 0
             WHERE r.floor_id = %(floor_id)s AND r.is_deleted = 0
-            ORDER BY r.id ASC
+            ORDER BY CAST(r.room_number AS UNSIGNED) ASC, r.id ASC
         """
         relations_sql = """
             SELECT rc.room_ref_id, c.row_no, c.col_no
@@ -1402,6 +1403,84 @@ class Database:
                 if row is None:
                     return False
                 cur.execute("DELETE FROM building_room WHERE id = %s", (int(row["id"]),))
+        return True
+
+    def create_room(
+        self,
+        building_id: int,
+        floor_id: int,
+        room_name: str | None = None,
+        room_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Create a room on a floor (room_number is auto-assigned as the next sequence).
+
+        The numeric room_number drives the frontend colour / index / 3D grouping; a
+        user-facing name is stored in room_name (falls back to "房間 N" when empty).
+        room_id follows the existing convention `room-<floor_id>-<seq>`. Returns the
+        new room dict, or None when the floor/building is invalid.
+        """
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM building_floor WHERE id = %s AND is_deleted = 0",
+                    (floor_id,),
+                )
+                floor = cur.fetchone()
+                if floor is None:
+                    return None
+                cur.execute(
+                    """SELECT COALESCE(MAX(CAST(room_number AS UNSIGNED)), 0) AS seq
+                       FROM building_room
+                       WHERE floor_id = %s AND is_deleted = 0""",
+                    (floor_id,),
+                )
+                seq = int((cur.fetchone() or {}).get("seq") or 0) + 1
+                room_number = str(seq)
+                room_id = f"room-{floor_id}-{seq}"
+                room_name = (room_name or "").strip() or None
+                rid = next_id()
+                cur.execute(
+                    """INSERT INTO building_room
+                       (id, room_id, building_id, floor_id, room_number, room_name, room_type, is_deleted)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, 0)""",
+                    (rid, room_id, building_id, floor_id, room_number, room_name, room_type),
+                )
+        return {
+            "id": rid,
+            "room_id": room_id,
+            "building_id": building_id,
+            "floor_id": floor_id,
+            "room_number": room_number,
+            "room_name": room_name,
+            "room_type": room_type,
+            "area": None,
+            "cells": [],
+        }
+
+    def update_room(
+        self,
+        room_id: str,
+        room_name: str | None = None,
+        room_number: str | None = None,
+    ) -> bool:
+        """Rename / renumber a room (editable by the user). Returns whether the room was found."""
+        sets: list[str] = []
+        params: list[Any] = []
+        if room_name is not None:
+            sets.append("room_name = %s")
+            params.append((room_name or "").strip() or None)
+        if room_number is not None:
+            sets.append("room_number = %s")
+            params.append(str(room_number).strip())
+        if not sets:
+            return False
+        params.append(room_id)
+        sql = f"UPDATE building_room SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP(3) WHERE room_id = %s AND is_deleted = 0"
+        with self.wingon_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(params))
+                if cur.rowcount <= 0:
+                    return False
         return True
 
     def assign_room_cell(self, room_id: str, floor_id: int, row_no: int, col_no: int) -> str:

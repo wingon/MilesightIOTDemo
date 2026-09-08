@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Floor3D, { type DeviceMarker } from '@/components/building/Floor3D.vue'
 import { floorName, type Cell, type DeviceType, type RoomMeta } from '@/utils/buildingDemo'
@@ -16,8 +16,8 @@ const props = defineProps<{
   deviceCountMap?: Record<string, number>
   /** Index of the selected custom wall in edit mode */
   selectedWallIndex?: number | null
-  /** DB floor rooms (room_id + room_number) */
-  rooms?: Array<{ room_id: string; room_number: string }>
+  /** DB floor rooms (room_id + room_number + optional room_name) */
+  rooms?: Array<{ room_id: string; room_number: string; room_name?: string | null }>
   /** roomId -> metadata (index + color) resolved from DB rooms */
   roomMeta?: Record<string, RoomMeta>
   /** 设备 3D 标记（已绑定格子的设备） */
@@ -42,9 +42,41 @@ const emit = defineEmits<{
   removeWall: [index: number]
   moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
   bindCell: [payload: { row: number; col: number }]
+  createRoom: []
+  renameRoom: [roomId: string, name: string]
+  deleteRoom: [roomId: string]
 }>()
 
 const { t } = useI18n()
+
+/** 行内改名状态：正在编辑的房间 id 与临时名称 */
+const editingRoomId = ref<string | null>(null)
+const editingName = ref('')
+
+/** 房间显示名称：优先自定义 room_name，否则回退「房間 {index}」 */
+function roomDisplayName(room: { room_id: string; room_number: string; room_name?: string | null }) {
+  if (room.room_name && room.room_name.trim()) return room.room_name
+  const meta = props.roomMeta?.[room.room_id]
+  if (meta && meta.index) return t('building.roomN', { n: meta.index })
+  return room.room_number || t('building.roomN', { n: meta?.index ?? '' })
+}
+
+function startEditRoom(room: { room_id: string; room_number: string; room_name?: string | null }) {
+  editingRoomId.value = room.room_id
+  editingName.value = roomDisplayName(room)
+}
+
+function commitEditRoom(roomId: string) {
+  if (editingRoomId.value !== roomId) return
+  const name = editingName.value.trim()
+  editingRoomId.value = null
+  if (!name) return
+  emit('renameRoom', roomId, name)
+}
+
+function cancelEditRoom() {
+  editingRoomId.value = null
+}
 
 function onRoomClick(roomId: string | null) {
   if (!roomId) {
@@ -169,33 +201,70 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
       </div>
 
       <aside class="legend">
-        <div class="legend-title">{{ t('building.rooms') }}</div>
-        <button
+        <div class="legend-title-row">
+          <span class="legend-title">{{ t('building.rooms') }}</span>
+          <span class="legend-tools">
+            <button
+              type="button"
+              class="legend-tool"
+              :title="t('building.addRoom')"
+              @click="emit('createRoom')"
+            >
+              ＋
+            </button>
+            <button
+              type="button"
+              class="legend-tool danger"
+              :title="t('building.deleteRoom')"
+              :disabled="!selectedRoom"
+              @click="selectedRoom && emit('deleteRoom', selectedRoom)"
+            >
+              －
+            </button>
+          </span>
+        </div>
+        <div
           v-for="room in rooms"
           :key="room.room_id"
-          type="button"
           class="legend-item"
+          role="button"
+          tabindex="0"
           :class="{ active: selectedRoom === room.room_id }"
           :draggable="editMode"
           @click="onRoomClick(room.room_id)"
+          @keydown.enter="onRoomClick(room.room_id)"
           @dragstart="(e) => onRoomDragStart(e, room.room_id)"
         >
           <i class="swatch" :style="{ background: roomMeta?.[room.room_id]?.color }" />
-          <span>{{ t('building.roomN', { n: roomMeta?.[room.room_id]?.index }) }}</span>
+          <template v-if="editingRoomId === room.room_id">
+            <input
+              v-model="editingName"
+              class="room-name-input"
+              :placeholder="t('building.roomNamePlaceholder')"
+              @click.stop
+              @keydown.enter.prevent="commitEditRoom(room.room_id)"
+              @keydown.esc.prevent="cancelEditRoom"
+              @blur="commitEditRoom(room.room_id)"
+            />
+          </template>
+          <span v-else class="room-name" @click.stop="startEditRoom(room)">
+            {{ roomDisplayName(room) }}
+          </span>
           <span class="count" :title="t('building.cellCount')">{{ cellCount(room.room_id) }}</span>
           <span class="count dim">{{ deviceCount(room.room_id) }}</span>
-        </button>
-        <button
+        </div>
+        <div
           v-if="lobbyCount != null && lobbyCount > 0"
-          type="button"
           class="legend-item"
+          role="button"
+          tabindex="0"
           @click="onRoomClick(null)"
         >
           <i class="swatch" :style="{ background: '#9A9A9A' }" />
           <span>{{ t('building.lobby') }}</span>
           <span class="count" :title="t('building.cellCount')">{{ lobbyCellCount ?? 0 }}</span>
           <span class="count dim">{{ lobbyCount }}</span>
-        </button>
+        </div>
         <p v-if="bindSn" class="legend-hint">{{ t('building.bindHint') }}</p>
         <p v-else-if="editMode && !selectedRoom" class="legend-hint">{{ t('building.editSelectRoom') }}</p>
 
@@ -294,12 +363,80 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
   gap: 2px;
 }
 
+.legend-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 4px;
+  margin-bottom: 6px;
+}
+
 .legend-title {
   font-size: 12px;
   font-weight: 650;
   color: #6b6b6b;
-  margin-bottom: 6px;
-  padding: 0 4px;
+}
+
+.legend-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.legend-tool {
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d8d2c4;
+  border-radius: 4px;
+  background: var(--brand-surface, #fff);
+  color: #6b6b6b;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover:not(:disabled) {
+    border-color: #a88955;
+    color: #8a6d3b;
+    background: var(--brand-canvas, #f7f7f5);
+  }
+
+  &.danger:hover:not(:disabled) {
+    border-color: #b42318;
+    color: #b42318;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.room-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px dashed transparent;
+
+  &:hover {
+    border-bottom-color: #c4a574;
+  }
+}
+
+.room-name-input {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  color: #0d0d0d;
+  border: 1px solid #a88955;
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  background: var(--brand-surface, #fff);
 }
 
 .legend-item {

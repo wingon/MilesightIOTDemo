@@ -64,6 +64,51 @@ def delete_room(
     return {"ok": True}
 
 
+class CreateRoomRequest(BaseModel):
+    building_id: int
+    floor_id: int
+    room_name: str | None = None
+    room_type: str | None = None
+
+
+class UpdateRoomRequest(BaseModel):
+    room_name: str | None = None
+    room_number: str | None = None
+
+
+@router.post("/building/rooms")
+def create_room(
+    body: CreateRoomRequest,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Create a user-defined room on a floor. room_number is auto-assigned as the next
+        sequence; a user-facing display name is stored in room_name."""
+    room = db.create_room(
+        building_id=body.building_id,
+        floor_id=body.floor_id,
+        room_name=body.room_name,
+        room_type=body.room_type,
+    )
+    if room is None:
+        raise HTTPException(status_code=404, detail="Floor not found")
+    return {"ok": True, "room": room}
+
+
+@router.patch("/building/rooms/{room_id}")
+def update_room(
+    room_id: str,
+    body: UpdateRoomRequest,
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Rename a room (editable display name)."""
+    ok = db.update_room(room_id, room_name=body.room_name, room_number=body.room_number)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return {"ok": True}
+
+
 class AssignRoomCellRequest(BaseModel):
     floor_id: int
     row_no: int

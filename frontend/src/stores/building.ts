@@ -28,6 +28,9 @@ import {
   listBuildings,
   listBuildingFloors,
   listFloorRooms,
+  createFloorRoom as apiCreateFloorRoom,
+  updateRoomName as apiUpdateRoomName,
+  deleteFloorRoom as apiDeleteFloorRoom,
   saveFloorLayout as apiSaveFloorLayout,
   type BuildingInfo,
   type FloorInfo,
@@ -420,6 +423,63 @@ export const useBuildingStore = defineStore('building', () => {
     }
   }
 
+  /** Building id of a 3D level (null when the structure is unknown) */
+  function buildingIdByLevel(level3d: number): string | number | null {
+    const f = floors.value.find((x) => x.level_3d === level3d)
+    return f?.building_id ?? null
+  }
+
+  /** Create a user-defined room on a floor (room_number auto-assigned by the backend). */
+  async function createFloorRoom(level3d: number, roomName: string): Promise<boolean> {
+    let fid = floorIdByLevel(level3d)
+    if (fid == null) {
+      await fetchBuildingStructure()
+      fid = floorIdByLevel(level3d)
+    }
+    if (fid == null) return false
+    const bid = buildingIdByLevel(level3d)
+    if (bid == null) return false
+    try {
+      const { data } = await apiCreateFloorRoom({
+        building_id: bid,
+        floor_id: fid,
+        room_name: roomName,
+      })
+      if (!data.ok) return false
+      await fetchFloorRooms(level3d)
+      return true
+    } catch (err) {
+      console.warn('[building] createFloorRoom failed:', err)
+      return false
+    }
+  }
+
+  /** Rename a room's display name. */
+  async function renameFloorRoom(level3d: number, roomId: string, roomName: string): Promise<boolean> {
+    try {
+      await apiUpdateRoomName(roomId, roomName)
+      await fetchFloorRooms(level3d)
+      return true
+    } catch (err) {
+      console.warn('[building] renameFloorRoom failed:', err)
+      return false
+    }
+  }
+
+  /** Delete a room (holds occupied cells and floor devices revert to the lobby). */
+  async function deleteFloorRoom(level3d: number, roomId: string): Promise<boolean> {
+    try {
+      await apiDeleteFloorRoom(roomId)
+      const fid = floorIdByLevel(level3d)
+      if (fid != null) delete floorRooms[fid]
+      await fetchFloorRooms(level3d)
+      return true
+    } catch (err) {
+      console.warn('[building] deleteFloorRoom failed:', err)
+      return false
+    }
+  }
+
   /** Move a cell from its source position to a target position (keeping room ownership) */
   function moveRoomCell(floor: number, fromRow: number, fromCol: number, toRow: number, toCol: number) {
     if (!isInterior(toRow, toCol)) return
@@ -708,6 +768,9 @@ export const useBuildingStore = defineStore('building', () => {
     assignRoomCell,
     resetFloorLayout,
     saveFloorLayoutToDb,
+    createFloorRoom,
+    renameFloorRoom,
+    deleteFloorRoom,
     moveRoomCell,
     getCustomWalls,
     addCustomWall,

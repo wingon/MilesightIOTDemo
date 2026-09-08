@@ -20,6 +20,9 @@ const editDirty = ref(false)
 const selectedWallIndex = ref<number | null>(null)
 /** 当前处于「绑定到格子」状态的设备 SN（在 3D 中点击格子完成绑定） */
 const pendingBindSn = ref<string | null>(null)
+/** 创建房间弹窗状态 */
+const creatingRoom = ref(false)
+const createRoomName = ref('')
 
 const floor = computed(() => {
   const n = Number(route.params.floor)
@@ -34,7 +37,7 @@ watch(
   floor,
   (n) => {
     if (!floorValid.value) {
-      router.replace('/building-viewer')
+      if (route.name === 'floor-viewer') router.replace('/building-viewer')
       return
     }
     store.ensureFloor(n)
@@ -344,9 +347,63 @@ function backToBuilding() {
 
 const roomLabel = computed(() => {
   if (!selectedRoom.value) return null
-  const meta = roomMeta.value[selectedRoom.value]
-  return meta ? t('building.roomN', { n: meta.index }) : selectedRoom.value
+  return roomDisplayName(selectedRoom.value)
 })
+
+/** 房间显示名称：优先自定义 room_name，否则回退「房間 {index}」 */
+function roomDisplayName(roomId: string): string {
+  const r = dbRooms.value.find((x) => x.room_id === roomId)
+  if (r?.room_name && r.room_name.trim()) return r.room_name
+  const meta = roomMeta.value[roomId]
+  return meta && meta.index ? t('building.roomN', { n: meta.index }) : r?.room_number || roomId
+}
+
+/** 打开「新增房间」弹窗，默认名称 = 下一位序号 */
+function onCreateRoom() {
+  createRoomName.value = t('building.roomN', { n: dbRooms.value.length + 1 })
+  creatingRoom.value = true
+}
+
+async function confirmCreateRoom() {
+  const name = createRoomName.value.trim()
+  if (!name) {
+    message.warning(t('building.roomNameRequired'))
+    return
+  }
+  creatingRoom.value = false
+  const ok = await store.createFloorRoom(floor.value, name)
+  if (ok) message.success(t('building.roomCreated'))
+  else message.error(t('building.roomCreateFailed'))
+}
+
+async function onRenameRoom(roomId: string, name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) {
+    message.warning(t('building.roomNameRequired'))
+    return
+  }
+  const ok = await store.renameFloorRoom(floor.value, roomId, trimmed)
+  if (ok) message.success(t('building.roomRenamed'))
+  else message.error(t('building.roomRenameFailed'))
+}
+
+function onDeleteRoom(roomId: string) {
+  Modal.confirm({
+    title: t('building.deleteRoomTitle'),
+    content: t('building.deleteRoomConfirm', { name: roomDisplayName(roomId) }),
+    okText: t('building.deleteRoomOk'),
+    cancelText: t('building.cancel'),
+    async onOk() {
+      const ok = await store.deleteFloorRoom(floor.value, roomId)
+      if (ok) {
+        if (selectedRoom.value === roomId) selectedRoom.value = null
+        message.success(t('building.roomDeleted'))
+      } else {
+        message.error(t('building.roomDeleteFailed'))
+      }
+    },
+  })
+}
 </script>
 
 <template>
@@ -389,6 +446,9 @@ const roomLabel = computed(() => {
           @remove-wall="onRemoveWall"
           @move-cell="onMoveCell"
           @bind-cell="onBindCell"
+          @create-room="onCreateRoom"
+          @rename-room="onRenameRoom"
+          @delete-room="onDeleteRoom"
         />
       </div>
       <div class="right">
@@ -412,6 +472,22 @@ const roomLabel = computed(() => {
         />
       </div>
     </div>
+
+    <a-modal
+      v-model:open="creatingRoom"
+      :title="t('building.addRoom')"
+      :ok-text="t('building.addRoomOk')"
+      :cancel-text="t('building.cancel')"
+      @ok="confirmCreateRoom"
+      @cancel="creatingRoom = false"
+    >
+      <a-input
+        v-model:value="createRoomName"
+        :placeholder="t('building.roomNamePlaceholder')"
+        :maxlength="50"
+        @press-enter="confirmCreateRoom"
+      />
+    </a-modal>
   </div>
 </template>
 

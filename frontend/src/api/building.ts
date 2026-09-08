@@ -48,6 +48,8 @@ export interface FloorRoom {
   building_id: string | number
   floor_id: string | number
   room_number: string
+  /** User-customizable display name (null/empty -> fall back to "房間 {room_number}") */
+  room_name?: string | null
   room_type: string | null
   area: number | null
   cells: Array<{ row: number; col: number }>
@@ -80,6 +82,26 @@ export function listFloorCells(floorId: string | number) {
 /** List floor rooms (including room-cell relations) */
 export function listFloorRooms(floorId: string | number) {
   return api.get<FloorRoom[]>(`/api/v1/building/floors/${floorId}/rooms`)
+}
+
+/** Create a user-defined room on a floor (room_number is auto-assigned) */
+export function createFloorRoom(params: {
+  building_id: string | number
+  floor_id: string | number
+  room_name?: string | null
+  room_type?: string | null
+}) {
+  return api.post<{ ok: boolean; room: FloorRoom }>('/api/v1/building/rooms', params)
+}
+
+/** Rename a room's display name */
+export function updateRoomName(roomId: string, roomName: string) {
+  return api.patch<{ ok: boolean }>(`/api/v1/building/rooms/${roomId}`, { room_name: roomName })
+}
+
+/** Physically delete a room (occupied cells are released; devices revert to the lobby) */
+export function deleteFloorRoom(roomId: string) {
+  return api.delete<{ ok: boolean }>(`/api/v1/building/rooms/${roomId}`)
 }
 
 /** Update a single cell's rotation (rotation_xyz) */

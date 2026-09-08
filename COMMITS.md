@@ -543,3 +543,39 @@ fix: 匿名大屏（iframe）登入跳轉與寫請求問題
 
 ### i18n
 - en.ts + zh-TW.ts 新增 common.loginRequired（Please sign in to edit / 請先登入後再進行編輯）
+
+## 2026-09-07 15:00
+feat: 樓層房間管理（建立 / 重新命名 / 刪除）
+
+### 後端
+- db.py 新增 create_room：自動產生 room_number（遞增序號）與 room_id（room-<floor_id>-<seq>）
+- db.py 新增 update_room：支援重新命名 room_name 與重新編號 room_number
+- db.py delete_room：改為 JOIN building_floor 確認樓層存在
+- db.py list_floor_rooms：查詢新增 room_name 欄位，排序改為 room_number 數值排序
+- building.py 新增三支 API：
+  - POST /api/v1/building/rooms：建立房間（需 building_id + floor_id）
+  - PATCH /api/v1/building/rooms/{room_id}：重新命名房間
+  - DELETE /api/v1/building/rooms/{room_id}：刪除房間
+
+### 前端 API
+- building.ts 新增 createFloorRoom / updateRoomName / deleteFloorRoom
+- FloorRoom 介面新增 room_name 可選欄位
+
+### 前端元件
+- FloorModelPanel.vue：
+  - 房間圖例新增「新增房間」按鈕（emit createRoom）
+  - 房間名稱支援行內編輯（雙擊改名 + emit renameRoom）
+  - 每個房間旁顯示刪除按鈕（emit deleteRoom）
+  - roomDisplayName 函式：優先使用自訂 room_name，否則回退「房間 {index}」
+- FloorViewerView.vue：
+  - 新增 createRoom / renameRoom / deleteRoom 處理函式
+  - createRoom：呼叫 API → 重新載入樓層資料 → 自動選中新房間
+  - renameRoom：呼叫 API → 更新本地 rooms 陣列
+  - deleteRoom：確認框 → 刪除 → 重新載入並清除選中
+  - 編輯模式下才顯示房間管理按鈕
+
+### i18n
+- en.ts + zh-TW.ts 新增：building.addRoom / building.renameRoom / building.deleteRoom / building.confirmDeleteRoom / common.rename / common.delete / common.create / common.save / common.cancel
+
+### SQL
+- add_building_room_name.sql（新檔案）：building_room 新增 room_name 欄位（VARCHAR 100）
