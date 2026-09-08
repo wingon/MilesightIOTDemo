@@ -650,6 +650,11 @@ export default {
     to: '結束',
     query: '查詢',
     reset: '重設',
+    exportBtn: '匯出 CSV',
+    exportTitle: '正在匯出…',
+    exportHint: '正在產生匯出檔…',
+    exportDone: '匯出完成。',
+    exportFailed: '匯出失敗。',
     // 樓層
     floorTitle: '樓層統計',
     floorSubtitle: '各樓層人流統計 · 點擊樓層查看詳情',

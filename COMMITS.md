@@ -636,3 +636,7 @@ feat: 設備 3D 高亮雙向同步與人流統計 i18n 修正
 
 ### i18n
 - en.ts + zh-TW.ts 新增：unitPeople / unitDays / dayMon~daySun / chartFloorDist 修正
+
+
+## 2026-09-08 23:57
+feat: 人流時數資料導出功能

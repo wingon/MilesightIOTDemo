@@ -660,6 +660,11 @@ export default {
     to: 'To',
     query: 'Search',
     reset: 'Reset',
+    exportBtn: 'Export CSV',
+    exportTitle: 'Exporting…',
+    exportHint: 'Generating report...',
+    exportDone: 'Export completed.',
+    exportFailed: 'Export failed.',
     // 樓層
     floorTitle: 'Floor Statistics',
     floorSubtitle: 'People flow per floor · click a floor to see details',

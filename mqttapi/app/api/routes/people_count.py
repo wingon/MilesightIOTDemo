@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from datetime import date as DateType, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user, get_db
 from app.cctv_sync import CONFIG_ENABLED, sync_date, sync_date_range
 from app.db import Database
+from app.people_count_export import (
+    MAX_EXPORT_DAYS,
+    create_export_task,
+    get_task,
+    normalize_lang,
+    text as export_text,
+)
 from app.security import AuthError
 
 router = APIRouter(prefix="/api/v1", tags=["people-count"])
@@ -241,6 +250,95 @@ def people_count_overview(
         ip_address=ip_address,
         channel_name=channel_name,
         exclude_zero=exclude_zero,
+    )
+
+
+@router.post("/people-count/export")
+def export_people_count(
+    date_from: DateType | None = Query(
+        default=None, description="Export: date >= date_from"
+    ),
+    date_to: DateType | None = Query(
+        default=None, description="Export: date <= date_to"
+    ),
+    hour_from: int | None = Query(default=None, ge=0, le=23),
+    hour_to: int | None = Query(default=None, ge=0, le=23),
+    channel_name: str | None = Query(default=None),
+    exclude_zero: bool = Query(default=False, description="過濾進入和離開皆為 0 的記錄"),
+    lang: str = Query(default="zh-TW", description="導出語言：en / zh-TW"),
+    db: Database = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """建立人流統計 Excel 導出任務（後台執行）。
+
+    產生「每日統計 + 通道統計」兩個工作表的 xlsx；時間範圍上限半年
+    （MAX_EXPORT_DAYS=183 天），超限回傳本地化提示。
+    建立後請輪詢 GET /people-count/export/status/{task_id} 取得進度。
+    """
+    lang = normalize_lang(lang)
+    if date_from is not None and date_to is not None:
+        if date_from > date_to:
+            raise AuthError("date_from 不能晚於 date_to", code=400)
+        span_days = (date_to - date_from).days + 1
+        if span_days > MAX_EXPORT_DAYS:
+            raise AuthError(
+                export_text(lang, "errTooLong", days=MAX_EXPORT_DAYS),
+                code=400,
+            )
+    task = create_export_task(
+        settings=db.settings,
+        date_from=date_from,
+        date_to=date_to,
+        hour_from=hour_from,
+        hour_to=hour_to,
+        channel_name=channel_name,
+        exclude_zero=exclude_zero,
+        lang=lang,
+    )
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "lang": lang,
+        "message": export_text(lang, "msgCreated", task_id=task["task_id"]),
+    }
+
+
+@router.get("/people-count/export/status/{task_id}")
+def get_export_status(
+    task_id: str,
+    lang: str = Query(default="zh-TW"),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """查詢匯出任務的執行狀態與進度（0 ~ 100）。"""
+    lang = normalize_lang(lang)
+    task = get_task(task_id)
+    if task is None:
+        raise AuthError(export_text(lang, "errNotFound"), code=404)
+    # 不下發內部 file_path，避免洩漏伺服器路徑
+    task = dict(task)
+    task.pop("file_path", None)
+    return task
+
+
+@router.get("/people-count/export/download/{task_id}")
+def download_export(
+    task_id: str,
+    lang: str = Query(default="zh-TW"),
+    _user: dict = Depends(get_current_user),
+) -> FileResponse:
+    """下載已完成的匯出檔（僅限 status=done）。"""
+    lang = normalize_lang(lang)
+    task = get_task(task_id)
+    if task is None:
+        raise AuthError(export_text(lang, "errNotFound"), code=404)
+    if task.get("status") != "done" or not task.get("file_path"):
+        raise AuthError(export_text(lang, "errNotReady"), code=400)
+    if not os.path.exists(task["file_path"]):
+        raise AuthError(export_text(lang, "errNotFound"), code=404)
+    return FileResponse(
+        task["file_path"],
+        media_type="application/zip",
+        filename=task.get("filename") or "people_count.zip",
     )
 
 

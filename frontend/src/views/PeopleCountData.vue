@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
-import type { Dayjs } from 'dayjs'
+import { message } from 'ant-design-vue'
+import { SearchOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons-vue'
+import dayjs, { type Dayjs } from 'dayjs'
 import {
   getPeopleCountOverview,
   listPeopleCountChannels,
+  createPeopleCountExport,
+  getPeopleCountExportStatus,
+  downloadPeopleCountExport,
   type PeopleCountOverview as OverviewData,
+  type PeopleCountExportParams,
+  type PeopleCountExportLang,
 } from '@/api/peopleCount'
 import { typeLabel, weekdayLabel } from '@/utils/peopleCountType'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const loading = ref(false)
 const overview = ref<OverviewData | null>(null)
@@ -22,6 +28,12 @@ const activeTab = ref<'daily' | 'channel'>('daily')
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
 const excludeZero = ref(true)
+
+// 匯出狀態
+const exporting = ref(false)
+const exportModalOpen = ref(false)
+const exportPercent = ref(0)
+const exportError = ref(false)
 
 const weekdayName = (w: number) => weekdayLabel(t, w)
 
@@ -52,15 +64,38 @@ const typeColor = (type: string) => {
   return 'green'
 }
 
+/** 未填寫範圍時預設最近 7 天（含今天），時段不限制（整天） */
+function defaultWindow() {
+  const now = dayjs()
+  return { s: now.subtract(6, 'day'), e: now }
+}
+
+/** 由整合的日期時間範圍拆出日期/時段參數；未填範圍時回傳預設近 7 天 */
+function buildDateParams() {
+  const range = dateTimeRange.value
+  if (range) {
+    const s = range[0]
+    const e = range[1]
+    return {
+      date_from: s?.format('YYYY-MM-DD') || undefined,
+      date_to: e?.format('YYYY-MM-DD') || undefined,
+      hour_from: s?.hour(),
+      hour_to: e?.hour(),
+    }
+  }
+  const { s, e } = defaultWindow()
+  return {
+    date_from: s.format('YYYY-MM-DD'),
+    date_to: e.format('YYYY-MM-DD'),
+    hour_from: undefined,
+    hour_to: undefined,
+  }
+}
+
 /** 由整合的日期時間範圍拆出查詢參數 */
 function buildQuery() {
-  const s = dateTimeRange.value?.[0]
-  const e = dateTimeRange.value?.[1]
   return {
-    date_from: s?.format('YYYY-MM-DD') || undefined,
-    date_to: e?.format('YYYY-MM-DD') || undefined,
-    hour_from: s?.hour(),
-    hour_to: e?.hour(),
+    ...buildDateParams(),
     channel_name: channelName.value,
     exclude_zero: excludeZero.value,
   }
@@ -95,9 +130,91 @@ async function loadChannels() {
   }
 }
 
+/** 由整合的日期時間範圍拆出匯出參數（含目前語言）；未填範圍時同樣預設近 7 天 */
+function makeExportParams(): PeopleCountExportParams {
+  const lang = (locale.value === 'zh-TW' ? 'zh-TW' : 'en') as PeopleCountExportLang
+  return {
+    ...buildDateParams(),
+    channel_name: channelName.value,
+    exclude_zero: excludeZero.value,
+    lang,
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function saveBlob(blob: Blob, filename?: string | null) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || 'people_count.zip'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function pollExport(taskId: string) {
+  let attempts = 0
+  while (exporting.value) {
+    const { data } = await getPeopleCountExportStatus(taskId)
+    exportPercent.value = data.progress ?? 0
+    if (data.status === 'failed') {
+      exportError.value = true
+      message.error(data.error || t('peopleCount.exportFailed'))
+      return
+    }
+    if (data.status === 'done') {
+      exportPercent.value = 100
+      try {
+        const { data: blob } = await downloadPeopleCountExport(taskId)
+        saveBlob(blob, data.filename)
+        message.success(t('peopleCount.exportDone'))
+      } catch {
+        exportError.value = true
+        message.error(t('peopleCount.exportFailed'))
+      }
+      return
+    }
+    attempts += 1
+    if (attempts >= 600) {
+      // 上限約 15 分鐘，避免任務卡死時無限輪詢
+      exportError.value = true
+      message.error(t('peopleCount.exportFailed'))
+      return
+    }
+    await sleep(1500)
+  }
+}
+
+async function onExport() {
+  if (exporting.value) return
+  exporting.value = true
+  exportModalOpen.value = true
+  exportError.value = false
+  exportPercent.value = 0
+  try {
+    const { data } = await createPeopleCountExport(makeExportParams())
+    exportPercent.value = 5
+    await pollExport(data.task_id)
+  } catch {
+    // 400（超過半年 / 無資料等）提示已由 http.ts 攔截器以 message 顯示
+    exportError.value = true
+  } finally {
+    exporting.value = false
+    exportModalOpen.value = false
+  }
+}
+
 onMounted(() => {
   loadChannels()
   load()
+})
+
+onBeforeUnmount(() => {
+  exporting.value = false
 })
 </script>
 
@@ -142,6 +259,9 @@ onMounted(() => {
           </a-button>
           <a-button @click="onReset">
             <ReloadOutlined /> {{ t('peopleCount.reset') }}
+          </a-button>
+          <a-button :loading="exporting" :disabled="loading" class="export-btn" @click="onExport">
+            <DownloadOutlined /> {{ t('peopleCount.exportBtn') }}
           </a-button>
         </div>
       </div>
@@ -206,6 +326,29 @@ onMounted(() => {
         </template>
       </a-table>
     </div>
+
+    <!-- 匯出進度 -->
+    <a-modal
+      v-model:open="exportModalOpen"
+      :title="t('peopleCount.exportTitle')"
+      :footer="null"
+      :closable="false"
+      :mask-closable="false"
+      :width="320"
+      centered
+    >
+      <div class="export-body">
+        <a-progress
+          :percent="exportPercent"
+          :status="exportPercent >= 100 ? 'success' : exportError ? 'exception' : 'active'"
+          :stroke-width="6"
+          class="export-progress"
+        />
+        <p class="export-hint">
+          {{ exportError ? t('peopleCount.exportFailed') : t('peopleCount.exportHint') }}
+        </p>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -268,6 +411,26 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.export-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 4px 4px;
+}
+
+.export-progress {
+  width: 220px;
+}
+
+.export-hint {
+  margin: 0;
+  color: #6b6b6b;
+  font-size: 12px;
+  text-align: center;
 }
 
 .tabs-bar {

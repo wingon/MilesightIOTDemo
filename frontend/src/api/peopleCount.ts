@@ -140,3 +140,53 @@ export function getPeopleCountChannelStats(params: PeopleCountHourlyQuery) {
 export function getPeopleCountOverview(params: PeopleCountOverviewQuery) {
   return api.get<PeopleCountOverview>('/api/v1/people-count/stats/overview', { params })
 }
+
+/** 導出語言（後端僅接受 en / zh-TW） */
+export type PeopleCountExportLang = 'en' | 'zh-TW'
+
+/** 建立 CSV 匯出任務的參數 */
+export interface PeopleCountExportParams {
+  date_from?: string
+  date_to?: string
+  hour_from?: number
+  hour_to?: number
+  channel_name?: string
+  exclude_zero?: boolean
+  lang: PeopleCountExportLang
+}
+
+/** 導出任務狀態（輪詢回傳） */
+export interface PeopleCountExportTask {
+  task_id: string
+  date_from?: string | null
+  date_to?: string | null
+  lang?: string
+  status: 'fetching' | 'writing' | 'done' | 'failed'
+  progress: number
+  stage: string
+  filename?: string | null
+  error?: string | null
+  created_at?: string | null
+  finished_at?: string | null
+}
+
+/** 建立後台 CSV 匯出任務 */
+export function createPeopleCountExport(params: PeopleCountExportParams) {
+  return api.post<{ task_id: string; status: string; lang: string; message: string }>(
+    '/api/v1/people-count/export',
+    null,
+    { params },
+  )
+}
+
+/** 輪詢導出任務進度 */
+export function getPeopleCountExportStatus(taskId: string) {
+  return api.get<PeopleCountExportTask>(`/api/v1/people-count/export/status/${taskId}`)
+}
+
+/** 下載已完成的匯出檔（blob，內含兩個 CSV 的 ZIP） */
+export function downloadPeopleCountExport(taskId: string) {
+  return api.get<Blob>(`/api/v1/people-count/export/download/${taskId}`, {
+    responseType: 'blob',
+  })
+}

@@ -5,7 +5,7 @@ import {
   SearchOutlined,
   ReloadOutlined,
 } from '@ant-design/icons-vue'
-import type { Dayjs } from 'dayjs'
+import dayjs, { type Dayjs } from 'dayjs'
 import {
   getPeopleCountOverview,
   listPeopleCountChannels,
@@ -94,15 +94,33 @@ const currentFloorKpis = computed(() => {
   }
 })
 
-/** 由整合的日期時間範圍拆出查詢參數 */
+/** 未填寫範圍時預設最近 7 天（含今天），時段不限制（整天） */
+function defaultWindow() {
+  const now = dayjs()
+  return { s: now.subtract(6, 'day'), e: now }
+}
+
+/** 由整合的日期時間範圍拆出查詢參數；未填範圍時回傳預設近 7 天 */
 function buildQuery() {
-  const s = dateTimeRange.value?.[0]
-  const e = dateTimeRange.value?.[1]
+  const range = dateTimeRange.value
+  if (range) {
+    const s = range[0]
+    const e = range[1]
+    return {
+      date_from: s?.format('YYYY-MM-DD') || undefined,
+      date_to: e?.format('YYYY-MM-DD') || undefined,
+      hour_from: s?.hour(),
+      hour_to: e?.hour(),
+      channel_name: channelName.value,
+      exclude_zero: excludeZero.value,
+    }
+  }
+  const { s, e } = defaultWindow()
   return {
-    date_from: s?.format('YYYY-MM-DD') || undefined,
-    date_to: e?.format('YYYY-MM-DD') || undefined,
-    hour_from: s?.hour(),
-    hour_to: e?.hour(),
+    date_from: s.format('YYYY-MM-DD'),
+    date_to: e.format('YYYY-MM-DD'),
+    hour_from: undefined,
+    hour_to: undefined,
     channel_name: channelName.value,
     exclude_zero: excludeZero.value,
   }
