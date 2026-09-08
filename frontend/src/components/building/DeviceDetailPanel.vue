@@ -51,6 +51,8 @@ const props = defineProps<{
   unboundCount?: number
   /** roomId -> metadata (index) so bind labels can show the room name */
   roomMeta?: Record<string, RoomMeta>
+  /** 3D 中悬停的设备 SN（用于高亮对应的设备卡片） */
+  hoveredSn?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -60,6 +62,7 @@ const emit = defineEmits<{
   removeFromRoom: [payload: { roomId: string; deviceId: string }]
   bindDevice: [sn: string]
   unbindDevice: [sn: string]
+  hoverDevice: [sn: string | null]
 }>()
 
 const { t, locale } = useI18n()
@@ -393,8 +396,10 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
             v-for="dev in envBlocks"
             :key="dev.sn"
             class="device-card env-card"
-            :class="{ active: activeId === dev.sn }"
+            :class="{ active: activeId === dev.sn, highlighted: hoveredSn === dev.sn }"
             :data-device-id="dev.sn"
+            @mouseenter="emit('hoverDevice', dev.sn)"
+            @mouseleave="emit('hoverDevice', null)"
           >
             <div class="device-head">
               <div>
@@ -436,8 +441,10 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
             v-for="block in deviceBlocks"
             :key="block.id"
             class="device-card"
-            :class="{ active: activeId === block.id }"
+            :class="{ active: activeId === block.id, highlighted: hoveredSn === block.sn }"
             :data-device-id="block.id"
+            @mouseenter="emit('hoverDevice', block.sn)"
+            @mouseleave="emit('hoverDevice', null)"
           >
             <div class="device-head">
               <div>
@@ -732,9 +739,15 @@ function onRemove(block: { roomKey: string; deviceId: string }, ev: Event) {
   padding: 12px;
   background: var(--brand-canvas, #fafaf8);
   scroll-margin-top: 8px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 
   &.active {
     border-color: #c4a574;
+  }
+
+  &.highlighted {
+    border-color: #1677ff;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.25);
   }
 }
 

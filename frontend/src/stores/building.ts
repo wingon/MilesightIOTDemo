@@ -191,13 +191,13 @@ export const useBuildingStore = defineStore('building', () => {
   }
 
   /** Fetch rooms (with occupied cells) of a 3D level into floorRooms */
-  async function fetchFloorRooms(level3d: number) {
+  async function fetchFloorRooms(level3d: number, { syncLayout = true } = {}) {
     const fid = floorIdByLevel(level3d)
     if (fid == null) return
     try {
       const { data } = await listFloorRooms(fid)
       floorRooms[fid] = data ?? []
-      syncFloorLayoutFromDb(level3d)
+      if (syncLayout) syncFloorLayoutFromDb(level3d)
     } catch (err) {
       console.warn('[building] fetchFloorRooms failed:', err)
     }
@@ -446,7 +446,7 @@ export const useBuildingStore = defineStore('building', () => {
         room_name: roomName,
       })
       if (!data.ok) return false
-      await fetchFloorRooms(level3d)
+      await fetchFloorRooms(level3d, { syncLayout: false })
       return true
     } catch (err) {
       console.warn('[building] createFloorRoom failed:', err)
@@ -458,7 +458,7 @@ export const useBuildingStore = defineStore('building', () => {
   async function renameFloorRoom(level3d: number, roomId: string, roomName: string): Promise<boolean> {
     try {
       await apiUpdateRoomName(roomId, roomName)
-      await fetchFloorRooms(level3d)
+      await fetchFloorRooms(level3d, { syncLayout: false })
       return true
     } catch (err) {
       console.warn('[building] renameFloorRoom failed:', err)
@@ -472,7 +472,7 @@ export const useBuildingStore = defineStore('building', () => {
       await apiDeleteFloorRoom(roomId)
       const fid = floorIdByLevel(level3d)
       if (fid != null) delete floorRooms[fid]
-      await fetchFloorRooms(level3d)
+      await fetchFloorRooms(level3d, { syncLayout: false })
       return true
     } catch (err) {
       console.warn('[building] deleteFloorRoom failed:', err)

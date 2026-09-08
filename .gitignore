@@ -36,3 +36,4 @@ Thumbs.db
 .reasonix/
 reasonix.toml
 /.opencode/
+/widget/

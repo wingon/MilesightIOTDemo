@@ -166,16 +166,23 @@ def aggregate(
         while cursor <= days[-1]:
             cal_days.append(cursor)
             cursor += timedelta(days=1)
-    daily = [
-        {
-            "date": d.isoformat(),
-            "weekday": d.weekday(),
-            "enter": daily_by_date.get(d, {"enter": 0})["enter"],
-            "exit": daily_by_date.get(d, {"exit": 0})["exit"],
-            "total": daily_by_date.get(d, {"total": 0})["total"],
-        }
-        for d in cal_days
-    ]
+    daily = []
+    for d in cal_days:
+        rec = daily_by_date.get(d)
+        if rec is None:
+            rec = {"enter": 0, "exit": 0, "total": 0}
+        # 隱藏零流量記錄：整日無進出的日期不輸出
+        if exclude_zero and rec["enter"] == 0 and rec["exit"] == 0:
+            continue
+        daily.append(
+            {
+                "date": d.isoformat(),
+                "weekday": d.weekday(),
+                "enter": rec["enter"],
+                "exit": rec["exit"],
+                "total": rec["enter"] + rec["exit"],
+            }
+        )
 
     # --- hour（各時段合計） ---
     hour_by_day: dict[tuple[date, int], dict[str, int]] = defaultdict(lambda: {"enter": 0, "exit": 0})
@@ -269,15 +276,21 @@ def aggregate(
         if f and channel_type(name) != "stairs":
             floor_accum[f]["enter"] += v["enter"]
             floor_accum[f]["exit"] += v["exit"]
-    floor = [
-        {
-            "floor": f,
-            "enter": floor_accum[f]["enter"],
-            "exit": floor_accum[f]["exit"],
-            "total": floor_accum[f]["enter"] + floor_accum[f]["exit"],
-        }
-        for f in FLOORS
-    ]
+    floor = []
+    for f in FLOORS:
+        er = floor_accum[f]["enter"]
+        xr = floor_accum[f]["exit"]
+        # 隱藏零流量記錄：整層無進出則不輸出
+        if exclude_zero and er == 0 and xr == 0:
+            continue
+        floor.append(
+            {
+                "floor": f,
+                "enter": er,
+                "exit": xr,
+                "total": er + xr,
+            }
+        )
 
     # --- floors（每層完整視角：含樓梯/電梯/出入口全部通道） ---
     floors = []
@@ -294,6 +307,9 @@ def aggregate(
                 hour24_enter[r["hour"]] += r["enter"]
                 hour24_exit[r["hour"]] += r["exit"]
                 daily_by_floor[r["date"]] += r["enter"] + r["exit"]
+        # 隱藏零流量記錄：整層無進出則不輸出（該層不會出現在樓層按鈕/詳情）
+        if exclude_zero and f_enter == 0 and f_exit == 0:
+            continue
         floors.append(
             {
                 "floor": f,
@@ -429,28 +445,13 @@ def empty_report() -> dict[str, Any]:
             "busiest_floor": None,
         },
         "daily": [],
-        "hour": [
-            {"hour": h, "enter": 0, "exit": 0, "total": 0} for h in range(24)
-        ],
+        "hour": [],
         "weekday": [],
         "weekdayHour": [],
         "channel": [],
         "channelHour": [],
-        "floor": [
-            {"floor": f, "enter": 0, "exit": 0, "total": 0} for f in FLOORS
-        ],
-        "floors": [
-            {
-                "floor": f,
-                "enter": 0,
-                "exit": 0,
-                "total": 0,
-                "channels": [],
-                "hour": [0] * 24,
-                "daily": [],
-            }
-            for f in FLOORS
-        ],
+        "floor": [],
+        "floors": [],
         "channelType": [],
         "sankey": [],
     }

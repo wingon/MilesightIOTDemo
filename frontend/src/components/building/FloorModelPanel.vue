@@ -24,6 +24,8 @@ const props = defineProps<{
   devices?: DeviceMarker[]
   /** 当前待绑定格子的设备 SN（非空时点击格子触发 bindCell） */
   bindSn?: string | null
+  /** 面板中悬停的设备 SN（用于3D高亮） */
+  hoverSn?: string | null
   /** 大厅/开放区域设备数 */
   lobbyCount?: number
   /** 大厅格子数（未被房间占用的有效格子） */
@@ -45,6 +47,7 @@ const emit = defineEmits<{
   createRoom: []
   renameRoom: [roomId: string, name: string]
   deleteRoom: [roomId: string]
+  hoverDevice: [sn: string | null]
 }>()
 
 const { t } = useI18n()
@@ -188,6 +191,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           :devices="devices"
           :device-count-map="deviceCountMap"
           :bind-sn="bindSn"
+          :hover-sn="hoverSn"
           @select-room="(id) => emit('selectRoom', id)"
           @toggle-cell="(p) => emit('toggleCell', p)"
           @drop-cell="(p) => emit('dropCell', p)"
@@ -197,6 +201,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           @remove-wall="(i) => emit('removeWall', i)"
           @move-cell="(p) => emit('moveCell', p)"
           @bind-cell="(p) => emit('bindCell', p)"
+          @hover-device="(sn) => emit('hoverDevice', sn)"
         />
       </div>
 

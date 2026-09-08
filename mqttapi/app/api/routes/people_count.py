@@ -21,6 +21,34 @@ _SYNC_TASKS_LOCK = threading.Lock()
 
 # 允許的最大查詢範圍（6 個月）
 MAX_BACKFILL_DAYS = 183
+# 一般查詢（統計聚合）允許的最大跨度（3 個月，含兩端的天數）
+MAX_QUERY_DAYS = 92
+
+
+def _normalize_query_range(
+    date_from: DateType | None,
+    date_to: DateType | None,
+) -> tuple[DateType | None, DateType | None]:
+    """查詢範圍的預設與限制。
+
+    - 前後端都未提供日期 → 預設最近 7 天（含今天），避免全表掃描
+    - 兩端都有值 → 校驗跨度不得超過 3 個月（MAX_QUERY_DAYS 天）
+    - 僅提供一端 → 維持原語義
+    """
+    if date_from is None and date_to is None:
+        date_to = DateType.today()
+        date_from = date_to - timedelta(days=6)
+        return date_from, date_to
+    if date_from is not None and date_to is not None:
+        if date_from > date_to:
+            raise AuthError("date_from 不能晚於 date_to", code=400)
+        span_days = (date_to - date_from).days + 1
+        if span_days > MAX_QUERY_DAYS:
+            raise AuthError(
+                f"查詢範圍超出限制：最多僅能查詢 3 個月（{MAX_QUERY_DAYS} 天）內的資料",
+                code=400,
+            )
+    return date_from, date_to
 
 
 class PeopleCountSyncBody(BaseModel):
@@ -103,6 +131,7 @@ def list_people_count_hourly(
     Filters are pushed into the WHERE clause; the query is served by the
     idx_date_channel_hour / uk_date_hour_ip indexes.
     """
+    date_from, date_to = _normalize_query_range(date_from, date_to)
     items, total = db.list_people_count_hourly(
         date_from=date_from,
         date_to=date_to,
@@ -135,6 +164,7 @@ def people_count_hourly_stats(
     _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Hourly enter/exit aggregation (for charts)."""
+    date_from, date_to = _normalize_query_range(date_from, date_to)
     return db.people_count_hourly_stats(
         date_from=date_from,
         date_to=date_to,
@@ -155,6 +185,7 @@ def people_count_daily_stats(
     _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Daily enter/exit aggregation (for charts)."""
+    date_from, date_to = _normalize_query_range(date_from, date_to)
     return db.people_count_daily_stats(
         date_from=date_from,
         date_to=date_to,
@@ -175,6 +206,7 @@ def people_count_channel_stats(
     _user: dict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Channel enter/exit aggregation (for charts)."""
+    date_from, date_to = _normalize_query_range(date_from, date_to)
     return db.people_count_channel_stats(
         date_from=date_from,
         date_to=date_to,
@@ -200,6 +232,7 @@ def people_count_overview(
 
     供「視圖 / 樓層 / 資料」三個頁面使用，回傳結構與 demo/data.json 同構。
     """
+    date_from, date_to = _normalize_query_range(date_from, date_to)
     return db.people_count_overview(
         date_from=date_from,
         date_to=date_to,

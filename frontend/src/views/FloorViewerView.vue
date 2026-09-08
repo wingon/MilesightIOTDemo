@@ -20,6 +20,8 @@ const editDirty = ref(false)
 const selectedWallIndex = ref<number | null>(null)
 /** 当前处于「绑定到格子」状态的设备 SN（在 3D 中点击格子完成绑定） */
 const pendingBindSn = ref<string | null>(null)
+/** 3D 中悬停的设备 SN（用于高亮右侧设备列表） */
+const hoveredDeviceSn = ref<string | null>(null)
 /** 创建房间弹窗状态 */
 const creatingRoom = ref(false)
 const createRoomName = ref('')
@@ -173,6 +175,7 @@ const deviceMarkers = computed(() =>
       row: d.cell!.row_no,
       col: d.cell!.col_no,
       abnormal: isEnvAbnormal(d),
+      model: d.model,
     })),
 )
 
@@ -433,6 +436,7 @@ function onDeleteRoom(roomId: string) {
           :room-meta="roomMeta"
           :devices="deviceMarkers"
           :bind-sn="pendingBindSn"
+          :hover-sn="hoveredDeviceSn"
           :lobby-count="lobbyDevices.length"
           :lobby-cell-count="lobbyCellCount"
           @select-room="onSelectRoom"
@@ -449,6 +453,7 @@ function onDeleteRoom(roomId: string) {
           @create-room="onCreateRoom"
           @rename-room="onRenameRoom"
           @delete-room="onDeleteRoom"
+          @hover-device="(sn) => { hoveredDeviceSn = sn }"
         />
       </div>
       <div class="right">
@@ -464,11 +469,13 @@ function onDeleteRoom(roomId: string) {
           :lobby-count="lobbyDevices.length"
           :unbound-count="unboundDevices.length"
           :room-meta="roomMeta"
+          :hovered-sn="hoveredDeviceSn"
           manageable
           @assign-to-room="onAssignToRoom"
           @remove-from-room="onRemoveFromRoom"
           @bind-device="onSelectDeviceForBind"
           @unbind-device="onUnbindDevice"
+          @hover-device="(sn) => { hoveredDeviceSn = sn }"
         />
       </div>
     </div>

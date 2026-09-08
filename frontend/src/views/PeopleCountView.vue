@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { message } from 'ant-design-vue'
-import dayjs, { type Dayjs } from 'dayjs'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import type { Dayjs } from 'dayjs'
 import {
   getPeopleCountOverview,
   listPeopleCountChannels,
@@ -11,7 +10,6 @@ import {
 } from '@/api/peopleCount'
 import ChartPanel from '@/components/ChartPanel.vue'
 import {
-  buildDailyTrendOption,
   buildHourDistOption,
   buildChannelTopOption,
   buildFloorDistOption,
@@ -19,8 +17,8 @@ import {
   buildDailyNetOption,
   buildWeekdayHourOption,
   buildCumulativeOption,
-  WEEKDAYS_ZH,
 } from '@/utils/peopleCountAggregateCharts'
+import { typeLabel, weekdayLabel } from '@/utils/peopleCountType'
 
 const { t } = useI18n()
 
@@ -28,20 +26,14 @@ const loading = ref(false)
 const overview = ref<OverviewData | null>(null)
 const channels = ref<string[]>([])
 
-// 篩選條件：整合為「日期時間範圍」（年月日時，分鐘固定 00）
+// 篩選條件：整合為「日期時間範圍」（年月日時，分鐘固定 00）。
+// 預設為空，由後端回傳最近 7 天數據；用戶自行填寫則依所選範圍查詢。
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
 const excludeZero = ref(true)
 
-/** 最近 7 天默認範圍（含今天，整點，分鐘為 0），進入頁面即載入最新數據 */
-function defaultRange(): [Dayjs, Dayjs] {
-  const end = dayjs().hour(23).minute(0).second(0).millisecond(0)
-  const start = end.subtract(6, 'day').hour(0).minute(0).second(0).millisecond(0)
-  return [start, end]
-}
-
 const weekdayNames = computed(() =>
-  Array.from({ length: 7 }, (_, i) => WEEKDAYS_ZH[i]),
+  Array.from({ length: 7 }, (_, i) => weekdayLabel(t, i)),
 )
 
 const labels = computed(() => ({
@@ -55,9 +47,6 @@ const netLabels = computed(() => ({
   exit: t('peopleCount.exit'),
 }))
 
-const dailyTrendOption = computed(() =>
-  overview.value ? buildDailyTrendOption(overview.value, labels.value) : {},
-)
 const hourDistOption = computed(() =>
   overview.value ? buildHourDistOption(overview.value, labels.value) : {},
 )
@@ -68,7 +57,7 @@ const floorDistOption = computed(() =>
   overview.value ? buildFloorDistOption(overview.value, labels.value) : {},
 )
 const channelTypeOption = computed(() =>
-  overview.value ? buildChannelTypeOption(overview.value) : {},
+  overview.value ? buildChannelTypeOption(overview.value, (type: string) => typeLabel(t, type)) : {},
 )
 const dailyNetOption = computed(() =>
   overview.value ? buildDailyNetOption(overview.value, netLabels.value) : {},
@@ -102,15 +91,14 @@ async function load() {
     const { data } = await getPeopleCountOverview(buildQuery())
     overview.value = data
   } catch (e: unknown) {
-    const err = e instanceof Error ? e.message : String(e)
-    message.error(`${t('peopleCount.loadFailed')} ${err}`)
+    console.error(t('peopleCount.loadFailed'), e)
   } finally {
     loading.value = false
   }
 }
 
 function onReset() {
-  dateTimeRange.value = defaultRange()
+  dateTimeRange.value = null
   channelName.value = undefined
   excludeZero.value = true
   load()
@@ -120,13 +108,13 @@ async function loadChannels() {
   try {
     const { data } = await listPeopleCountChannels()
     channels.value = data
-  } catch {
+  } catch (e: unknown) {
     channels.value = []
+    console.error(t('peopleCount.loadFailed'), e)
   }
 }
 
 onMounted(() => {
-  dateTimeRange.value = defaultRange()
   loadChannels()
   load()
 })
@@ -189,7 +177,7 @@ onMounted(() => {
         <div class="card kpi">
           <div class="kpi-label">{{ t('peopleCount.kpiDailyAvg') }}</div>
           <div class="kpi-value blue">{{ Math.round(meta.daily_avg).toLocaleString() }}</div>
-          <div class="kpi-sub">{{ meta.days }} 天</div>
+          <div class="kpi-sub">{{ meta.days }} {{ t('peopleCount.unitDays') }}</div>
         </div>
         <div class="card kpi">
           <div class="kpi-label">{{ t('peopleCount.kpiMaxDay') }}</div>
@@ -215,10 +203,6 @@ onMounted(() => {
 
       <!-- 圖表 -->
       <div class="charts-grid">
-        <div class="card chart-card">
-          <div class="chart-title">{{ t('peopleCount.chartDailyTrend') }}</div>
-          <ChartPanel :option="dailyTrendOption" height="280px" />
-        </div>
         <div class="card chart-card">
           <div class="chart-title">{{ t('peopleCount.chartHourDist') }}</div>
           <ChartPanel :option="hourDistOption" height="280px" />

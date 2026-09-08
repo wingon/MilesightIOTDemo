@@ -3,8 +3,8 @@ import { brand } from '@/theme/colorConfig'
 import type { EChartsCoreOption } from 'echarts/core'
 
 /**
- * 按小时统计的进出人数柱状�?
- * X�? 0-23 小时
+ * 按小时统计的进出人数柱状�?
+ * X�? 0-23 小时
  */
 export function buildHourlyBarOption(
   rows: PeopleCountStatsRow[],
@@ -53,6 +53,7 @@ export function buildHourlyBarOption(
       axisLabel: { color: brand.muted, fontSize: 10 },
       splitLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -73,8 +74,8 @@ export function buildHourlyBarOption(
 }
 
 /**
- * 按日期统计的进出人数折线�?
- * 以数据范围为中心，前后各扩展1�?
+ * 按日期统计的进出人数折线�?
+ * 以数据范围为中心，前后各扩展1�?
  */
 export function buildDailyTrendOption(
   rows: PeopleCountStatsRow[],
@@ -173,6 +174,7 @@ export function buildDailyTrendOption(
       axisLabel: { color: brand.muted, fontSize: 10 },
       splitLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -197,8 +199,8 @@ export function buildDailyTrendOption(
 }
 
 /**
- * 按通道统计的进出人�?- 水平柱状�?
- * 只显�?Top 10，其余合并为"其他"
+ * 按通道统计的进出人�?- 水平柱状�?
+ * 只显�?Top 10，其余合并为"其他"
  */
 export function buildChannelBarOption(
   rows: PeopleCountStatsRow[],
@@ -248,6 +250,7 @@ export function buildChannelBarOption(
       },
       axisLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', yAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,

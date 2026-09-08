@@ -41,6 +41,17 @@ export interface DeviceMarker {
   row: number
   col: number
   abnormal: boolean
+  model?: string | null
+}
+
+/** 设备类型颜色映射表 */
+const DEVICE_TYPE_COLORS: Record<string, { normal: number; abnormal: number }> = {
+  CT103: { normal: 0xa88955, abnormal: 0xb42318 },
+  AM319: { normal: 0x5b7c99, abnormal: 0xb42318 },
+  VS135: { normal: 0x3d7a5a, abnormal: 0xb42318 },
+  TH4XW: { normal: 0x6b4c9a, abnormal: 0xb42318 },
+  WOETH: { normal: 0x6b4c9a, abnormal: 0xb42318 },
+  default: { normal: 0x2f8f46, abnormal: 0xb42318 },
 }
 
 const props = defineProps<{
@@ -59,6 +70,8 @@ const props = defineProps<{
   devices?: DeviceMarker[]
   /** 当前待绑定格子的设备 SN（非空时点击格子触发 bindCell） */
   bindSn?: string | null
+  /** 面板中悬停的设备 SN（用于3D高亮） */
+  hoverSn?: string | null
   /** DB 实际接入设备数（roomId -> count；提供时悬停提示以此为准） */
   deviceCountMap?: Record<string, number>
 }>()
@@ -73,12 +86,15 @@ const emit = defineEmits<{
   removeWall: [index: number]
   moveCell: [payload: { fromRow: number; fromCol: number; row: number; col: number }]
   bindCell: [payload: { row: number; col: number }]
+  hoverDevice: [sn: string | null]
 }>()
 
 const { t } = useI18n()
 const host = ref<HTMLDivElement>()
 
 const hoveredRoom = ref<string | null>(null)
+const hoveredDevice = ref<string | null>(null)
+const hoveredDeviceName = ref<string | null>(null)
 const toastVisible = ref(false)
 const toastStyle = ref<Record<string, string>>({ left: '0px', top: '0px' })
 /** Index of the selected custom wall in edit mode */
@@ -93,6 +109,7 @@ let pointer = new THREE.Vector2()
 let animId = 0
 let pickMeshes: THREE.Mesh[] = []
 const meshesByKey = new Map<string, THREE.Mesh[]>()
+const deviceMarkerMeshes = new Map<string, THREE.Mesh[]>()
 let floorGroup: THREE.Group | null = null
 
 const CORRIDOR_H = 0.18
@@ -215,7 +232,10 @@ function rebuildScene() {
     deviceHeadGeo ??= new THREE.SphereGeometry(0.14, 12, 10)
     for (const dev of props.devices) {
       const { x, z } = cellToWorld(dev.row, dev.col)
-      const color = dev.abnormal ? 0xb42318 : 0x2f8f46
+      const modelKey = (dev.model ?? '').toUpperCase()
+      const color = dev.abnormal
+        ? DEVICE_TYPE_COLORS[modelKey]?.abnormal ?? 0xb42318
+        : DEVICE_TYPE_COLORS[modelKey]?.normal ?? 0x2f8f46
       const mat = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
@@ -228,11 +248,18 @@ function rebuildScene() {
       stem.position.set(x, baseY + 0.25, z)
       stem.userData.deviceSn = dev.sn
       stem.userData.kind = 'device-marker'
+      stem.userData.deviceName = dev.name
       const head = new THREE.Mesh(deviceHeadGeo, mat)
       head.position.set(x, baseY + 0.6, z)
       head.userData.deviceSn = dev.sn
       head.userData.kind = 'device-marker'
+      head.userData.deviceName = dev.name
       floorGroup.add(stem, head)
+      pickMeshes.push(stem, head)
+      if (!deviceMarkerMeshes.has(dev.sn)) {
+        deviceMarkerMeshes.set(dev.sn, [])
+      }
+      deviceMarkerMeshes.get(dev.sn)!.push(stem, head)
     }
   }
 
@@ -386,6 +413,8 @@ function onPointerMove(ev: PointerEvent) {
   if (hits.length) {
     const hit = hits[0].object
     const roomId = (hit.userData.roomId as string | null) || null
+    const deviceSn = (hit.userData.deviceSn as string | null) || null
+    const deviceName = (hit.userData.deviceName as string | null) || null
     if (props.bindSn) {
       toastVisible.value = true
       placeToast(pos.clientX, pos.clientY, pos.rect)
@@ -397,6 +426,8 @@ function onPointerMove(ev: PointerEvent) {
         hoveredRoom.value = null
         updateAppearance()
       }
+      hoveredDevice.value = null
+      emit('hoverDevice', null)
       return
     }
     if (props.editMode) {
@@ -410,6 +441,17 @@ function onPointerMove(ev: PointerEvent) {
         hoveredRoom.value = null
         updateAppearance()
       }
+      hoveredDevice.value = null
+      emit('hoverDevice', null)
+      return
+    }
+    if (deviceSn) {
+      hoveredDevice.value = deviceSn
+      hoveredDeviceName.value = deviceName || deviceSn
+      emit('hoverDevice', deviceSn)
+      toastVisible.value = true
+      placeToast(pos.clientX, pos.clientY, pos.rect)
+      host.value.style.cursor = 'pointer'
       return
     }
     if (roomId) {
@@ -420,12 +462,19 @@ function onPointerMove(ev: PointerEvent) {
       toastVisible.value = true
       placeToast(pos.clientX, pos.clientY, pos.rect)
       host.value.style.cursor = 'pointer'
+      hoveredDevice.value = null
+      emit('hoverDevice', null)
       return
     }
   }
   if (hoveredRoom.value != null) {
     hoveredRoom.value = null
     updateAppearance()
+  }
+  if (hoveredDevice.value != null) {
+    hoveredDevice.value = null
+    hoveredDeviceName.value = null
+    emit('hoverDevice', null)
   }
   toastVisible.value = false
   host.value.style.cursor = 'grab'
@@ -437,6 +486,9 @@ function onPointerLeave() {
   hideDragGhost()
   if (controls) controls.enabled = true
   hoveredRoom.value = null
+  hoveredDevice.value = null
+  hoveredDeviceName.value = null
+  emit('hoverDevice', null)
   toastVisible.value = false
   updateAppearance()
   if (host.value) host.value.style.cursor = 'grab'
@@ -661,6 +713,27 @@ function animate() {
   if (renderer && scene && camera) renderer.render(scene, camera)
 }
 
+/** 高亮3D设备标记（面板悬停联动） */
+function updateDeviceHighlight(hoverSn: string | null) {
+  if (!scene) return
+  // 重置所有设备标记
+  for (const [sn, meshes] of deviceMarkerMeshes) {
+    for (const mesh of meshes) {
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      if (hoverSn && sn === hoverSn) {
+        // 高亮：放大 + 增强发光
+        mesh.scale.set(1.5, 1.5, 1.5)
+        mat.emissiveIntensity = 0.8
+      } else {
+        // 恢复原始状态
+        mesh.scale.set(1, 1, 1)
+        const dev = props.devices?.find((d) => d.sn === sn)
+        mat.emissiveIntensity = dev?.abnormal ? 0.4 : 0.18
+      }
+    }
+  }
+}
+
 const toastTitle = () => {
   if (props.bindSn) {
     const dev = props.devices?.find((d) => d.sn === props.bindSn)
@@ -670,6 +743,9 @@ const toastTitle = () => {
     if (!props.selectedRoom) return t('building.editSelectRoom')
     const meta = props.roomMeta?.[props.selectedRoom]
     return t('building.editClickCell', { n: meta?.index ?? '' })
+  }
+  if (hoveredDevice.value) {
+    return hoveredDeviceName.value || hoveredDevice.value
   }
   if (!hoveredRoom.value) return ''
   return t('building.roomN', { n: props.roomMeta?.[hoveredRoom.value]?.index ?? '' })
@@ -767,6 +843,13 @@ watch(
 )
 
 watch(
+  () => props.hoverSn,
+  (sn) => {
+    updateDeviceHighlight(sn ?? null)
+  },
+)
+
+watch(
   () => props.customWalls,
   () => {
     if (selectedWallIndex.value !== null && props.customWalls) {
@@ -820,7 +903,10 @@ onBeforeUnmount(() => {
       :style="editMode && selectedRoom && !toastVisible ? { left: '12px', top: '40px' } : toastStyle"
     >
       <div class="toast-title">{{ toastTitle() }}</div>
-      <div v-if="!editMode && hoveredRoom" class="toast-meta">
+      <div v-if="hoveredDevice" class="toast-meta">
+        {{ hoveredDevice }}
+      </div>
+      <div v-else-if="!editMode && hoveredRoom" class="toast-meta">
         {{ t('building.toastDevices', { n: deviceCount(hoveredRoom) }) }}
       </div>
       <div v-else-if="editMode && selectedRoom" class="toast-meta">

@@ -5,8 +5,6 @@ import type { EChartsCoreOption } from 'echarts/core'
 /** 樓層順序（B1/F 最低 → 6/F 最高） */
 export const FLOOR_ORDER = ['B1/F', 'G/F', '1/F', '2/F', '3/F', '4/F', '5/F', '6/F']
 
-export const WEEKDAYS_ZH = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
-
 const fmt = (n: number) => Number(n).toLocaleString('en-US')
 
 /** 大標籤字型：面向保安 / 中老年人群，數字清晰可見 */
@@ -60,6 +58,7 @@ export function buildDailyTrendOption(ov: PeopleCountOverview, labels: { enter: 
     grid: gridOpt(),
     xAxis: catAxis(d.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -95,10 +94,9 @@ export function buildDailyTrendOption(ov: PeopleCountOverview, labels: { enter: 
   }
 }
 
-/** 24 時進出（柱狀，帶數值標籤）。默認只渲染最近 6 個時段，避免標籤過於擁擠。 */
+/** 24 時進出（柱狀，帶數值標籤）。顯示完整 24 小時數據，通過滑鼠滾輪可縮放。 */
 export function buildHourDistOption(ov: PeopleCountOverview, labels: { enter: string; exit: string }): EChartsCoreOption {
-  // 時段按小時升序排列，超出 6 個時只保留最後 6 個（最近的時段）
-  const h = ov.hour.length > 6 ? ov.hour.slice(-6) : ov.hour
+  const h = ov.hour
   return {
     color: [brand.primary, brand.charcoal],
     tooltip: tooltip(),
@@ -106,6 +104,7 @@ export function buildHourDistOption(ov: PeopleCountOverview, labels: { enter: st
     grid: gridOpt(),
     xAxis: catAxis(h.map((r) => `${r.hour}:00`)),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -153,6 +152,7 @@ export function buildChannelTopOption(ov: PeopleCountOverview, labels: { enter: 
       axisLabel: { color: brand.muted, fontSize: 12, width: 130, overflow: 'truncate' },
       axisLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', yAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -194,6 +194,7 @@ export function buildFloorDistOption(ov: PeopleCountOverview, labels: { enter: s
     grid: gridOpt(),
     xAxis: catAxis(floors.map((r) => r.floor)),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -226,7 +227,10 @@ export function buildFloorDistOption(ov: PeopleCountOverview, labels: { enter: s
 }
 
 /** 通道類型分布（甜甜圈，帶數值與百分比） */
-export function buildChannelTypeOption(ov: PeopleCountOverview): EChartsCoreOption {
+export function buildChannelTypeOption(
+  ov: PeopleCountOverview,
+  typeLabel: (type: string) => string,
+): EChartsCoreOption {
   const ct = ov.channelType
   return {
     tooltip: tooltip('item'),
@@ -244,7 +248,7 @@ export function buildChannelTypeOption(ov: PeopleCountOverview): EChartsCoreOpti
           formatter: '{b}\n{d}%',
         },
         labelLine: { length: 12, length2: 8 },
-        data: ct.map((r) => ({ name: r.label, value: r.total })),
+        data: ct.map((r) => ({ name: typeLabel(r.type), value: r.total })),
       },
     ],
   }
@@ -274,6 +278,7 @@ export function buildDailyNetOption(
     grid: gridOpt(),
     xAxis: catAxis(d.map((r) => r.date.slice(5))),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
@@ -319,6 +324,7 @@ export function buildWeekdayHourOption(ov: PeopleCountOverview, weekdayNames: st
       axisLabel: { color: brand.muted, fontSize: 12 },
       axisLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     visualMap: {
       min: 0,
       max,
@@ -350,9 +356,10 @@ export function buildCumulativeOption(ov: PeopleCountOverview): EChartsCoreOptio
   const interval = n <= 7 ? 0 : Math.max(1, Math.ceil(n / 6) - 1)
   return {
     tooltip: tooltip(),
-    grid: gridOpt(),
+    grid: { top: 40, left: 8, right: 60, bottom: 8, containLabel: true },
     xAxis: catAxis(ov.daily.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         type: 'line',
@@ -372,7 +379,7 @@ export function buildCumulativeOption(ov: PeopleCountOverview): EChartsCoreOptio
         },
         endLabel: {
           show: true,
-          position: 'right',
+          position: 'insideRight',
           ...labelStyle(brand.primary, 700, 14),
           formatter: (p: { value: number }) => fmt(p.value),
         },
@@ -464,6 +471,7 @@ export function buildFloorChannelHourOption(
       axisLabel: { color: brand.muted, fontSize: 11, width: 110, overflow: 'truncate' },
       axisLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     visualMap: {
       min: 0,
       max,
@@ -499,6 +507,7 @@ export function buildFloorCompareOption(ov: PeopleCountOverview): EChartsCoreOpt
       axisLabel: { color: brand.muted, fontSize: 13 },
       axisLine: { lineStyle: { color: brand.line } },
     },
+    dataZoom: [{ type: 'inside', yAxisIndex: 0 }],
     series: [
       {
         type: 'bar',
@@ -521,19 +530,32 @@ export function buildFloorHourOption(
   hourEnter: number[],
   hourExit: number[],
   labels: { enter: string; exit: string },
+  excludeZero = false,
 ): EChartsCoreOption {
+  // 僅在「隱藏零流量記錄」時才過濾進入與離開皆為 0 的小時；否則完整顯示 0~23 小時
+  const idx: number[] = []
+  for (let i = 0; i < hourEnter.length; i++) {
+    const en = hourEnter[i] ?? 0
+    const ex = hourExit[i] ?? 0
+    if (excludeZero && en === 0 && ex === 0) continue
+    idx.push(i)
+  }
+  const hours = idx.map((i) => `${i}:00`)
+  const enterData = idx.map((i) => hourEnter[i])
+  const exitData = idx.map((i) => hourExit[i])
   return {
     color: [brand.primary, brand.charcoal],
     tooltip: tooltip(),
     legend: { data: [labels.enter, labels.exit], textStyle: { color: brand.muted, fontSize: 13 }, top: 4 },
     grid: gridOpt(),
-    xAxis: catAxis(Array.from({ length: 24 }, (_, h) => `${h}:00`), { interval: 2 }),
+    xAxis: catAxis(hours),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         name: labels.enter,
         type: 'bar',
-        data: hourEnter,
+        data: enterData,
         barMaxWidth: 14,
         itemStyle: { borderRadius: [2, 2, 0, 0] },
         label: {
@@ -546,7 +568,7 @@ export function buildFloorHourOption(
       {
         name: labels.exit,
         type: 'bar',
-        data: hourExit,
+        data: exitData,
         barMaxWidth: 14,
         itemStyle: { borderRadius: [2, 2, 0, 0] },
         label: {
@@ -567,6 +589,7 @@ export function buildFloorDailyOption(daily: Array<{ date: string; total: number
     grid: gridOpt(),
     xAxis: catAxis(daily.map((r) => r.date.slice(5)), { boundaryGap: false }),
     yAxis: valAxis(),
+    dataZoom: [{ type: 'inside', xAxisIndex: 0 }],
     series: [
       {
         type: 'line',

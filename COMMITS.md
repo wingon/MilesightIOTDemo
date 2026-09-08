@@ -579,3 +579,60 @@ feat: 樓層房間管理（建立 / 重新命名 / 刪除）
 
 ### SQL
 - add_building_room_name.sql（新檔案）：building_room 新增 room_name 欄位（VARCHAR 100）
+
+## 2026-09-08 10:00
+fix: 設備懸停提示與型別著色
+
+### Floor3D.vue
+- 新增 DEVICE_TYPE_COLORS 設備型別顏色映射表（CT103 棕色 / AM319 藍灰 / VS135 綠色 / TH4XW 紫色 / WOETH 紫色 / default 綠色）
+- 設備 3D 標記顏色由 model 欄位決定（abnormal 固定紅色）
+- 新增 hoveredDevice / hoveredDeviceName 懸停狀態
+- onPointerMove 偵測設備 hit：顯示設備名稱 / SN 於 toast 提示
+- pickMeshes 加入設備 stem + head，支援設備 hover 偵測
+- toastTitle 優先顯示設備名稱
+
+### building.ts
+- fetchFloorRooms 新增 syncLayout 選項（預設 true）：
+  - room CRUD（建立 / 重新命名 / 刪除）後呼叫 fetchFloorRooms(level3d, { syncLayout: false })
+  - 避免房間操作後重新同步 3D 佈局（僅更新房間資料，不影響編輯中佈局）
+
+### FloorViewerView.vue
+- deviceMarkers 計算新增 model 欄位傳入 DeviceMarker
+
+### .env.example
+- 新增 CCTV_USERNAME / CCTV_PASSWORD / SNOWFLAKE_WORKER_ID 說明
+
+## 2026-09-08 11:00
+feat: 設備 3D 高亮雙向同步與人流統計 i18n 修正
+
+### Floor3D.vue：設備懸停與高亮
+- DEVICE_TYPE_COLORS 設備型別顏色映射（CT103 棕 / AM319 藍灰 / VS135 綠 / TH4XW / WOETH 紫）
+- 設備 3D 標記顏色依 model 欄位決定（abnormal 固定紅色）
+- 新增 hoverSn prop：面板懸停設備時，3D 標記放大 1.5× + 增強發光
+- onPointerMove 偵測設備 hit：顯示設備名稱 / SN 於 toast
+- emit hoverDevice 事件：3D 懸停設備時通知父元件
+- deviceMarkerMeshes Map：支援按 SN 批次操作設備 3D 標記
+- updateDeviceHighlight 函式：批量設定設備標記 scale + emissiveIntensity
+
+### DeviceDetailPanel.vue：設備卡片高亮
+- 新增 hoveredSn prop：接收 3D 懸停的設備 SN
+- 設備卡片增加 highlighted class（藍色邊框 + 陰影）
+- 卡片 @mouseenter / @mouseleave 觸發 emit hoverDevice
+
+### FloorModelPanel.vue + FloorViewerView.vue
+- hoverSn prop 與 hoverDevice event 貫穿元件鏈
+- 3D ↔ 面板雙向同步：3D 懸停 → 面板高亮，面板懸停 → 3D 高亮
+
+### 人流統計 i18n 修正
+- 新增 peopleCountType.ts：集中管理通道類型（lift / stairs / entrance）與星期的 i18n key
+- 移除 peopleCountAggregateCharts.ts 中硬編碼的 WEEKDAYS_ZH 中文常數
+- 前端負責翻譯 type_label / weekday name，避免英文介面露出中文
+- 三個 PeopleCount 頁面（View / Floor / Data）改用 typeLabel / weekdayLabel 函式
+
+### 人流統計查詢範圍限制
+- _normalize_query_range：未提供日期時預設最近 7 天（避免全表掃描）
+- MAX_QUERY_DAYS=92：統計查詢最多 3 個月
+- 所有統計端點（hourly / daily / channel / overview）加上範圍校驗
+
+### i18n
+- en.ts + zh-TW.ts 新增：unitPeople / unitDays / dayMon~daySun / chartFloorDist 修正

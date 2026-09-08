@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { message } from 'ant-design-vue'
 import {
   SearchOutlined,
   ReloadOutlined,
 } from '@ant-design/icons-vue'
-import dayjs, { type Dayjs } from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import {
   getPeopleCountOverview,
   listPeopleCountChannels,
@@ -21,6 +20,7 @@ import {
   buildFloorDailyOption,
   channelTypeColor,
 } from '@/utils/peopleCountAggregateCharts'
+import { typeLabel } from '@/utils/peopleCountType'
 
 const { t } = useI18n()
 
@@ -29,18 +29,13 @@ const overview = ref<OverviewData | null>(null)
 const channels = ref<string[]>([])
 const activeFloor = ref<string | null>(null)
 
-// 篩選條件（與視圖頁一致的搜索框）：整合為「日期時間範圍」
+// 篩選條件（與視圖頁一致的搜索框）：整合為「日期時間範圍」。
+// 預設為空，由後端回傳最近 7 天數據；用戶自行填寫則依所選範圍查詢。
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
 const excludeZero = ref(true)
-
-/** 截止到昨天的最近 7 天默認範圍（整點，分鐘為 0） */
-/** 最近 7 天默認範圍（含今天，整點，分鐘為 0），進入頁面即載入最新數據 */
-function defaultRange(): [Dayjs, Dayjs] {
-  const end = dayjs().hour(23).minute(0).second(0).millisecond(0)
-  const start = end.subtract(6, 'day').hour(0).minute(0).second(0).millisecond(0)
-  return [start, end]
-}
+// 當前「查詢」實際生效的隱藏零流量快照：只在點擊查詢時同步，避免勾選框即時影響圖表
+let appliedExcludeZero = true
 
 const floorList = computed(() => {
   if (!overview.value) return []
@@ -64,10 +59,15 @@ const currentFloor = computed(() => {
 
 const floorHourOption = computed(() =>
   currentFloor.value
-    ? buildFloorHourOption(currentFloor.value.hour_enter, currentFloor.value.hour_exit, {
-        enter: t('peopleCount.enter'),
-        exit: t('peopleCount.exit'),
-      })
+    ? buildFloorHourOption(
+        currentFloor.value.hour_enter,
+        currentFloor.value.hour_exit,
+        {
+          enter: t('peopleCount.enter'),
+          exit: t('peopleCount.exit'),
+        },
+        appliedExcludeZero,
+      )
     : {},
 )
 const floorDailyOption = computed(() =>
@@ -110,6 +110,7 @@ function buildQuery() {
 
 async function load() {
   loading.value = true
+  appliedExcludeZero = excludeZero.value
   try {
     const { data } = await getPeopleCountOverview(buildQuery())
     overview.value = data
@@ -117,15 +118,14 @@ async function load() {
       activeFloor.value = null
     }
   } catch (e: unknown) {
-    const err = e instanceof Error ? e.message : String(e)
-    message.error(`${t('peopleCount.loadFailed')} ${err}`)
+    console.error(t('peopleCount.loadFailed'), e)
   } finally {
     loading.value = false
   }
 }
 
 function onReset() {
-  dateTimeRange.value = defaultRange()
+  dateTimeRange.value = null
   channelName.value = undefined
   excludeZero.value = true
   activeFloor.value = null
@@ -140,13 +140,13 @@ async function loadChannels() {
   try {
     const { data } = await listPeopleCountChannels()
     channels.value = data
-  } catch {
+  } catch (e: unknown) {
     channels.value = []
+    console.error(t('peopleCount.loadFailed'), e)
   }
 }
 
 onMounted(() => {
-  dateTimeRange.value = defaultRange()
   loadChannels()
   load()
 })
@@ -254,9 +254,9 @@ onMounted(() => {
         <div v-for="c in currentFloor.channels" :key="c.channel_name" class="card ch-card">
           <div class="ch-name">
             {{ c.channel_name }}
-            <a-tag :color="channelTypeColor(c.type)">{{ c.type_label }}</a-tag>
+            <a-tag :color="channelTypeColor(c.type)">{{ typeLabel(t, c.type) }}</a-tag>
           </div>
-          <div class="ch-big">{{ c.total.toLocaleString() }} <span class="unit">人次</span></div>
+          <div class="ch-big">{{ c.total.toLocaleString() }} <span class="unit">{{ t('peopleCount.unitPeople') }}</span></div>
           <div class="ch-nums">
             <span>{{ t('peopleCount.enter') }} <b class="in">{{ c.enter.toLocaleString() }}</b></span>
             <span>{{ t('peopleCount.exit') }} <b class="out">{{ c.exit.toLocaleString() }}</b></span>

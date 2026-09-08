@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { message } from 'ant-design-vue'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
-import dayjs, { type Dayjs } from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import {
   getPeopleCountOverview,
   listPeopleCountChannels,
   type PeopleCountOverview as OverviewData,
 } from '@/api/peopleCount'
-import { WEEKDAYS_ZH } from '@/utils/peopleCountAggregateCharts'
+import { typeLabel, weekdayLabel } from '@/utils/peopleCountType'
 
 const { t } = useI18n()
 
@@ -18,19 +17,13 @@ const overview = ref<OverviewData | null>(null)
 const channels = ref<string[]>([])
 const activeTab = ref<'daily' | 'channel'>('daily')
 
-// 篩選條件：整合為「日期時間範圍」
+// 篩選條件：整合為「日期時間範圍」。
+// 預設為空，由後端回傳最近 7 天數據；用戶自行填寫則依所選範圍查詢。
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
 const excludeZero = ref(true)
 
-/** 最近 7 天默認範圍（含今天，整點，分鐘為 0），進入頁面即載入最新數據 */
-function defaultRange(): [Dayjs, Dayjs] {
-  const end = dayjs().hour(23).minute(0).second(0).millisecond(0)
-  const start = end.subtract(6, 'day').hour(0).minute(0).second(0).millisecond(0)
-  return [start, end]
-}
-
-const weekdayName = (w: number) => WEEKDAYS_ZH[w] ?? ''
+const weekdayName = (w: number) => weekdayLabel(t, w)
 
 const dailyColumns = computed(() => [
   { title: t('peopleCount.colDate'), dataIndex: 'date', key: 'date', width: 120 },
@@ -79,15 +72,14 @@ async function load() {
     const { data } = await getPeopleCountOverview(buildQuery())
     overview.value = data
   } catch (e: unknown) {
-    const err = e instanceof Error ? e.message : String(e)
-    message.error(`${t('peopleCount.loadFailed')} ${err}`)
+    console.error(t('peopleCount.loadFailed'), e)
   } finally {
     loading.value = false
   }
 }
 
 function onReset() {
-  dateTimeRange.value = defaultRange()
+  dateTimeRange.value = null
   channelName.value = undefined
   excludeZero.value = true
   load()
@@ -97,13 +89,13 @@ async function loadChannels() {
   try {
     const { data } = await listPeopleCountChannels()
     channels.value = data
-  } catch {
+  } catch (e: unknown) {
     channels.value = []
+    console.error(t('peopleCount.loadFailed'), e)
   }
 }
 
 onMounted(() => {
-  dateTimeRange.value = defaultRange()
   loadChannels()
   load()
 })
@@ -201,7 +193,7 @@ onMounted(() => {
             {{ record.floors.join('、') || '—' }}
           </template>
           <template v-else-if="column.key === 'type_label'">
-            <a-tag :color="typeColor(record.type)">{{ record.type_label }}</a-tag>
+            <a-tag :color="typeColor(record.type)">{{ typeLabel(t, record.type) }}</a-tag>
           </template>
           <template v-else-if="column.key === 'enter' || column.key === 'exit' || column.key === 'total'">
             {{ Number(record[column.key as 'enter' | 'exit' | 'total']).toLocaleString() }}
