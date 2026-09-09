@@ -472,7 +472,8 @@ export const useBuildingStore = defineStore('building', () => {
       await apiDeleteFloorRoom(roomId)
       const fid = floorIdByLevel(level3d)
       if (fid != null) delete floorRooms[fid]
-      await fetchFloorRooms(level3d, { syncLayout: false })
+      // 删除房间后必须重建 floorLayouts，否则 3D 会残留被删房间的「幽灵格子」
+      await fetchFloorRooms(level3d, { syncLayout: true })
       return true
     } catch (err) {
       console.warn('[building] deleteFloorRoom failed:', err)

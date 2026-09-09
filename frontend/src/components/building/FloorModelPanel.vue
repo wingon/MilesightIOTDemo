@@ -65,6 +65,7 @@ function roomDisplayName(room: { room_id: string; room_number: string; room_name
 }
 
 function startEditRoom(room: { room_id: string; room_number: string; room_name?: string | null }) {
+  if (!props.editMode) return
   editingRoomId.value = room.room_id
   editingName.value = roomDisplayName(room)
 }
@@ -210,6 +211,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
           <span class="legend-title">{{ t('building.rooms') }}</span>
           <span class="legend-tools">
             <button
+              v-if="editMode"
               type="button"
               class="legend-tool"
               :title="t('building.addRoom')"
@@ -218,6 +220,7 @@ function onWallDragStart(ev: DragEvent, dir: 'v' | 'h') {
               ＋
             </button>
             <button
+              v-if="editMode"
               type="button"
               class="legend-tool danger"
               :title="t('building.deleteRoom')"

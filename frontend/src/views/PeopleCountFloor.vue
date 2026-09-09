@@ -33,9 +33,9 @@ const activeFloor = ref<string | null>(null)
 // 預設為空，由後端回傳最近 7 天數據；用戶自行填寫則依所選範圍查詢。
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
-const excludeZero = ref(true)
+const excludeZero = ref(false)
 // 當前「查詢」實際生效的隱藏零流量快照：只在點擊查詢時同步，避免勾選框即時影響圖表
-let appliedExcludeZero = true
+let appliedExcludeZero = false
 
 const floorList = computed(() => {
   if (!overview.value) return []
@@ -145,7 +145,7 @@ async function load() {
 function onReset() {
   dateTimeRange.value = null
   channelName.value = undefined
-  excludeZero.value = true
+  excludeZero.value = false
   activeFloor.value = null
   load()
 }

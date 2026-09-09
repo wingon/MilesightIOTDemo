@@ -30,7 +30,7 @@ const channels = ref<string[]>([])
 // 預設為空，由後端回傳最近 7 天數據；用戶自行填寫則依所選範圍查詢。
 const dateTimeRange = ref<[Dayjs | null, Dayjs | null] | null>(null)
 const channelName = ref<string | undefined>(undefined)
-const excludeZero = ref(true)
+const excludeZero = ref(false)
 
 const weekdayNames = computed(() =>
   Array.from({ length: 7 }, (_, i) => weekdayLabel(t, i)),
@@ -119,7 +119,7 @@ async function load() {
 function onReset() {
   dateTimeRange.value = null
   channelName.value = undefined
-  excludeZero.value = true
+  excludeZero.value = false
   load()
 }
 

@@ -33,7 +33,7 @@ api.interceptors.response.use(
       // 匿名免登大屏（如第三方平台 iframe）：写请求被后端拒绝属预期，静默忽略，不弹错也不跳登录
       const anonymousScreen = !hadToken && pagePath !== '/login' && pagePath.startsWith('/building-viewer')
       if (anonymousScreen) {
-        console.warn('[api] 匿名大屏写请求被拒绝（未登录），已忽略:', error.config?.url)
+        console.warn('[api] Anonymous screen write rejected (no token), ignoring:', error.config?.url)
         return Promise.reject(error)
       }
       localStorage.removeItem(TOKEN_STORAGE_KEY)

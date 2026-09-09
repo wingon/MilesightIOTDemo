@@ -614,7 +614,7 @@ function logCellInfo(mesh: THREE.Mesh) {
   geo.boundingBox?.getSize(size)
   const { x, y, z } = mesh.position
   console.log(
-    `格子 行=${row} 列=${col} x=${x.toFixed(2)} y=${y.toFixed(2)} z=${z.toFixed(2)} 长度=${size.z.toFixed(2)} 宽度=${size.x.toFixed(2)} 高度=${size.y.toFixed(2)}`,
+    `Cell row=${row} col=${col} x=${x.toFixed(2)} y=${y.toFixed(2)} z=${z.toFixed(2)} depth=${size.z.toFixed(2)} width=${size.x.toFixed(2)} height=${size.y.toFixed(2)}`,
   )
 }
 
@@ -1239,7 +1239,7 @@ onBeforeUnmount(() => {
     <!-- Loading overlay while data is being fetched -->
     <div v-if="loading" class="loading-overlay">
       <div class="loading-spinner"></div>
-      <div class="loading-text">加载中...</div>
+      <div class="loading-text">{{ t('building.loading') }}</div>
     </div>
     <div
       v-show="toastVisible && hoveredFloor != null"

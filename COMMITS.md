@@ -640,3 +640,21 @@ feat: 設備 3D 高亮雙向同步與人流統計 i18n 修正
 
 ## 2026-09-08 23:57
 feat: 人流時數資料導出功能
+
+## 2026-09-08 14:00
+fix: 房間管理按鈕可見性、刪除後佈局重建與人流預設值修正
+
+### FloorModelPanel.vue
+- 新增房間 / 刪除房間按鈕僅在 editMode 時顯示（v-if=editMode）
+- startEditRoom 加入 editMode 檢查：非編輯模式下禁止行內改名
+
+### building.ts
+- deleteFloorRoom 改回 syncLayout: true：刪除房間後必須重建 floorLayouts，避免 3D 殘留「幽靈格子」
+
+### PeopleCountData / Floor / View
+- excludeZero 預設值由 true 改為 false：預設顯示所有記錄（含零流量），由用戶主動勾選過濾
+- onReset 同步重置為 false
+
+### 中文硬編碼清理
+- http.ts：匿名大屏 console.warn 改為英文
+- Building3D.vue：logCellInfo debug 輸出改為英文；loading 文字改用 t('building.loading') i18n
